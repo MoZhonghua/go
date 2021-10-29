@@ -743,6 +743,12 @@ func schedinit() {
 		// to ensure runtime·modinfo is kept in the resulting binary.
 		modinfo = ""
 	}
+	dump_consts()
+}
+
+func dump_consts() {
+	print("consts\n")
+	dump_pagealloc_consts();
 }
 
 func dumpgstatus(gp *g) {

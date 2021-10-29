@@ -55,10 +55,10 @@ import (
 const (
 	// The size of a bitmap chunk, i.e. the amount of bits (that is, pages) to consider
 	// in the bitmap at once.
-	pallocChunkPages    = 1 << logPallocChunkPages
-	pallocChunkBytes    = pallocChunkPages * pageSize
+	pallocChunkPages    = 1 << logPallocChunkPages    // 512
+	pallocChunkBytes    = pallocChunkPages * pageSize // 512 * 8192
 	logPallocChunkPages = 9
-	logPallocChunkBytes = logPallocChunkPages + pageShift
+	logPallocChunkBytes = logPallocChunkPages + pageShift // 9 + 13 = 22
 
 	// The number of radix bits for each level.
 	//
@@ -73,15 +73,32 @@ const (
 	// summaryLevels is an architecture-dependent value defined in mpagealloc_*.go.
 	summaryLevelBits = 3
 	summaryL0Bits    = heapAddrBits - logPallocChunkBytes - (summaryLevels-1)*summaryLevelBits
+	// heapAddrBits = 48
+	// summaryLevels = 5
+	// 48 - 22 - (5-1)*3 = 14
+	// [14] [3] [3] [3] [3] [22]
 
 	// pallocChunksL2Bits is the number of bits of the chunk index number
 	// covered by the second level of the chunks map.
 	//
 	// See (*pageAlloc).chunks for more details. Update the documentation
 	// there should this change.
-	pallocChunksL2Bits  = heapAddrBits - logPallocChunkBytes - pallocChunksL1Bits
+	pallocChunksL2Bits  = heapAddrBits - logPallocChunkBytes - pallocChunksL1Bits // 48 - 22 - 13 = 13
 	pallocChunksL1Shift = pallocChunksL2Bits
 )
+
+func dump_pagealloc_consts() {
+	print("  arenaBaseOffset     = ", guintptr(arenaBaseOffset).ptr(), "\n")
+	print("  pallocChunkPages    = ", uint64(pallocChunkPages), "\n")
+	print("  pallocChunkBytes    = ", uint64(pallocChunkBytes), "\n")
+	print("  logPallocChunkPages = ", uint64(logPallocChunkPages), "\n")
+	print("  logPallocChunkBytes = ", uint64(logPallocChunkBytes), "\n")
+	print("  summaryL0Bits       = ", uint64(summaryL0Bits), "\n")
+	print("  pallocChunksL2Bits  = ", uint64(pallocChunksL2Bits), "\n")
+	print("  pallocChunksL1Shift = ", uint64(pallocChunksL1Shift), "\n")
+	print("  maxOffAddr          = ", guintptr(maxOffAddr.a).ptr(), "\n")
+	print("  minOffAddr          = ", guintptr(minOffAddr.a).ptr(), "\n")
+}
 
 // Maximum searchAddr value, which indicates that the heap has no free space.
 //
@@ -99,6 +116,12 @@ type chunkIdx uint
 // chunkIndex returns the global index of the palloc chunk containing the
 // pointer p.
 func chunkIndex(p uintptr) chunkIdx {
+	// print("chunkIndex\n")
+	// print("  p: ", p, "\n")
+	// print("  arenaBaseOffset: ", uintptr(arenaBaseOffset), "\n")
+	// print("  cmp: ", p > arenaBaseOffset, "\n")
+	// print("  p - arenaBaseOffset: ", p-arenaBaseOffset, "\n")
+	// throw("x")
 	return chunkIdx((p - arenaBaseOffset) / pallocChunkBytes)
 }
 
