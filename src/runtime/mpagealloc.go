@@ -98,9 +98,9 @@ func dump_pagealloc_consts() {
 	print("  pallocChunksL1Shift = ", uint64(pallocChunksL1Shift), "\n")
 	print("  maxOffAddr          = ", guintptr(maxOffAddr.a).ptr(), "\n")
 	print("  minOffAddr          = ", guintptr(minOffAddr.a).ptr(), "\n")
-	print("  pallocSumBytes      = ", pallocSumBytes , "\n")
-	print("  maxPackedValue      = ", 	maxPackedValue, "\n")
-	print("  logMaxPackedValue   = ", 	logMaxPackedValue , "\n")
+	print("  pallocSumBytes      = ", pallocSumBytes, "\n")
+	print("  maxPackedValue      = ", maxPackedValue, "\n")
+	print("  logMaxPackedValue   = ", logMaxPackedValue, "\n")
 }
 
 // Maximum searchAddr value, which indicates that the heap has no free space.
