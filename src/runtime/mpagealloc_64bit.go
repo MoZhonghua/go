@@ -77,6 +77,8 @@ func (p *pageAlloc) sysInit() {
 		// Reserve b bytes of memory anywhere in the address space.
 		b := alignUp(uintptr(entries)*pallocSumBytes, physPageSize)
 		r := sysReserve(nil, b)
+		print("sysReserve: size: ", b, " mapped to: ", r, "\n")
+ 
 		if r == nil {
 			throw("failed to reserve page summary memory")
 		}
@@ -177,5 +179,7 @@ func (p *pageAlloc) sysGrow(base, limit uintptr) {
 		// Map and commit need.
 		sysMap(unsafe.Pointer(need.base.addr()), need.size(), p.sysStat)
 		sysUsed(unsafe.Pointer(need.base.addr()), need.size())
+		print("sysMap: base: ", need.base.addr(), ", size: ", need.size(), "\n")
+		// throw("x")
 	}
 }

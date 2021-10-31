@@ -101,6 +101,10 @@ func dump_pagealloc_consts() {
 	print("  pallocSumBytes      = ", pallocSumBytes, "\n")
 	print("  maxPackedValue      = ", maxPackedValue, "\n")
 	print("  logMaxPackedValue   = ", logMaxPackedValue, "\n")
+	print("  heapArenaBytes      = ", heapArenaBytes, "\n")
+	print("  arenaL1Bits         = ", arenaL1Bits, "\n")
+	print("  arenaL2Bits         = ", arenaL2Bits, "\n")
+	print("  arenas         = ", len(mheap_.arenas), ", ", len(mheap_.arenas[0]), "\n")
 }
 
 // Maximum searchAddr value, which indicates that the heap has no free space.

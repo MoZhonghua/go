@@ -742,6 +742,7 @@ mapped:
 		if l2[ri.l2()] != nil {
 			throw("arena already initialized")
 		}
+		print("create arena map: v: ", v, ", ri: ", ri, ", ri.l2(): ", ri.l2(), "\n")
 		var r *heapArena
 		r = (*heapArena)(h.heapArenaAlloc.alloc(unsafe.Sizeof(*r), sys.PtrSize, &memstats.gcMiscSys))
 		if r == nil {
