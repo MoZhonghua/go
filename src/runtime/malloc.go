@@ -519,6 +519,7 @@ func mallocinit() {
 		//
 		// On AIX, mmaps starts at 0x0A00000000000000 for 64-bit.
 		// processes.
+		// print("arenaHint\n")
 		for i := 0x7f; i >= 0; i-- {
 			var p uintptr
 			switch {
@@ -546,6 +547,7 @@ func mallocinit() {
 			}
 			hint := (*arenaHint)(mheap_.arenaHintAlloc.alloc())
 			hint.addr = p
+			// print("  hint: ", unsafe.Pointer(p), "\n")
 			hint.next, mheap_.arenaHints = mheap_.arenaHints, hint
 		}
 	} else {
@@ -733,6 +735,7 @@ mapped:
 		if l2 == nil {
 			// Allocate an L2 arena map.
 			l2 = (*[1 << arenaL2Bits]*heapArena)(persistentalloc(unsafe.Sizeof(*l2), sys.PtrSize, nil))
+			print("alloc []*heapArea: ", unsafe.Sizeof(*l2), "\n")
 			if l2 == nil {
 				throw("out of memory allocating heap arena map")
 			}
@@ -1465,6 +1468,7 @@ type linearAlloc struct {
 }
 
 func (l *linearAlloc) init(base, size uintptr, mapMemory bool) {
+	print("linearAlloc.init: ", l, ", base: ", base, ", size: ", size, "\n")
 	if base+size < base {
 		// Chop off the last byte. The runtime isn't prepared
 		// to deal with situations where the bounds could overflow.
@@ -1478,8 +1482,10 @@ func (l *linearAlloc) init(base, size uintptr, mapMemory bool) {
 }
 
 func (l *linearAlloc) alloc(size, align uintptr, sysStat *sysMemStat) unsafe.Pointer {
+	print("linearAlloc.alloc: ", l, ", l.next:", l.next, ", l.end: ", l.end, ", size: ", size, "\n")
 	p := alignUp(l.next, align)
 	if p+size > l.end {
+		print("  return nil\n")
 		return nil
 	}
 	l.next = p + size
