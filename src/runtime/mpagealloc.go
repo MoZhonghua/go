@@ -772,6 +772,8 @@ nextLevel:
 			// We found a sufficiently large run of free pages straddling
 			// some boundary, so compute the address and return it.
 			addr := levelIndexToOffAddr(l, i).add(uintptr(base) * pageSize).addr()
+			print("pageAlloc.find()\n")
+			print("  npages: ", npages, ", addr: ", addr, "\n")
 			return addr, p.findMappedAddr(firstFree.base)
 		}
 		if l == 0 {
@@ -818,6 +820,8 @@ nextLevel:
 	// found an even narrower free window.
 	searchAddr := chunkBase(ci) + uintptr(searchIdx)*pageSize
 	foundFree(offAddr{searchAddr}, chunkBase(ci+1)-searchAddr)
+	// print("pageAlloc.find()\n")
+	// print("  npages: ", npages, ", ci: ", ci, ", addr: ", addr, "\n")
 	return addr, p.findMappedAddr(firstFree.base)
 }
 
