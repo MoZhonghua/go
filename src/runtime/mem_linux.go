@@ -62,6 +62,8 @@ func sysUnused(v unsafe.Pointer, n uintptr) {
 	// gets most of the benefit of huge pages while keeping the
 	// number of VMAs under control. With hugePageSize = 2MB, even
 	// a pessimal heap can reach 128GB before running out of VMAs.
+	// max_map_count = 65530
+	// 128GB = 65530 * 2M
 	if physHugePageSize != 0 {
 		// If it's a large allocation, we want to leave huge
 		// pages enabled. Hence, we only adjust the huge page
