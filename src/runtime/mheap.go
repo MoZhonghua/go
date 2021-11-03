@@ -1996,7 +1996,7 @@ func newMarkBits(nelems uintptr) *gcBits {
 	blocksNeeded := uintptr((nelems + 63) / 64)
 	bytesNeeded := blocksNeeded * 8
 
-	print("newMarkBits: nelems = ", nelems, ", bytesNeeded = ", bytesNeeded, "\n")
+	// print("newMarkBits: nelems = ", nelems, ", bytesNeeded = ", bytesNeeded, "\n")
 
 	// Try directly allocating from the current head arena.
 	head := (*gcBitsArena)(atomic.Loadp(unsafe.Pointer(&gcBitsArenas.next)))
