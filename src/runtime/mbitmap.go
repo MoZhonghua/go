@@ -495,6 +495,9 @@ func (h heapBits) forward(n uintptr) heapBits {
 // contiguous sections of the bitmap. It returns the number of words
 // advanced over, which will be <= n.
 func (h heapBits) forwardOrBoundary(n uintptr) (heapBits, uintptr) {
+	if h.shift != 0 {
+		throw("bad")
+	}
 	maxn := 4 * ((uintptr(unsafe.Pointer(h.last)) + 1) - uintptr(unsafe.Pointer(h.bitp)))
 	if n > maxn {
 		n = maxn
@@ -511,6 +514,14 @@ func (h heapBits) forwardOrBoundary(n uintptr) (heapBits, uintptr) {
 func (h heapBits) bits() uint32 {
 	// The (shift & 31) eliminates a test and conditional branch
 	// from the generated code.
+	// 如果编译器不能确定h.shift <= 31则会生成?
+	// x = x >> h.shift
+	// if h.shift >= 32 {
+	//    x &= 0
+	// } else {
+	//    x &= uint32(-1)
+	// }
+
 	return uint32(*h.bitp) >> (h.shift & 31)
 }
 
