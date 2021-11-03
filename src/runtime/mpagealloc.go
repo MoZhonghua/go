@@ -104,7 +104,10 @@ func dump_pagealloc_consts() {
 	print("  heapArenaBytes      = ", heapArenaBytes, "\n")
 	print("  arenaL1Bits         = ", arenaL1Bits, "\n")
 	print("  arenaL2Bits         = ", arenaL2Bits, "\n")
-	print("  arenas         = ", len(mheap_.arenas), ", ", len(mheap_.arenas[0]), "\n")
+	print("  arenas              = ", len(mheap_.arenas), ", ", len(mheap_.arenas[0]), "\n")
+	print("  sizeof(heapArena)   = ", unsafe.Sizeof(heapArena{}), "\n")
+	print("  sizeof(heapArena.bitmap) = ", unsafe.Sizeof(heapArena{}.bitmap), "\n")
+	print("  sizeof(heapArena.spans)  = ", unsafe.Sizeof(heapArena{}.spans), "\n")
 }
 
 // Maximum searchAddr value, which indicates that the heap has no free space.
