@@ -1393,6 +1393,7 @@ func (h *mheap) grow(npage uintptr) bool {
 	h.curArena.base = nBase
 
 	// Transition the space we're going to use from Reserved to Prepared.
+	print("sysMap: mheap.grow: npages = ", npage, ", base = ", hex(v), ", nBase = ", hex(nBase), "\n")
 	sysMap(unsafe.Pointer(v), nBase-v, &memstats.heap_sys)
 
 	// The memory just allocated counts as both released
@@ -1994,6 +1995,8 @@ func (b *gcBitsArena) tryAlloc(bytes uintptr) *gcBits {
 func newMarkBits(nelems uintptr) *gcBits {
 	blocksNeeded := uintptr((nelems + 63) / 64)
 	bytesNeeded := blocksNeeded * 8
+
+	print("newMarkBits: nelems = ", nelems, ", bytesNeeded = ", bytesNeeded, "\n")
 
 	// Try directly allocating from the current head arena.
 	head := (*gcBitsArena)(atomic.Loadp(unsafe.Pointer(&gcBitsArenas.next)))

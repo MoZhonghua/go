@@ -31,6 +31,7 @@ func sysAlloc(n uintptr, sysStat *sysMemStat) unsafe.Pointer {
 		return nil
 	}
 	sysStat.add(int64(n))
+	print("sysAlloc: p = ", hex(uintptr(p)), ", pages = ", n/_PageSize, "\n")
 	return p
 }
 
@@ -172,5 +173,9 @@ func sysMap(v unsafe.Pointer, n uintptr, sysStat *sysMemStat) {
 	}
 	if p != v || err != 0 {
 		throw("runtime: cannot map pages in arena address space")
+	}
+
+	if sysStat == &memstats.heap_sys {
+		print("sysMap: p = ", hex(uintptr(p)), ", size = ", n, ", pages = ", n/_PageSize, ", heap_sys: ", sysStat == &memstats.heap_sys, "\n")
 	}
 }
