@@ -874,7 +874,7 @@ func heapBitsSetType(x, size, dataSize uintptr, typ *_type) {
 
 	h := heapBitsForAddr(x)
 	ptrmask := typ.gcdata // start of 1-bit pointer mask (or GC program, handled below)
-	println("typ.name =", typ.name(), "ptrmas =", hex(uintptr(ptrmask)))
+	// println("typ.name =", typ.name(), "ptrmas =", ptrmask) = 4M
 
 	// 2-word objects only have 4 bitmap bits and 3-word objects only have 6 bitmap bits.
 	// Therefore, these objects share a heap bitmap byte with the objects next to them.
@@ -893,8 +893,10 @@ func heapBitsSetType(x, size, dataSize uintptr, typ *_type) {
 			// (In general the number of instances of typ being allocated is
 			// dataSize/typ.size.)
 			if sys.PtrSize == 4 && dataSize == sys.PtrSize {
+				// size=8, dataSize=4, PtrSize=4, typ.size=4
 				// 1 pointer object. On 32-bit machines clear the bit for the
 				// unused second word.
+				// x &^ y => x & (^y): bit clear
 				*h.bitp &^= (bitPointer | bitScan | (bitPointer|bitScan)<<heapBitsShift) << h.shift
 				*h.bitp |= (bitPointer | bitScan) << h.shift
 			} else {
@@ -1866,7 +1868,7 @@ Run:
 	var totalBits uintptr
 	if size == 1 {
 		totalBits = (uintptr(unsafe.Pointer(dst))-uintptr(unsafe.Pointer(dstStart)))*8 + nbits
-		nbits += -nbits & 7
+		nbits += -nbits & 7  // roundup nbits to 8
 		for ; nbits > 0; nbits -= 8 {
 			*dst = uint8(bits)
 			dst = add1(dst)
