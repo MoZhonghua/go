@@ -831,6 +831,14 @@ func (s *mspan) countAlloc() int {
 // machines, callers must execute a store/store (publication) barrier
 // between calling this function and making the object reachable.
 func heapBitsSetType(x, size, dataSize uintptr, typ *_type) {
+	/*
+	println("heapBitsSetType: size=", size, "dataSize=", dataSize, "typ=", typ.name())
+	s := spanOfHeap(x)
+	if s != nil {
+		sizeClass := s.spanclass.sizeclass()
+		println("  heapBitsSetType: sizeClass =", sizeClass, "size =", class_to_size[sizeClass])
+	}
+	*/
 	const doubleCheck = false // slow but helpful; enable to test modifications to this code
 
 	const (
