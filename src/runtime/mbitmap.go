@@ -874,6 +874,7 @@ func heapBitsSetType(x, size, dataSize uintptr, typ *_type) {
 
 	h := heapBitsForAddr(x)
 	ptrmask := typ.gcdata // start of 1-bit pointer mask (or GC program, handled below)
+	println("typ.name =", typ.name(), "ptrmas =", hex(uintptr(ptrmask)))
 
 	// 2-word objects only have 4 bitmap bits and 3-word objects only have 6 bitmap bits.
 	// Therefore, these objects share a heap bitmap byte with the objects next to them.
