@@ -393,7 +393,7 @@ type moduledata struct {
 	cutab        []uint32
 	filetab      []byte
 	pctab        []byte
-	pclntable    []byte
+	pclntable    []byte // [_func, funcdata, _func, funcdata]
 	ftab         []functab
 	findfunctab  uintptr
 	minpc, maxpc uintptr
@@ -1089,4 +1089,23 @@ type inlinedCall struct {
 	line     int32 // line number of the call site
 	func_    int32 // offset into pclntab for name of called function
 	parentPc int32 // position of an instruction whose source position is the call site (offset from entry)
+}
+
+func DumpFunc(pc uintptr) {
+	f := findfunc(pc)
+
+	if !f.valid() {
+		println("pc =", hex(pc), " not found")
+		return
+	}
+
+	println("func.name =", funcname(f))
+	println("  _func.npcdata = ", f.npcdata)
+	for table := uint32(0);  table < f.npcdata; table++ {
+		println("  pcdata index =", table, "off =", pcdatastart(f, table))
+	}
+
+	for table := uint8(0); table <= _FUNCDATA_ArgInfo; table++ {
+		println("  funcdata index =", table, "ptr =", funcdata(f, table))
+	}
 }

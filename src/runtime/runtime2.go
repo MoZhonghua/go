@@ -873,6 +873,11 @@ type _func struct {
 	flag      funcFlag
 	_         [1]byte // pad
 	nfuncdata uint8   // must be last, must end on a uint32-aligned boundary
+	// 其余数据
+	// [npcdata]uint32  max(npcdata) = _PCDATA_InlTreeIndex + 1
+
+	// pad to sys.PtrSize
+	// [_FUNCDATA_ArgInfo+1]unsafe.Pointer
 }
 
 // Pseudo-Func that is returned for PCs that occur in inlined code.
