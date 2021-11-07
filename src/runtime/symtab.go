@@ -1101,11 +1101,19 @@ func DumpFunc(pc uintptr) {
 
 	println("func.name =", funcname(f))
 	println("  _func.npcdata = ", f.npcdata)
-	for table := uint32(0);  table < f.npcdata; table++ {
+	for table := uint32(0); table < f.npcdata; table++ {
 		println("  pcdata index =", table, "off =", pcdatastart(f, table))
 	}
 
 	for table := uint8(0); table <= _FUNCDATA_ArgInfo; table++ {
 		println("  funcdata index =", table, "ptr =", funcdata(f, table))
 	}
+}
+
+func SPDelta(pc uintptr) int32 {
+	f := findfunc(pc)
+	if !f.valid() {
+		return 0
+	}
+	return funcspdelta(f, pc, nil)
 }

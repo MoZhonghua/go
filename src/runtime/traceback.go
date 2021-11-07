@@ -212,7 +212,9 @@ func gentraceback(pc0, sp0, lr0 uintptr, gp *g, skip int, pcbuf *uintptr, max in
 					flag &^= funcFlag_SPWRITE
 				}
 			}
-			frame.fp = frame.sp + uintptr(funcspdelta(f, frame.pc, &cache))
+			spDelta := funcspdelta(f, frame.pc, &cache)
+			println("  sp delta =", spDelta, "pc =", hex(frame.pc))
+			frame.fp = frame.sp + uintptr(spDelta)
 			if !usesLR {
 				// On x86, call instruction pushes return PC before entering new function.
 				frame.fp += sys.PtrSize
