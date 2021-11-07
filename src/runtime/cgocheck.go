@@ -220,6 +220,9 @@ func cgoCheckUsingType(typ *_type, src unsafe.Pointer, off, size uintptr) {
 		cgoCheckBits(src, typ.gcdata, off, size)
 		return
 	}
+
+	// 使用gcprog只能是struct和array，而field和item本身有类型，一直
+	// 递归下去，直到field/item类型足够小，没使用gcprog
 	switch typ.kind & kindMask {
 	default:
 		throw("can't happen")
