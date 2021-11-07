@@ -65,6 +65,7 @@ func tracebackdefers(gp *g, callback func(*stkframe, unsafe.Pointer) bool, v uns
 // of logical frames to skip rather than physical frames (with inlining, a
 // PC in pcbuf can represent multiple calls).
 func gentraceback(pc0, sp0, lr0 uintptr, gp *g, skip int, pcbuf *uintptr, max int, callback func(*stkframe, unsafe.Pointer) bool, v unsafe.Pointer, flags uint) int {
+	flags |= _TraceRuntimeFrames
 	if skip > 0 && callback != nil {
 		throw("gentraceback callback cannot be used with non-zero skip")
 	}
