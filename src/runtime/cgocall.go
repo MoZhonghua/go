@@ -631,3 +631,7 @@ func cgoCheckResult(val interface{}) {
 	t := ep._type
 	cgoCheckArg(t, ep.data, t.kind&kindDirectIface == 0, false, cgoResultFail)
 }
+
+func CgoCheckPointer(ptr interface{}, arg interface{}) {
+	cgoCheckPointer(ptr, arg)
+}
