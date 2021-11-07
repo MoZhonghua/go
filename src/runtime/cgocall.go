@@ -8,6 +8,8 @@
 // runtime.cgocall(_cgo_Cfunc_f, frame), where _cgo_Cfunc_f is a
 // gcc-compiled function written by cgo.
 //
+// example: do_hello() in C => main._Cfunc_do_hello
+//
 // runtime.cgocall (below) calls entersyscall so as not to block
 // other goroutines or the garbage collector, and then calls
 // runtime.asmcgocall(_cgo_Cfunc_f, frame).
