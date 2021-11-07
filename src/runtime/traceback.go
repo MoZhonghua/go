@@ -1359,7 +1359,7 @@ func printCgoTraceback(callers *cgoCallers) {
 		printOneCgoTraceback(c, 0x7fffffff, &arg)
 	}
 	arg.pc = 0
-	callCgoSymbolizer(&arg)
+	callCgoSymbolizer(&arg) // called with pc=0 to free resources
 }
 
 // printOneCgoTraceback prints the traceback of a single cgo caller.
@@ -1431,4 +1431,12 @@ func Systemstack(f func()) {
 	systemstack(func() {
 		f()
 	})
+}
+
+func IsInHeap(v uintptr) bool {
+	s := spanOfHeap(v)
+	if s != nil {
+		return true
+	}
+	return false
 }
