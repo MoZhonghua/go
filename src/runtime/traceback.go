@@ -148,6 +148,7 @@ func gentraceback(pc0, sp0, lr0 uintptr, gp *g, skip int, pcbuf *uintptr, max in
 	lastFuncID := funcID_normal
 	n := 0
 	for n < max {
+		println("trace")
 		// Typically:
 		//	pc is the PC of the running function.
 		//	sp is the stack pointer at that program counter.
@@ -163,12 +164,13 @@ func gentraceback(pc0, sp0, lr0 uintptr, gp *g, skip int, pcbuf *uintptr, max in
 
 		// Compute function info flags.
 		flag := f.flag
-		if f.funcID == funcID_cgocallback {
+		if f.funcID == funcID_cgocallback || f.funcID == funcID_systemstack {
 			// cgocallback does write SP to switch from the g0 to the curg stack,
 			// but it carefully arranges that during the transition BOTH stacks
 			// have cgocallback frame valid for unwinding through.
 			// So we don't need to exclude it with the other SP-writing functions.
 			flag &^= funcFlag_SPWRITE
+			flags |= _TraceJumpStack
 		}
 		if frame.pc == pc0 && frame.sp == sp0 && pc0 == gp.syscallpc && sp0 == gp.syscallsp {
 			// Some Syscall functions write to SP, but they do so only after
@@ -176,6 +178,7 @@ func gentraceback(pc0, sp0, lr0 uintptr, gp *g, skip int, pcbuf *uintptr, max in
 			// Since we are using the entry PC/SP, the later SP write doesn't matter.
 			flag &^= funcFlag_SPWRITE
 		}
+		println("  frame.fp =", hex(frame.fp))
 
 		// Found an actual function.
 		// Derive frame pointer and link register.
@@ -201,6 +204,11 @@ func gentraceback(pc0, sp0, lr0 uintptr, gp *g, skip int, pcbuf *uintptr, max in
 					// stack transition.
 					frame.sp = gp.m.curg.sched.sp
 					cgoCtxt = gp.m.curg.cgoCtxt
+					spPtr := *(*uintptr)(unsafe.Pointer(frame.sp))
+					spPtr2 := *(*uintptr)(unsafe.Pointer(frame.sp + 8))
+					spPtr3 := *(*uintptr)(unsafe.Pointer(frame.sp - 8))
+					println("  systemstack: sp =", hex(frame.sp), "*sp =", hex(spPtr),
+						"*(sp+8) =", hex(spPtr2), "*(sp-8) =", hex(spPtr3))
 					flag &^= funcFlag_SPWRITE
 				}
 			}
