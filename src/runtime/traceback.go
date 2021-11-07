@@ -1416,3 +1416,9 @@ func cgoContextPCs(ctxt uintptr, buf []uintptr) {
 	}
 	call(cgoTraceback, noescape(unsafe.Pointer(&arg)))
 }
+
+func Systemstack(f func()) {
+	systemstack(func() {
+		f()
+	})
+}
