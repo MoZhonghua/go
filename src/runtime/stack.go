@@ -946,6 +946,20 @@ func round2(x int32) int32 {
 //
 //go:nowritebarrierrec
 func newstack() {
+	// called by runtime.morestack()
+
+	// y() { x() }
+	// x() { runtime.morestack() }
+
+	// curg: stack layout
+	//  addr+16: ret1 <- return addr after call x()
+	//  addr+8 : ret2 <- return addr after call runtime.morestack*()
+	//  addr   :
+
+	// m.morebuf : sp -> addr + 16; pc = ret1
+	// curg.sched: sp -> addr + 8; pc = ret2
+
+
 	thisg := getg()
 	// TODO: double check all gp. shouldn't be getg().
 	if thisg.m.morebuf.g.ptr().stackguard0 == stackFork {
