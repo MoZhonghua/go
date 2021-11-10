@@ -438,9 +438,20 @@ TEXT runtime·morestack(SB),NOSPLIT,$0-0
 	// Called from f.
 	// Set m->morebuf to f's caller.
 	NOP	SP	// tell vet SP changed - stop checking offsets
-	MOVQ	8(SP), AX	// f's caller's PC
+
+	// 假设是在函数x()中触发了morestack，此时x实际相当于没有执行，因为是在prolog里检查
+	// y() {
+	//    x()  <- pc1
+	// }
+	// x() {
+	//    morestack() <- pc2
+	// }
+	// 此时栈中连续有两个ret addr
+	//   pc1  // 调用x()的返回地址
+	//   pc2  // 调用morestack()的返回地址
+	MOVQ	8(SP), AX	// f's caller's PC  // 这里取的是y调用x()的返回地址
 	MOVQ	AX, (m_morebuf+gobuf_pc)(BX)
-	LEAQ	16(SP), AX	// f's caller's SP
+	LEAQ	16(SP), AX	// f's caller's SP  // 这里取的是pc1之上的地址
 	MOVQ	AX, (m_morebuf+gobuf_sp)(BX)
 	get_tls(CX)
 	MOVQ	g(CX), SI
