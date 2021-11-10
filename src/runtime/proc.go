@@ -3296,6 +3296,9 @@ func injectglist(glist *gList) {
 // Never returns.
 func schedule() {
 	_g_ := getg()
+	if _g_ != _g_.m.g0 {
+		throw("schedule: not called in systemstack")
+	}
 
 	if _g_.m.locks != 0 {
 		throw("schedule: holding locks")
