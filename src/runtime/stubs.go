@@ -84,6 +84,9 @@ func badsystemstack() {
 // implementation of typedmemclr and memclrHasPointers. See the doc of
 // memmove for more details.
 //
+// * atomically指指针的8字节都是同时写入，其他人不能看到写了一般的数据，比如
+// 只写了前4个字节
+//
 // The (CPU-specific) implementations of this function are in memclr_*.s.
 //
 //go:noescape
@@ -225,7 +228,8 @@ func breakpoint()
 // only in a very limited callee of reflectcall, the stackArgs are copied, and
 // regArgs is only used in the reflectcall frame.
 //go:noescape
-func reflectcall(stackArgsType *_type, fn, stackArgs unsafe.Pointer, stackArgsSize, stackRetOffset, frameSize uint32, regArgs *abi.RegArgs)
+func reflectcall(stackArgsType *_type, fn, stackArgs unsafe.Pointer,
+	stackArgsSize, stackRetOffset, frameSize uint32, regArgs *abi.RegArgs)
 
 func procyield(cycles uint32)
 

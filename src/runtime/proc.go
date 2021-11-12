@@ -748,7 +748,7 @@ func schedinit() {
 
 func dump_consts() {
 	print("consts\n")
-	dump_pagealloc_consts();
+	dump_pagealloc_consts()
 }
 
 func dumpgstatus(gp *g) {
@@ -2237,6 +2237,7 @@ func newm(fn func(), _p_ *p, id int64) {
 }
 
 func newm1(mp *m) {
+	println("newm1, iscgo=", iscgo)
 	if iscgo {
 		var ts cgothreadstart
 		if _cgo_thread_start == nil {
@@ -2249,7 +2250,9 @@ func newm1(mp *m) {
 			msanwrite(unsafe.Pointer(&ts), unsafe.Sizeof(ts))
 		}
 		execLock.rlock() // Prevent process clone.
+		println("newm1 before _cgo_thread_start mp=", mp)
 		asmcgocall(_cgo_thread_start, unsafe.Pointer(&ts))
+		println("newm1 after _cgo_thread_start mp=", mp)
 		execLock.runlock()
 		return
 	}

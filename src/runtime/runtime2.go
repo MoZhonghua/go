@@ -518,6 +518,7 @@ type m struct {
 	gsignal       *g                // signal-handling g
 	goSigStack    gsignalStack      // Go-allocated signal handling stack
 	sigmask       sigset            // storage for saved signal mask
+	// 在runtime.settls()和newm1()中使用
 	tls           [tlsSlots]uintptr // thread-local storage (for x86 extern register)
 	mstartfn      func()
 	curg          *g       // current running goroutine

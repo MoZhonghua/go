@@ -1062,10 +1062,13 @@ func newstack() {
 		}
 
 		if gp.preemptStop {
+			// 设置gp->status = Gpreempted; gp.waitresion = waitReasonPreempted
+			// 但是没有把gp加入到任何等待队列中，可能之后通过遍历来改变为runnable并加到globalrunq中?
 			preemptPark(gp) // never returns
 		}
 
 		// Act like goroutine called runtime.Gosched.
+		// gp->status=Grunnable, globrunqput(gp)
 		gopreempt_m(gp) // never return
 	}
 

@@ -61,3 +61,24 @@ func NumGoroutine() int {
 func debug_modinfo() string {
 	return modinfo
 }
+
+func GetFS() uintptr
+
+func PrintCurrentG() {
+	g := getg()
+	println("g =", g)
+}
+
+func DebugTLS() {
+	m1 := m{};
+
+	m1Addr := uintptr(unsafe.Pointer(&m1))
+	tls0Addr := uintptr(unsafe.Pointer(&m1.tls[0]))
+
+	println("&m1 =", &m1)
+	println("&tls[0] =", &m1.tls[0])
+
+	println("tls[0] pos =", tls0Addr - m1Addr)
+	println("tls[0] + 0xfffffffffffffff8 =", hex(tls0Addr + 0xfffffffffffffff8))
+
+}
