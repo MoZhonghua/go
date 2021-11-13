@@ -1133,6 +1133,21 @@ func gopanic(e interface{}) {
 			// Pass information about recovering frame to recovery.
 			gp.sigcode0 = uintptr(sp)
 			gp.sigcode1 = pc
+
+			// defer x() 编译为：
+			//   初始化一个defer结构体, 假设在栈上分配，地址为dp
+			//   mov dp, AX
+			//   call runtime.deferprocStack(AX)
+			//   test ax, ax  // defer.pc指向这条语句，有两个路径会跳转过来
+			//   jne L
+			//   ...
+			//L: call runtime.deferreturn
+			//
+			// 两个路径过来：
+			//   1. deferprocStack(AX)正常返回，此时ax=0, 专门的return0()函数设置
+			//   2. mcall(recovery)，通过gogo()跳转过来，设置gobuf.ret=1，因此过来之后ax=1
+			//      此时相当于函数直接执行完成后调用runtime.deferreturn()
+			// 因此一个recover会恢复之前所有的panic
 			mcall(recovery)
 			throw("recovery failed") // mcall should not return
 		}
