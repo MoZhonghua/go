@@ -80,5 +80,4 @@ func DebugTLS() {
 
 	println("tls[0] pos =", tls0Addr - m1Addr)
 	println("tls[0] + 0xfffffffffffffff8 =", hex(tls0Addr + 0xfffffffffffffff8))
-
 }
