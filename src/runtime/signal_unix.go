@@ -723,6 +723,7 @@ func sigpanic() {
 	case _SIGBUS:
 		// sigcode0 -> siginfo_t.si_code
 		// sigcode1 -> siginfo_t.si_addr
+		// 0x1000是为了处理*nil这种情况，其他情况都是直接throw，不能恢复
 		if g.sigcode0 == _BUS_ADRERR && g.sigcode1 < 0x1000 {
 			panicmem()
 		}

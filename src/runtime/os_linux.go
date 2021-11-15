@@ -403,7 +403,7 @@ func sigprocmask(how int32, new, old *sigset) {
 	rtsigprocmask(how, new, old, int32(unsafe.Sizeof(*new)))
 }
 
-func raise(sig uint32)
+func raise(sig uint32)  // syscall(SYS_tgkill, getpid(), gettid(), sig)
 func raiseproc(sig uint32)
 
 //go:noescape
