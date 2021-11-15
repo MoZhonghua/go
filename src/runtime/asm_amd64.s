@@ -1894,7 +1894,7 @@ good:
 	MOVQ	AX, 0(SP)
 	MOVQ	$20, 8(SP) // length of debugCallFrameTooLarge string
 	MOVQ	$8, R12
-	BYTE	$0xcc
+	BYTE	$0xcc  // int 3
 	JMP	restore
 
 restore:

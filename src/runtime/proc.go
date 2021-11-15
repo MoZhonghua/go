@@ -356,6 +356,12 @@ func gopark(unlockf func(*g, unsafe.Pointer) bool, lock unsafe.Pointer, reason w
 	if status != _Grunning && status != _Gscanrunning {
 		throw("gopark: bad g status")
 	}
+	// out of bound 参数，给park_m使用
+	// 因为park_m会把gp状态改为waiting，但是其他goroutine可能会决定再次唤醒gp并运行，此时如果直接传
+	// 入closure，closure会被无效化。
+	//
+	// 正常的go代码没有这个问题，因为call(callback)一定会在callback执行完，call才会返回。这里是
+	// park_m还没执行完，mcall就返回(实际是longjmp过来)
 	mp.waitlock = lock
 	mp.waitunlockf = unlockf
 	gp.waitreason = reason
