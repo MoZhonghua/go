@@ -721,6 +721,8 @@ func sigpanic() {
 
 	switch g.sig {
 	case _SIGBUS:
+		// sigcode0 -> siginfo_t.si_code
+		// sigcode1 -> siginfo_t.si_addr
 		if g.sigcode0 == _BUS_ADRERR && g.sigcode1 < 0x1000 {
 			panicmem()
 		}
