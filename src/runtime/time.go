@@ -264,6 +264,12 @@ func addtimer(t *timer) {
 	when := t.when
 
 	// Disable preemption while using pp to avoid changing another P's heap.
+	// preemption可能发生在
+	//  - 函数入口，此时函数相当于还没有执行
+	//  - 调用其他函数时
+	//  - signal：不用考虑，所有runtime, runtime.internal都是unsafepoint
+	// preempt后的后果是：
+	//  - 可能被调度到其他m和p，因此如果代码里获取了m或者p，就不能被抢占，否则m和p不是指向当前值
 	mp := acquirem()
 
 	pp := getg().m.p.ptr()
