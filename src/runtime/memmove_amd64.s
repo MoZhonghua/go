@@ -179,7 +179,7 @@ move_5through7:
 move_8:
 	// We need a separate case for 8 to make sure we write pointers atomically.
 	MOVQ	(SI), AX
-	MOVQ	AX, (DI)
+	MOVQ	AX, (DI) // 在x86中，如果mov的dst和src都是对齐的则保证是atomic, 要完全保证需要使用xchg指令
 	RET
 move_9through16:
 	MOVQ	(SI), AX
