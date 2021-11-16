@@ -85,7 +85,8 @@ func badsystemstack() {
 // memmove for more details.
 //
 // * atomically指指针的8字节都是同时写入，其他人不能看到写了一般的数据，比如
-// 只写了前4个字节
+// 只写了前4个字节. mov指令只在对齐是原子的，当满足上面的条件，memclrNoHeapPointers函数中的
+// 所有mov指令都是对齐的。
 //
 // The (CPU-specific) implementations of this function are in memclr_*.s.
 //
