@@ -149,8 +149,9 @@ _9through16:
 	MOVQ	AX, -8(DI)(BX*1)
 	RET
 _17through32:
-	MOVOU	X15, (DI)
-	MOVOU	X15, -16(DI)(BX*1)
+	// 这两条语句设置的内存可能有overlap，但是没有循环和分支，性能更好
+	MOVOU	X15, (DI)           // ptr[0:16] = 0
+	MOVOU	X15, -16(DI)(BX*1)  // ptr[len-16, len] = 0
 	RET
 _33through64:
 	MOVOU	X15, (DI)
