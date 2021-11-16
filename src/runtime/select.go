@@ -323,6 +323,13 @@ func selectgo(cas0 *scase, order0 *uint16, pc0 *uintptr, nsends, nrecvs int, blo
 	// to park on a channel. The window between when this G's status
 	// changes and when we set gp.activeStackChans is not safe for
 	// stack shrinking.
+
+	// parkingOnChan的原理：
+	// activeStackChans=true的时候，copystack必须先获取所有channel的锁，然后才能
+	// 复制栈内存。在selparkcommit()中设置，问题在于gopark是先设置g.status=waiting，然后再
+	// 调用selparkcommit，在两者之间GC可以开始shrink栈(grow栈总是发生在这个g中，没有并发问题)，
+	// 然后检查activeStackChans=false，没有加锁，导致和其他goroutine冲突.
+	// 通过设置parkingOnChan=1来保护这段时间，即当要shrink栈时，如果发现parkingOnChan=1就不做shrink
 	atomic.Store8(&gp.parkingOnChan, 1)
 	gopark(selparkcommit, nil, waitReasonSelect, traceEvGoBlockSelect, 1)
 	gp.activeStackChans = false
