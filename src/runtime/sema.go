@@ -443,6 +443,7 @@ func (root *semaRoot) rotateRight(y *sudog) {
 	}
 }
 
+// 基本就是ticket-lock
 // notifyList is a ticket-based notification list used to implement sync.Cond.
 //
 // It must be kept in sync with the sync package.
