@@ -233,7 +233,7 @@ TEXT runtime·nanotime1(SB),NOSPLIT,$16-8
 
 	LEAQ	ret+0(FP), DX
 	MOVQ	-8(DX), CX
-	MOVQ	CX, m_vdsoPC(BX)
+	MOVQ	CX, m_vdsoPC(BX)  // 等价于m.vsdoPC = getcallerpc(), m.vdsoSP = getcallersp()
 	MOVQ	DX, m_vdsoSP(BX)
 
 #ifdef GOEXPERIMENT_regabig
