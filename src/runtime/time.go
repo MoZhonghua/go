@@ -309,6 +309,8 @@ func doaddtimer(pp *p, t *timer) {
 // actually remove it from the timers heap. We can only mark it as deleted.
 // It will be removed in due course by the P whose heap it is on.
 // Reports whether the timer was removed before it was run.
+//
+// 注意: 没有加锁
 func deltimer(t *timer) bool {
 	for {
 		switch s := atomic.Load(&t.status); s {
