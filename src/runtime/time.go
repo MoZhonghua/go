@@ -544,6 +544,7 @@ loop:
 // or may have been, used previously.
 // Reports whether the timer was modified before it was run.
 func resettimer(t *timer, when int64) bool {
+	// TODO(mzh): race with modtimer
 	return modtimer(t, when, t.period, t.f, t.arg, t.seq)
 }
 
