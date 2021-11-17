@@ -11,4 +11,6 @@ type.go
 rwmutex.go
 runtime-gdb.py
 runtime.go
-runtime1.go ?
+runtime1.go
+runtime2.go ?
+profbuf.go ?

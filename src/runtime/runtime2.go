@@ -84,6 +84,9 @@ const (
 	// ready()ing this G.
 	_Gpreempted // 9
 
+	// 设置了_Gscan会导致：
+	// - 切换状态时一直循环(spin)，直到_Gscan位被清除，才会真正切换
+	//   相当于一个spin lock
 	// _Gscan combined with one of the above states other than
 	// _Grunning indicates that GC is scanning the stack. The
 	// goroutine is not executing user code and the stack is owned
