@@ -19,6 +19,10 @@ var ticks struct {
 	val  uint64
 }
 
+func Tickspersecond() int64 {
+	return tickspersecond()
+}
+
 // Note: Called by runtime/pprof in addition to runtime code.
 func tickspersecond() int64 {
 	r := int64(atomic.Load64(&ticks.val))
