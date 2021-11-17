@@ -11,6 +11,8 @@ import (
 
 type mOS struct{}
 
+// op=WAIT => sleep if *addr = val
+// op=WAKE => wakeup at most val waiters
 //go:noescape
 func futex(addr unsafe.Pointer, op int32, val uint32, ts, addr2 unsafe.Pointer, val3 uint32) int32
 

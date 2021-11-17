@@ -13,6 +13,7 @@ runtime-gdb.py
 runtime.go
 runtime1.go
 runtime2.go
-profbuf.go ?
-cpuprof.go ?
+profbuf.go
+cpuprof.go
 os_linux_* ?
+lock* ?
