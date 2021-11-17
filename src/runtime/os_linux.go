@@ -204,6 +204,7 @@ func sysargs(argc int32, argv **byte) {
 	// skip NULL separator
 	n++
 
+	// { [ argv ] nil [ envp ] nil [ auxv ] }
 	// now argv+n is auxv
 	auxv := (*[1 << 28]uintptr)(add(unsafe.Pointer(argv), uintptr(n)*sys.PtrSize))
 	if sysauxv(auxv[:]) != 0 {
