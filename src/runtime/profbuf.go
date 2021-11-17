@@ -23,6 +23,9 @@ import (
 // hdrsize words giving the fixed-size header, and then len(stk) words
 // for the stack.
 //
+// event = len | time | header | stk
+//          1  + 1    + 2      + n
+//
 // The current effective offsets into the tags and data circular buffers
 // for reading and writing are stored in the high 30 and low 32 bits of r and w.
 // The bottom bits of the high 32 are additional flag bits in w, unused in r.

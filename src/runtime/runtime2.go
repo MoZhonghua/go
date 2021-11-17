@@ -517,10 +517,10 @@ type m struct {
 	divmod  uint32 // div/mod denominator for arm - known to liblink
 
 	// Fields not known to debuggers.
-	procid        uint64            // for debuggers, but offset not hard-coded
-	gsignal       *g                // signal-handling g
-	goSigStack    gsignalStack      // Go-allocated signal handling stack
-	sigmask       sigset            // storage for saved signal mask
+	procid     uint64       // for debuggers, but offset not hard-coded
+	gsignal    *g           // signal-handling g
+	goSigStack gsignalStack // Go-allocated signal handling stack
+	sigmask    sigset       // storage for saved signal mask
 	// 在runtime.settls()和newm1()中使用, 实际的fs=&tls + 8, 因此访问tls[0]时的汇编是
 	//  mov %fs:0xfffffffffffffff8,%r14
 	//  +0xfffffffffffffff8 就是 -8
@@ -1153,3 +1153,24 @@ var (
 
 // Must agree with internal/buildcfg.Experiment.FramePointer.
 const framepointer_enabled = GOARCH == "amd64" || GOARCH == "arm64"
+
+var n note
+var n2 note
+
+func DebugNote() {
+	noteclear(&n)
+	noteclear(&n2)
+
+	notewakeup(&n)
+	go func() {
+		systemstack(func() {
+			notesleep(&n)
+			notewakeup(&n2)
+		})
+	}()
+
+	systemstack(func() {
+		notesleep(&n)
+		notesleep(&n2)
+	})
+}
