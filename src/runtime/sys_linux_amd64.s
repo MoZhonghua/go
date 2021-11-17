@@ -548,6 +548,11 @@ nog1:
 	MOVL	$SYS_clone, AX
 	SYSCALL
 
+	// at&t 风格 注意总是用 $b XX $a, 不是$a XX $b
+	//   cmp $a, $b
+	//   jXX label
+	// ==>
+	//   if ($b XX $a) { jump to label }
 	// In parent, return.
 	CMPQ	AX, $0
 	JEQ	3(PC)

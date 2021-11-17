@@ -15,5 +15,5 @@ runtime1.go
 runtime2.go
 profbuf.go
 cpuprof.go
-os_linux_* ?
+os_linux.go
 lock* ?
