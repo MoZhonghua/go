@@ -15,6 +15,8 @@ import "unsafe"
 // Zero means not to use faketime.
 var faketime int64
 
+// syscall clock_gettime(CLOCK_MONOTONIC, &timespec{})
+// return (timespec.tv_sec * 10e6 + timespec.tv_nsec)
 //go:nosplit
 func nanotime() int64 {
 	return nanotime1()

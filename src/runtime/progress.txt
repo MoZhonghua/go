@@ -1,12 +1,13 @@
 2021-11-16
-string.go .
-slice.go  .
-sema.go   .
-select.go .
-chan.go   .
-type.go   .
+string.go
+slice.go
+sema.go
+select.go
+chan.go
+type.go
 
 
 2021-11-17
-rwmutex.go ?
-runtime*.go ?
+rwmutex.go
+runtime-gdb.py
+runtime.go?
