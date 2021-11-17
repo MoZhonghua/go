@@ -521,7 +521,9 @@ type m struct {
 	gsignal       *g                // signal-handling g
 	goSigStack    gsignalStack      // Go-allocated signal handling stack
 	sigmask       sigset            // storage for saved signal mask
-	// 在runtime.settls()和newm1()中使用
+	// 在runtime.settls()和newm1()中使用, 实际的fs=&tls + 8, 因此访问tls[0]时的汇编是
+	//  mov %fs:0xfffffffffffffff8,%r14
+	//  +0xfffffffffffffff8 就是 -8
 	tls           [tlsSlots]uintptr // thread-local storage (for x86 extern register)
 	mstartfn      func()
 	curg          *g       // current running goroutine
