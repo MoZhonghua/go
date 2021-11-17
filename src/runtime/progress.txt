@@ -6,7 +6,6 @@ select.go
 chan.go
 type.go
 
-
 2021-11-17
 rwmutex.go
 runtime-gdb.py
@@ -16,4 +15,8 @@ runtime2.go
 profbuf.go
 cpuprof.go
 os_linux.go
-lock* ?
+
+2021-11-18
+heapdump.go ?
+histogram.go ?
+iface.go ?
