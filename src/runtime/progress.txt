@@ -3,5 +3,10 @@ string.go .
 slice.go  .
 sema.go   .
 select.go .
-chan.go   ?
+chan.go   .
+type.go   .
 
+
+2021-11-17
+rwmutex.go ?
+runtime*.go ?

@@ -36,6 +36,8 @@ func (rw *rwmutex) rlock() {
 	// deadlock (issue #20903). Alternatively, we could drop the P
 	// while sleeping.
 	acquirem()
+	// rw.readerCounter += 1
+	// if (rw.readerCounter & 0xC0000000) == 0xC0000000 {
 	if int32(atomic.Xadd(&rw.readerCount, 1)) < 0 {
 		// A writer is pending. Park on the reader queue.
 		systemstack(func() {
@@ -60,6 +62,8 @@ func (rw *rwmutex) rlock() {
 
 // runlock undoes a single rlock call on rw.
 func (rw *rwmutex) runlock() {
+	// rw.readerCounter -= 1
+	// if (rw.readerCounter & 0xC0000000) == 0xC0000000 {
 	if r := int32(atomic.Xadd(&rw.readerCount, -1)); r < 0 {
 		if r+1 == 0 || r+1 == -rwmutexMaxReaders {
 			throw("runlock of unlocked rwmutex")
@@ -78,6 +82,10 @@ func (rw *rwmutex) runlock() {
 	releasem(getg().m)
 }
 
+func Xadd(v *uint32, delta int32) uint32 {
+	return atomic.Xadd(v, delta)
+}
+
 // lock locks rw for writing.
 func (rw *rwmutex) lock() {
 	// Resolve competition with other writers and stick to our P.
@@ -87,6 +95,8 @@ func (rw *rwmutex) lock() {
 	r := int32(atomic.Xadd(&rw.readerCount, -rwmutexMaxReaders)) + rwmutexMaxReaders
 	// Wait for any active readers to complete.
 	lockWithRank(&rw.rLock, lockRankRwmutexR)
+	// readerWait 指想获取wlock时，有几个reader已经获取了锁(?)，要求这么多个reader释放锁之后
+	// 唤醒，然后获取锁。
 	if r != 0 && atomic.Xadd(&rw.readerWait, r) != 0 {
 		// Wait for reader to wake us up.
 		systemstack(func() {
