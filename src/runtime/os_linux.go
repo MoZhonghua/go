@@ -193,6 +193,10 @@ var procAuxv = []byte("/proc/self/auxv\x00")
 
 var addrspace_vec [1]byte
 
+// mincore()  returns  a vector that indicates whether pages of the calling process's virtual memory
+// are resident in core (RAM)
+//
+// EINVAL addr is not a multiple of the page size
 func mincore(addr unsafe.Pointer, n uintptr, dst *byte) int32
 
 func sysargs(argc int32, argv **byte) {
