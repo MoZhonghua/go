@@ -168,6 +168,11 @@ func signal_recv() uint32 {
 					}
 					notetsleepg(&sig.note, -1)
 					noteclear(&sig.note)
+
+					// sigReceiving之后有两种可能被唤醒:
+					// - sighandler调用sigsend()， sigReceiving -> sigIdle
+					// - sigRecvPrepareForFixup()通知正在执行sigsend()的线程需要执行fixup，sigReceiving -> sigFixup
+					// 只有前者是真正有新信号进来，因此如果是后者，没有任何事需要处理，再次循环
 					if !atomic.Cas(&sig.state, sigFixup, sigIdle) {
 						break Receive
 					}
