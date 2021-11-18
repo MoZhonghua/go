@@ -11,6 +11,13 @@ import (
 )
 
 const (
+	// HDR: high dynamic range
+	// 也就是bucket的范围是动态的，值小的时候bucket范围也小，值大时bucket范围也大
+	// 用第一个非0bit的位置做为superbucket索引，然后再分为16个subbucket
+	//
+	// 公式：super_bucket_index = sbi，从0开始, [0, 45)
+	//       subbucket_range = (1 << (4 + sbi + 1)) / 16
+	//
 	// For the time histogram type, we use an HDR histogram.
 	// Values are placed in super-buckets based solely on the most
 	// significant set bit. Thus, super-buckets are power-of-2 sized.
@@ -136,6 +143,13 @@ func float64NegInf() float64 {
 // timeHistogramMetricsBuckets generates a slice of boundaries for
 // the timeHistogram. These boundaries are represented in seconds,
 // not nanoseconds like the timeHistogram represents durations.
+//
+// returns:
+//  0 -> -Inf
+//  1 -> 0.000000
+//  2 -> 1.000000
+//  3 -> 2.000000
+// range of bucket index i: b[i] < v <= b[i+1]
 func timeHistogramMetricsBuckets() []float64 {
 	b := make([]float64, timeHistTotalBuckets+1)
 	b[0] = float64NegInf()
