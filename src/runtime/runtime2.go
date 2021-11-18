@@ -1153,24 +1153,3 @@ var (
 
 // Must agree with internal/buildcfg.Experiment.FramePointer.
 const framepointer_enabled = GOARCH == "amd64" || GOARCH == "arm64"
-
-var n note
-var n2 note
-
-func DebugNote() {
-	noteclear(&n)
-	noteclear(&n2)
-
-	notewakeup(&n)
-	go func() {
-		systemstack(func() {
-			notesleep(&n)
-			notewakeup(&n2)
-		})
-	}()
-
-	systemstack(func() {
-		notesleep(&n)
-		notesleep(&n2)
-	})
-}

@@ -97,6 +97,9 @@ func (t *itabTableType) find(inter *interfacetype, typ *_type) *itab {
 	// Implemented using quadratic probing.
 	// Probe sequence is h(i) = h0 + i*(i+1)/2 mod 2^k.
 	// We're guaranteed to hit all table entries using this probe sequence.
+	// 通用公式为: h(i) = { h0 + i * c1 + i*i * c2 } mod N
+	// 当N为2^k时，c1=c2=0.5，也就是i*(i+1)/2，可以保证遍历整个数组（证明？）
+	// https://en.wikipedia.org/wiki/Quadratic_probing
 	mask := t.size - 1
 	h := itabHashFunc(inter, typ) & mask
 	for i := uintptr(1); ; i++ {
@@ -221,6 +224,7 @@ imethods:
 				if pkgPath == "" {
 					pkgPath = typ.nameOff(x.pkgpath).name()
 				}
+				// interface可以定义不导出的方法，这个时候要求实现在同一个包里
 				if tname.isExported() || pkgPath == ipkg {
 					if m != nil {
 						ifn := typ.textOff(t.ifn)
@@ -315,6 +319,15 @@ var (
 // The convXXX functions succeed on a nil input, whereas the assertXXX
 // functions fail on a nil input.
 
+// 比如 a := struct{...}
+//      var b interface{}
+//      b = a
+// 对应的汇编为
+//      b = convT2E(_struct_type, &a)
+// 注意永远都是重新分配内存复制一份数据，不是直接指向原始数据
+
+// 如果是指针转成inteface{}, 不分配内存而是_type=&struct{}, data=ptr, 不会
+// 调用这个函数
 func convT2E(t *_type, elem unsafe.Pointer) (e eface) {
 	if raceenabled {
 		raceReadObjectPC(t, elem, getcallerpc(), funcPC(convT2E))
@@ -331,6 +344,13 @@ func convT2E(t *_type, elem unsafe.Pointer) (e eface) {
 	return
 }
 
+// 比如 a := uint16(100)
+//      var b interface{}
+//      b = a
+// 对应的汇编为
+//      data := convT16(a)
+//      _type := uint16Type
+//      b = eface { _type, data }
 func convT16(val uint16) (x unsafe.Pointer) {
 	if val < uint16(len(staticuint64s)) {
 		x = unsafe.Pointer(&staticuint64s[val])

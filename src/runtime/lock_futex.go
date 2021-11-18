@@ -244,3 +244,25 @@ func beforeIdle(int64, int64) (*g, bool) {
 }
 
 func checkTimeouts() {}
+
+type Note struct {
+	note
+}
+
+func Notenew() Note {
+	return Note{}
+}
+
+func (n *Note) Clear() {
+	noteclear(&n.note)
+}
+
+func (n *Note) Sleep() {
+	systemstack(func() {
+		notesleep(&n.note)
+	})
+}
+
+func (n *Note) Wakeup() {
+	notewakeup(&n.note)
+}
