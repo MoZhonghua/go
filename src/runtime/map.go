@@ -127,7 +127,7 @@ type hmap struct {
 	buckets    unsafe.Pointer // array of 2^B Buckets. may be nil if count==0.
 	oldbuckets unsafe.Pointer // previous bucket array of half the size, non-nil only when growing
 	nevacuate  uintptr        // progress counter for evacuation (buckets less than this have been evacuated)
-	// 不是扩容当前写入的bucket，而是每次写操作时，从0开始选择N个bucket来移动?
+	// 每次写入会移动需要修改的bucket，同时多移动一个从0开始的bucket
 
 	extra *mapextra // optional fields
 }
@@ -208,7 +208,7 @@ func tophash(hash uintptr) uint8 {
 }
 
 func evacuated(b *bmap) bool {
-	h := b.tophash[0]
+	h := b.tophash[0] // bucket所有元素要么都是evacuated，要么都不是，因此检查第一个就可以了
 	return h > emptyOne && h < minTopHash
 }
 
@@ -259,7 +259,10 @@ func (h *hmap) newoverflow(t *maptype, b *bmap) *bmap {
 		if ovf.overflow(t) == nil {
 			// We're not at the end of the preallocated overflow buckets. Bump the pointer.
 			h.extra.nextOverflow = (*bmap)(add(unsafe.Pointer(ovf), uintptr(t.bucketsize)))
+			// overflow永远不会回收，因此每次分配简单+bucketsize即可。在扩容时统一释放
 		} else {
+			// 预分配时只需要把最后一个bmap.setoverflow(sentinel)来标记结尾，而不是反过来，
+			// 中间的都设置，最后一个不设置。这样只需要设置一个，效率更高
 			// This is the last preallocated overflow bucket.
 			// Reset the overflow pointer on this bucket,
 			// which was set to a non-nil sentinel value.
@@ -358,7 +361,7 @@ func makeBucketArray(t *maptype, b uint8, dirtyalloc unsafe.Pointer) (buckets un
 		// Add on the estimated number of overflow buckets
 		// required to insert the median number of elements
 		// used with this value of b.
-		nbuckets += bucketShift(b - 4)
+		nbuckets += bucketShift(b - 4)  // loadfactor=6.5，当快满的时候，overflow=20.90%
 		sz := t.bucket.size * nbuckets
 		up := roundupsize(sz)
 		if up != sz {
@@ -399,6 +402,7 @@ func makeBucketArray(t *maptype, b uint8, dirtyalloc unsafe.Pointer) (buckets un
 // the key is not in the map.
 // NOTE: The returned pointer may keep the whole map live, so don't
 // hold onto it for very long.
+// 比如: *elem -> *bucket -> *overflow bucket -> *hmap
 func mapaccess1(t *maptype, h *hmap, key unsafe.Pointer) unsafe.Pointer {
 	if raceenabled && h != nil {
 		callerpc := getcallerpc()
@@ -576,6 +580,10 @@ func mapaccess2_fat(t *maptype, h *hmap, key, zero unsafe.Pointer) (unsafe.Point
 }
 
 // Like mapaccess, but allocates a slot for the key if it is not present in the map.
+// map[k] = v 编译为
+// p = mapassing(k)
+// *p = v
+// 赋值是在外面做的, 锁是同时保护这两条语句，同一个线程里这两条语句总是连在一起的，因此没有并发问题
 func mapassign(t *maptype, h *hmap, key unsafe.Pointer) unsafe.Pointer {
 	if h == nil {
 		panic(plainError("assignment to entry in nil map"))
