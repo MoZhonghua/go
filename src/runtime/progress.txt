@@ -24,4 +24,12 @@ lfstack.go
 lock_futex.go
 
 2021-11-19
-map.go ?
+map.go
+map_fast32.go
+map_fast64.go
+map_faststr.go
+mbarrier.go
+mwbbuf.go
+
+2021-11-20
+malloc.go ?

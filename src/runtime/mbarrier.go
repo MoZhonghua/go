@@ -82,6 +82,10 @@ import (
 //
 // ld r1, [slotmark]       ld r2, [slot]
 //
+// 如果满足SequentialConsistent, 那么不管是M还是GC先执行第一条语句，r1和r2必然有一个不是0
+//  - 先执行M的第一条语句， r2 != 0
+//  - 先执行GC的第一条语句，r1 != 0
+//
 // Without an expensive memory barrier between the st and the ld, the final
 // result on most HW (including 386/amd64) can be r1==r2==0. This is a classic
 // example of what can happen when loads are allowed to be reordered with older
@@ -117,6 +121,7 @@ import (
 // so it depends on write barriers to track changes to pointers in
 // stack frames that have not been active.
 //
+// 这里主要指chan操作，goroutine可以写入其他goroutine的栈
 //
 // Global writes:
 //

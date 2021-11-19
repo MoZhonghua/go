@@ -19,6 +19,7 @@
 // registers and disallow any GC safe points that could observe the
 // stack frame (since we don't know the types of the spilled
 // registers).
+// 指当前goroutine被deschedule，只能是异步抢占?
 
 package runtime
 

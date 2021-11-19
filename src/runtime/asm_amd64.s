@@ -1624,6 +1624,8 @@ TEXT ·sigpanic0<ABIInternal>(SB),NOSPLIT,$0-0
 // but may clobber others (e.g., SSE registers).
 // Defined as ABIInternal since it does not use the stack-based Go ABI.
 TEXT runtime·gcWriteBarrier<ABIInternal>(SB),NOSPLIT,$112
+	// 这里的fastpath等价于wbuf.putFast()函数，只是直接用汇编重新实现，避免
+	// 函数调用，同时也可以手动优化
 	// Save the registers clobbered by the fast path. This is slightly
 	// faster than having the caller spill these.
 	MOVQ	R12, 96(SP)
@@ -1651,7 +1653,7 @@ TEXT runtime·gcWriteBarrier<ABIInternal>(SB),NOSPLIT,$112
 	// take care of the vast majority of these. We could
 	// patch this up in the signal handler, or use XCHG to
 	// combine the read and the write.
-	MOVQ	(DI), R13
+	MOVQ	(DI), R13  // 真正要做的是 *DI = AX，写入*DX，这里需要先读取*DX
 	MOVQ	R13, -8(R12)	// Record *slot
 	// Is the buffer full? (flags set in CMPQ above)
 	JEQ	flush
