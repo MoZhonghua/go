@@ -812,6 +812,14 @@ search:
 	h.flags &^= hashWriting
 }
 
+// iterator的关键点：
+//   - 开始位置是随机bucket+offset, 之后遍历时是每次 *整个* bucket，
+//     比如两个bucket，遍历起始位置为bucket=0, offset=3， 检查顺序为:
+//        (0, 3) ... (0, 7), (0, 1), (0, 2)
+//        (1, 3), .. (1, 7), (1, 1), (1, 2)
+//   - 如果是已经移走的项(evacuatedX...)，通过mapccessK()直接查找，不是follow，因为
+//     可能经历多次扩容，而又没记录下一层的bucket指针，因此没办法追踪
+
 // mapiterinit initializes the hiter struct used for ranging over maps.
 // The hiter struct pointed to by 'it' is allocated on the stack
 // by the compilers order pass or on the heap by reflect_mapiterinit.
