@@ -74,6 +74,7 @@ const (
 	// Must fit in a uint8.
 	// Fast versions cannot handle big elems - the cutoff size for
 	// fast versions in cmd/compile/internal/gc/walk.go must be at most this elem.
+	// 指当每个bucket中的平均元素个数，即(len(map)/buckets)>=loadfactor时需要扩容map
 	maxKeySize  = 128
 	maxElemSize = 128
 
@@ -95,6 +96,8 @@ const (
 	evacuatedY     = 3 // same as above, but evacuated to second half of larger table.
 	evacuatedEmpty = 4 // cell is empty, bucket is evacuated.
 	minTopHash     = 5 // minimum tophash for a normal filled cell.
+
+	// 关键在于每次都是evacuate整个bucket，这样可以更容易实现iterator
 
 	// flags
 	iterator     = 1 // there may be an iterator using buckets
@@ -124,6 +127,7 @@ type hmap struct {
 	buckets    unsafe.Pointer // array of 2^B Buckets. may be nil if count==0.
 	oldbuckets unsafe.Pointer // previous bucket array of half the size, non-nil only when growing
 	nevacuate  uintptr        // progress counter for evacuation (buckets less than this have been evacuated)
+	// 不是扩容当前写入的bucket，而是每次写操作时，从0开始选择N个bucket来移动?
 
 	extra *mapextra // optional fields
 }
@@ -182,6 +186,10 @@ type hiter struct {
 // bucketShift returns 1<<b, optimized for code generation.
 func bucketShift(b uint8) uintptr {
 	// Masking the shift amount allows overflow checks to be elided.
+	// SHL CL, AX => AX = AX << (CL % 64)
+	// 如果没有& (sys.PtrSize*8 - 1)，那么b>=64时需要返回0，和SHL的语意不符合。
+	// 加上这个，就和SHL语意相符。如果调用者保证传入的b<64，那么两者结果没有区别
+	// 但是生成的汇编代码不用考虑>=64的情况
 	return uintptr(1) << (b & (sys.PtrSize*8 - 1))
 }
 
