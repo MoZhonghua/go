@@ -361,7 +361,7 @@ func makeBucketArray(t *maptype, b uint8, dirtyalloc unsafe.Pointer) (buckets un
 		// Add on the estimated number of overflow buckets
 		// required to insert the median number of elements
 		// used with this value of b.
-		nbuckets += bucketShift(b - 4)  // loadfactor=6.5，当快满的时候，overflow=20.90%
+		nbuckets += bucketShift(b - 4) // loadfactor=6.5，当快满的时候，overflow=20.90%
 		sz := t.bucket.size * nbuckets
 		up := roundupsize(sz)
 		if up != sz {
@@ -660,6 +660,7 @@ bucketloop:
 
 	// If we hit the max load factor or we have too many overflow buckets,
 	// and we're not already in the middle of growing, start growing.
+	// 全部bucket都移动完成之后才能进行下一次扩容
 	if !h.growing() && (overLoadFactor(h.count+1, h.B) || tooManyOverflowBuckets(h.noverflow, h.B)) {
 		hashGrow(t, h)
 		goto again // Growing the table invalidates everything, so try again
@@ -1208,6 +1209,9 @@ func evacuate(t *maptype, h *hmap, oldbucket uintptr) {
 						// after multiple grows.
 						useY = top & 1
 						top = tophash(hash)
+						// 因为每次hash都不一样，对于map[k]来说没区别，反正也找不到正确的bucket
+						// 但是对于iterator来说，要求用确定性的算法决定选x还是y，这里用最低位bit来确
+						// 定
 					} else {
 						if hash&newbit != 0 {
 							useY = 1
@@ -1268,6 +1272,7 @@ func advanceEvacuationMark(h *hmap, t *maptype, newbit uintptr) {
 	h.nevacuate++
 	// Experiments suggest that 1024 is overkill by at least an order of magnitude.
 	// Put it in there as a safeguard anyway, to ensure O(1) behavior.
+	// 最多只检查1024个，避免特殊情况下，最多检查所有bucket
 	stop := h.nevacuate + 1024
 	if stop > newbit {
 		stop = newbit
