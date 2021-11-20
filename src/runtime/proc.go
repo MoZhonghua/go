@@ -686,7 +686,7 @@ func schedinit() {
 
 	// raceinit must be the first call to race detector.
 	// In particular, it must be done before mallocinit below calls racemapshadow.
-	_g_ := getg() // 汇编中设置，就是g0
+	_g_ := getg() // 汇编中设置，就是g0, 相当于在systemstack()中调用
 	if raceenabled {
 		_g_.racectx, raceprocctx0 = raceinit()
 	}
@@ -718,7 +718,7 @@ func schedinit() {
 	goargs()
 	goenvs()
 	parsedebugvars()
-	gcinit()
+	gcinit() // 在runtime.main中调用gcenable()才真正启动GC
 
 	lock(&sched.lock)
 	sched.lastpoll = uint64(nanotime())
