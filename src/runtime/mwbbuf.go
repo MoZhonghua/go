@@ -84,6 +84,7 @@ func (b *wbBuf) reset() {
 	if writeBarrier.cgo {
 		// Effectively disable the buffer by forcing a flush
 		// on every barrier.
+		// cgoCheck是在wbBufFlush中执行的，我们希望写入时马上检查，而不是到flush时再检查
 		b.end = uintptr(unsafe.Pointer(&b.buf[wbBufEntryPointers]))
 	} else if testSmallBuf {
 		// For testing, allow two barriers in the buffer. If
@@ -142,7 +143,7 @@ func (b *wbBuf) empty() bool {
 //
 //go:nowritebarrierrec
 //go:nosplit
-func (b *wbBuf) putFast(old, new uintptr) bool {
+func (b *wbBuf) putFast(old, new uintptr) bool { // 永远都是成功写入，返回值是强制要求flush
 	p := (*[2]uintptr)(unsafe.Pointer(b.next))
 	p[0] = old
 	p[1] = new

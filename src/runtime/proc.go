@@ -727,6 +727,7 @@ func schedinit() {
 		procs = n
 	}
 	if procresize(procs) != nil {
+		// P都是新创建的，p.runq都是空，因此不应该返回任何可以执行的P
 		throw("unknown runnable goroutine during bootstrap")
 	}
 	unlock(&sched.lock)
