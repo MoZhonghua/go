@@ -767,7 +767,8 @@ type consistentHeapStats struct {
 	// of 2: one is for the writers, one contains the most recent
 	// data, and the last one is clear so writers can begin writing
 	// to it the moment gen is updated.
-	// TODO(mzh): 2 is enough
+	// 需要保留最近一次reader返回的数据，因此需要3个。但是实际可以单独
+	// 存储，没必要放在这个数组里。注意：返回的是从程序开始一直累加的数据
 	stats [3]heapStatsDelta
 
 	// gen represents the current index into which writers
