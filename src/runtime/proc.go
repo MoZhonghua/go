@@ -201,6 +201,9 @@ func main() {
 		inittrace.active = true
 	}
 
+	// 调用init()函数，按照package的依赖关系顺序调用，因为不允许循环引用，总是可以
+	// 找到一个合适的顺序调用所有的init()函数
+	// 调用的runtime本身的
 	doInit(&runtime_inittask) // Must be before defer.
 
 	// Defer unlock so that runtime.Goexit during init does the unlock too.
@@ -235,6 +238,7 @@ func main() {
 		cgocall(_cgo_notify_runtime_init_done, nil)
 	}
 
+	// 调用的用户代码的所有init
 	doInit(&main_inittask)
 
 	// Disable init tracing after main init done to avoid overhead
@@ -308,6 +312,7 @@ func forcegchelper() {
 		if debug.gctrace > 0 {
 			println("GC forced")
 		}
+		// 会阻塞等待一次完整GC完成，因此不能在sysmon中直接调用
 		// Time-triggered, fully concurrent.
 		gcStart(gcTrigger{kind: gcTriggerTime, now: nanotime()})
 	}
@@ -343,6 +348,12 @@ func goschedguarded() {
 // readied. If unlockf returns false, it must guarantee that the G cannot be
 // externally readied.
 //
+// 因为park_m会把gp状态改为waiting，但是其他goroutine可能会决定再次唤醒gp并运行，此时如果直接传
+// 入closure，closure会被无效化。
+//
+// 正常的go代码没有这个问题，因为call(callback)一定会在callback执行完，call才会返回。这里是
+// park_m还没执行完，mcall就返回(实际是longjmp过来)
+//
 // Reason explains why the goroutine has been parked. It is displayed in stack
 // traces and heap dumps. Reasons should be unique and descriptive. Do not
 // re-use reasons, add new ones.
@@ -356,12 +367,8 @@ func gopark(unlockf func(*g, unsafe.Pointer) bool, lock unsafe.Pointer, reason w
 	if status != _Grunning && status != _Gscanrunning {
 		throw("gopark: bad g status")
 	}
+
 	// out of bound 参数，给park_m使用
-	// 因为park_m会把gp状态改为waiting，但是其他goroutine可能会决定再次唤醒gp并运行，此时如果直接传
-	// 入closure，closure会被无效化。
-	//
-	// 正常的go代码没有这个问题，因为call(callback)一定会在callback执行完，call才会返回。这里是
-	// park_m还没执行完，mcall就返回(实际是longjmp过来)
 	mp.waitlock = lock
 	mp.waitunlockf = unlockf
 	gp.waitreason = reason
@@ -388,7 +395,7 @@ func goready(gp *g, traceskip int) {
 func acquireSudog() *sudog {
 	// Delicate dance: the semaphore implementation calls
 	// acquireSudog, acquireSudog calls new(sudog),
-	// new calls malloc, malloc can call the garbage collector,
+	// new calls malloc, malloc can call the garbage collector,  (where malloc calls gc?)
 	// and the garbage collector calls the semaphore implementation
 	// in stopTheWorld.
 	// Break the cycle by doing acquirem/releasem around new(sudog).
@@ -572,11 +579,6 @@ func atomicAllG() (**g, uintptr) {
 	return ptr, length
 }
 
-// atomicAllGIndex returns ptr[i] with the allgptr returned from atomicAllG.
-func atomicAllGIndex(ptr **g, i uintptr) *g {
-	return *(**g)(add(unsafe.Pointer(ptr), i*sys.PtrSize))
-}
-
 // forEachG calls fn on every G from allgs.
 //
 // forEachG takes a lock to exclude concurrent addition of new Gs.
@@ -595,7 +597,7 @@ func forEachG(fn func(gp *g)) {
 func forEachGRace(fn func(gp *g)) {
 	ptr, length := atomicAllG()
 	for i := uintptr(0); i < length; i++ {
-		gp := atomicAllGIndex(ptr, i)
+		gp := *(**g)(add(unsafe.Pointer(ptr), i*sys.PtrSize))
 		fn(gp)
 	}
 	return
