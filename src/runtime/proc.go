@@ -738,6 +738,10 @@ func schedinit() {
 	// For cgocheck > 1, we turn on the write barrier at all times
 	// and check all pointer writes. We can't do this until after
 	// procresize because the write barrier needs a P.
+	// debug.cgocheck:
+	// 0: 不检查
+	// 1: cgocall/cgocallback调用点检查
+	// 2: 总是开启wb，每次写入指针时检查
 	if debug.cgocheck > 1 {
 		// cgo =true 会导致
 		// 1. wb永远开启
