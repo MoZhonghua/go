@@ -300,6 +300,9 @@ type dbgVar struct {
 // existing int var for that value, which may
 // already have an initial value.
 var debug struct {
+	// 0: 不检查
+	// 1: cgocall/cgocallback调用点检查
+	// 2: 总是开启wb，每次写入指针时检查
 	cgocheck           int32
 	clobberfree        int32
 	efence             int32

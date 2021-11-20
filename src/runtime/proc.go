@@ -739,6 +739,9 @@ func schedinit() {
 	// and check all pointer writes. We can't do this until after
 	// procresize because the write barrier needs a P.
 	if debug.cgocheck > 1 {
+		// cgo =true 会导致
+		// 1. wb永远开启
+		// 2. wbbuf容量为1，每次写入后马上flush，执行cgoCheck
 		writeBarrier.cgo = true
 		writeBarrier.enabled = true
 		for _, p := range allp {
