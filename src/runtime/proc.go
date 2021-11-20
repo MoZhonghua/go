@@ -826,7 +826,7 @@ func mcommoninit(mp *m, id int64) {
 		mp.fastrand[1] = 1
 	}
 
-	mpreinit(mp)
+	mpreinit(mp) // alloc signalg
 	if mp.gsignal != nil {
 		mp.gsignal.stackguard1 = mp.gsignal.stack.lo + _StackGuard
 	}
@@ -887,6 +887,8 @@ var freezing uint32
 // Similar to stopTheWorld but best-effort and can be called several times.
 // There is no reverse operation, used during crashing.
 // This function must not lock any mutexes.
+// panic，且没有recover，不希望等待太久，尽力stw，但是不保证
+// 打印trace之后直接exit，没有stw也问题不大
 func freezetheworld() {
 	atomic.Store(&freezing, 1)
 	// stopwait and preemption requests can be lost
@@ -947,6 +949,7 @@ func casfrom_Gscanstatus(gp *g, oldval, newval uint32) {
 
 // This will return false if the gp is not in the expected status and the cas fails.
 // This acts like a lock acquire while the casfromgstatus acts like a lock release.
+// 加上_Gscan之后其他人就不能通过casgstatus()切换goroutine的状态，会一直spin，相当于加锁
 func castogscanstatus(gp *g, oldval, newval uint32) bool {
 	switch oldval {
 	case _Grunnable,
@@ -1015,6 +1018,10 @@ func casgstatus(gp *g, oldval, newval uint32) {
 		gp.trackingSeq++
 	}
 	if gp.tracking {
+		// g: runnable ... waiting ... runnable ... running
+		//    [ t1       ]             [t2        ]
+		// runnableTime是处于runnable状态时间的总和，也就是t1+t2
+		// sched.timeToRun: 是从上次runnable到running的时间，即t2
 		now := nanotime()
 		if oldval == _Grunnable {
 			// We transitioned out of runnable, so measure how much
@@ -1073,6 +1080,7 @@ func casGToPreemptScan(gp *g, old, new uint32) {
 // _Gwaiting. If successful, the caller is responsible for
 // re-scheduling gp.
 func casGFromPreempted(gp *g, old, new uint32) bool {
+	// old，new实际是固定值，要求传入是为了保证调用这个函数时的状态正确
 	if old != _Gpreempted || new != _Gwaiting {
 		throw("bad g transition")
 	}
@@ -1094,6 +1102,8 @@ func casGFromPreempted(gp *g, old, new uint32) bool {
 // in panic or being exited, this may not reliably stop all
 // goroutines.
 func stopTheWorld(reason string) {
+	// 可能不能马上取得， 切换到waiting，在semaRoot等待列表中
+	// 不影响获取了worldsema的g完成STW。或者说更好，因为不用不用抢占这个g
 	semacquire(&worldsema)
 	gp := getg()
 	gp.m.preemptoff = reason
@@ -2454,6 +2464,8 @@ func mspinning() {
 // comment on acquirem below.
 //
 // Must not have write barriers because this may be called without a P.
+// 每个m都是OS线程，只能是通过mPark()，然后等待在m.park
+// stopm() -> { mput(m), mPark() }
 //go:nowritebarrierrec
 func startm(_p_ *p, spinning bool) {
 	// Disable preemption.
@@ -2610,12 +2622,14 @@ func wakep() {
 	if atomic.Load(&sched.nmspinning) != 0 || !atomic.Cas(&sched.nmspinning, 0, 1) {
 		return
 	}
+	// mstart是每个m的入口函数
+	// startm从等待的m列表中唤醒一个m，如果没有则新启动一个m
 	startm(nil, true)
 }
 
 // Stops execution of the current m that is locked to a g until the g is runnable again.
 // Returns with acquired P.
-func stoplockedm() {
+func stoplockedm() { //这个线程会被阻塞
 	_g_ := getg()
 
 	if _g_.m.lockedg == 0 || _g_.m.lockedg.ptr().lockedm.ptr() != _g_.m {
