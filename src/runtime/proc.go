@@ -1101,11 +1101,18 @@ func casGFromPreempted(gp *g, old, new uint32) bool {
 // This is also used by routines that do stack dumps. If the system is
 // in panic or being exited, this may not reliably stop all
 // goroutines.
+// 两个sema:
+//  1. worldsema： 只在STW中保持
+//  2. gcsema：在整个GC mark阶段都保持, 保证不能和mark阶段并发的操作不触发
+//  da21cfdda764
 func stopTheWorld(reason string) {
 	// 可能不能马上取得， 切换到waiting，在semaRoot等待列表中
 	// 不影响获取了worldsema的g完成STW。或者说更好，因为不用不用抢占这个g
 	semacquire(&worldsema)
 	gp := getg()
+
+	// func canPreemptM(mp *m); newstack()/sighandler()中检查
+	// 	 mp.locks == 0 && mp.mallocing == 0 && mp.preemptoff == "" && mp.p.ptr().status == _Prunning
 	gp.m.preemptoff = reason
 	systemstack(func() {
 		// Mark the goroutine which called stopTheWorld preemptible so its
