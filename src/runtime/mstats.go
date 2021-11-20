@@ -767,6 +767,7 @@ type consistentHeapStats struct {
 	// of 2: one is for the writers, one contains the most recent
 	// data, and the last one is clear so writers can begin writing
 	// to it the moment gen is updated.
+	// TODO(mzh): 2 is enough
 	stats [3]heapStatsDelta
 
 	// gen represents the current index into which writers
