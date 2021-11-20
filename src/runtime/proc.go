@@ -143,6 +143,10 @@ var initSigmask sigset
 
 // The main goroutine.
 func main() {
+	// g: 动态创建的g
+	// g.m = &m0
+	// g.m.g0 = &g0: 静态的g0，在rt0_go中设置栈和关联到m0
+
 	g := getg()
 
 	// Racectx of m0->g0 is used only as the parent of the main goroutine.
@@ -656,7 +660,7 @@ func cpuinit() {
 //	call osinit
 //	call schedinit
 //	make & queue new G
-//	call runtime·mstart
+//	call runtime·mstart // 以上这些都是在rt0_go汇编中调用
 //
 // The new G calls runtime·main.
 func schedinit() {
@@ -682,7 +686,7 @@ func schedinit() {
 
 	// raceinit must be the first call to race detector.
 	// In particular, it must be done before mallocinit below calls racemapshadow.
-	_g_ := getg()
+	_g_ := getg() // 汇编中设置，就是g0
 	if raceenabled {
 		_g_.racectx, raceprocctx0 = raceinit()
 	}

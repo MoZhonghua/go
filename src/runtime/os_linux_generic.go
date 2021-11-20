@@ -20,6 +20,8 @@ const (
 // rt_sigprocmask crashes if we get it wrong, so if binaries
 // are running, this is right.
 type sigset [2]uint32
+// 最开始只有uint32, 之后linux增加了实时signal，uint32放不下，增加了一个
+// rt_sigprocmask系统调用。libc会自动使用后者（如果可用）
 
 var sigset_all = sigset{^uint32(0), ^uint32(0)}
 
