@@ -1159,6 +1159,7 @@ func startTheWorld() {
 // stopTheWorldGC has the same effect as stopTheWorld, but blocks
 // until the GC is not running. It also blocks a GC from starting
 // until startTheWorldGC is called.
+// GC is running 指: STW(start mark) -> mark -> STW(mark termination), 不包括之后的sweep过程
 func stopTheWorldGC(reason string) {
 	semacquire(&gcsema)
 	stopTheWorld(reason)
@@ -1203,19 +1204,26 @@ var gcsema uint32 = 1
 // startTheWorldWithSema and stopTheWorldWithSema.
 // Holding worldsema causes any other goroutines invoking
 // stopTheWorld to block.
+// 什么算STW： 所有P都切换到Pgcstop状态
+//  - 所有可以执行的g，需要P的g都在runq里(切换到Pgcstop时加入)
+//  - 不需要P的g不阻塞，继续执行，但是等到需要P时阻塞并加入runq
+//  - 两种情况m都是阻塞在mPark()
 func stopTheWorldWithSema() {
-	_g_ := getg()
+	_g_ := getg() // on systemstack, so g=g.m.g0
 
 	// If we hold a lock, then we won't be able to stop another M
 	// that is blocked trying to acquire the lock.
+	// 只需要考虑spinning的，主要是lock(mutex), 直接切换到Gwaiting的不用考虑
 	if _g_.m.locks > 0 {
 		throw("stopTheWorld: holding locks")
 	}
 
+	// 下面unlock，这之间的代码都是不会block的。会有其他g由于等待sched.lock不能被抢占
+	// 在释放锁之后再抢占和等待
 	lock(&sched.lock)
-	sched.stopwait = gomaxprocs
+	sched.stopwait = gomaxprocs // 修改maxprocs必须STW，不用考虑并发修改的问题
 	atomic.Store(&sched.gcwaiting, 1)
-	preemptall()
+	preemptall() // 遍历P，不是g。向所有p上的g发送抢占请求
 	// stop current P
 	_g_.m.p.ptr().status = _Pgcstop // Pgcstop is only diagnostic.
 	sched.stopwait--
@@ -1229,10 +1237,15 @@ func stopTheWorldWithSema() {
 			}
 			p.syscalltick++
 			sched.stopwait--
+
+			// entersyscall_gcwait会检查sched.gcwaiting，如果是的话会主动切换P到_Pgcstop. 注意执行
+			// syscall的g本身不会停止，还是继续运行。在exitsyscall时需要获取P，如果失败，加入
+			// globrunqput(g)，然后mPark()
 		}
 	}
 	// stop idle P's
 	for {
+		// 因为设置sched.gcwaiting，在pidleput时是: lock, check， put, 主动切换到_Pgcstop，不会死锁
 		p := pidleget()
 		if p == nil {
 			break
@@ -1248,6 +1261,7 @@ func stopTheWorldWithSema() {
 		for {
 			// wait for 100us, then try to re-preempt in case of any races
 			if notetsleep(&sched.stopnote, 100*1000) {
+				// 其他P会主动切换到_Pgcstop，同时sched.stopwait--, 如果为0，则wakeup
 				noteclear(&sched.stopnote)
 				break
 			}
@@ -1380,8 +1394,14 @@ func mstart()
 //go:nosplit
 //go:nowritebarrierrec
 func mstart0() {
+	// m.g0, 在调用前需要设置好TLS/R14; clone()/_cgo_thread_start()里设置
+	// CLONE_SETTLS
 	_g_ := getg()
 
+	// println("mstart0: g.stack.lo = ", hex(_g_.stack.lo), "hi = ", hex(_g_.stack.hi))
+
+	// 如果是通过runtime.clone()创建的线程，使用go分配的栈, 设置了g.stack
+	// 如果是_cgo_thread_start()创建的线程，是有libc来分配栈空间, 在C代码中取了栈大小并设置ts->g->stackhi = size;
 	osStack := _g_.stack.lo == 0
 	if osStack {
 		// Initialize stack bounds from system stack.
@@ -1392,7 +1412,7 @@ func mstart0() {
 		// We set hi to &size, but there are things above
 		// it. The 1024 is supposed to compensate this,
 		// but is somewhat arbitrary.
-		size := _g_.stack.hi
+		size := _g_.stack.hi  // linux下默认为8M
 		if size == 0 {
 			size = 8192 * sys.StackGuardMultiplier
 		}
@@ -1406,6 +1426,7 @@ func mstart0() {
 	// functions, which check stackguard1.
 	_g_.stackguard1 = _g_.stackguard0
 	mstart1()
+	// g0.sched指向这里，退出m时，gogo(&m.g0.sched)
 
 	// Exit this thread.
 	if mStackIsSystemAllocated() {
@@ -1420,8 +1441,8 @@ func mstart0() {
 // The go:noinline is to guarantee the getcallerpc/getcallersp below are safe,
 // so that we can set up g0.sched to return to the call of mstart1 above.
 //go:noinline
-func mstart1() {
-	_g_ := getg()
+func mstart1() {  // 运行在g0，不会被抢占，除非主动调用schedule/gogo/execute
+	_g_ := getg() // g0
 
 	if _g_ != _g_.m.g0 {
 		throw("bad runtime·mstart")
@@ -1437,8 +1458,8 @@ func mstart1() {
 	_g_.sched.pc = getcallerpc()
 	_g_.sched.sp = getcallersp()
 
-	asminit()
-	minit()
+	asminit() // nothing
+	minit() // 设置signalstack，但是没有设置signalmask?
 
 	// Install signal handlers; after minit so that minit can
 	// prepare the thread to be able to handle the signals.
@@ -1446,8 +1467,8 @@ func mstart1() {
 		mstartm0()
 	}
 
-	if fn := _g_.m.mstartfn; fn != nil {
-		fn()
+	if fn := _g_.m.mstartfn; fn != nil { // fn is passed by newm(fn)
+		fn() // 通常是做一些初始化操作，不会调度
 	}
 
 	if _g_.m != &m0 {
@@ -1601,7 +1622,7 @@ found:
 	// return to. Exit the thread directly. exitThread will clear
 	// m.freeWait when it's done with the stack and the m can be
 	// reaped.
-	exitThread(&m.freeWait)
+	exitThread(&m.freeWait) // 当exitThread不再使用stack之后设置m.freeWait=0
 }
 
 // forEachP calls fn(p) for every P p when p reaches a GC safe point.
@@ -1620,10 +1641,10 @@ func forEachP(fn func(*p)) {
 	_p_ := getg().m.p.ptr()
 
 	lock(&sched.lock)
-	if sched.safePointWait != 0 {
+	if sched.safePointWait != 0 { // 必须是串行, 通过要求获取worldsema来保证
 		throw("forEachP: sched.safePointWait != 0")
 	}
-	sched.safePointWait = gomaxprocs - 1
+	sched.safePointWait = gomaxprocs - 1 // -1是自己
 	sched.safePointFn = fn
 
 	// Ask all Ps to run the safe point function.
@@ -1663,7 +1684,7 @@ func forEachP(fn func(*p)) {
 				traceProcStop(p)
 			}
 			p.syscalltick++
-			handoffp(p)
+			handoffp(p) // 会执行safePointFn
 		}
 	}
 
@@ -1804,6 +1825,7 @@ func syscall_runtime_doAllThreadsSyscall(fn func(bool) bool) {
 				if mp.procid == tid {
 					continue
 				}
+				// TODO(mzh): should be done = done && ... ?
 				done = atomic.Load(&mp.mFixup.used) == 0
 			}
 			if done {
@@ -2066,7 +2088,7 @@ func oneNewExtraM() {
 	// The sched.pc will never be returned to, but setting it to
 	// goexit makes clear to the traceback routines where
 	// the goroutine stack ends.
-	mp := allocm(nil, nil, -1)
+	mp := allocm(nil, nil, -1) // 分配好g0和gsinal，以及对应的stack
 	gp := malg(4096)
 	gp.sched.pc = abi.FuncPCABI0(goexit) + sys.PCQuantum
 	gp.sched.sp = gp.stack.hi

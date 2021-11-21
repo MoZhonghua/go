@@ -1106,6 +1106,8 @@ func minitSignalStack() {
 	_g_ := getg()
 	var st stackt
 	sigaltstack(nil, &st)
+	// 仅当iscgo && st.ss_flags&_SS_DISABLE = 0不使用我们自己分配的
+	// gsignal.stack: 说明是C自己分配了stack
 	if st.ss_flags&_SS_DISABLE != 0 || !iscgo {
 		signalstack(&_g_.m.gsignal.stack)
 		_g_.m.newSigstack = true
