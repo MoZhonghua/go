@@ -5128,6 +5128,8 @@ func (pp *p) destroy() {
 // gcworkbufs must not be being modified by either the GC or the write barrier
 // code, so the GC must not be running if the number of Ps actually changes.
 //
+// 只要求在nprocs真正改变时不能处于GC, runtime.GOMAXPROCS()会semacquire(gcsema)保证
+//
 // Returns list of Ps with local work, they need to be scheduled by the caller.
 func procresize(nprocs int32) *p {
 	assertLockHeld(&sched.lock)
@@ -5373,6 +5375,7 @@ func checkdead() {
 		}
 	}
 
+	// 如果有timer或者netpoll，会保证有个M在执行epoll()，因此不是死锁
 	run := mcount() - sched.nmidle - sched.nmidlelocked - sched.nmsys
 	if run > run0 {
 		return
