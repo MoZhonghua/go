@@ -4683,8 +4683,6 @@ func dolockOSThread() {
 	_g_.lockedm.set(_g_.m)
 }
 
-//go:nosplit
-
 // LockOSThread wires the calling goroutine to its current operating system thread.
 // The calling goroutine will always execute in that thread,
 // and no other goroutine will execute in it,
@@ -4699,6 +4697,8 @@ func dolockOSThread() {
 //
 // A goroutine should call LockOSThread before calling OS services or
 // non-Go library functions that depend on per-thread state.
+//
+//go:nosplit
 func LockOSThread() {
 	if atomic.Load(&newmHandoff.haveTemplateThread) == 0 && GOOS != "plan9" {
 		// If we need to start a new thread from the locked
@@ -4737,8 +4737,6 @@ func dounlockOSThread() {
 	_g_.lockedm = 0
 }
 
-//go:nosplit
-
 // UnlockOSThread undoes an earlier call to LockOSThread.
 // If this drops the number of active LockOSThread calls on the
 // calling goroutine to zero, it unwires the calling goroutine from
@@ -4751,6 +4749,7 @@ func dounlockOSThread() {
 // other goroutines, it should not call this function and thus leave
 // the goroutine locked to the OS thread until the goroutine (and
 // hence the thread) exits.
+//go:nosplit
 func UnlockOSThread() {
 	_g_ := getg()
 	if _g_.m.lockedExt == 0 {
@@ -4807,7 +4806,7 @@ func _VDSO()                      { _VDSO() }
 // Called if we receive a SIGPROF signal.
 // Called by the signal handler, may run during STW.
 //go:nowritebarrierrec
-func sigprof(pc, sp, lr uintptr, gp *g, mp *m) {
+func sigprof(pc, sp, lr uintptr, gp *g, mp *m) { // 在sighandler中调用
 	if prof.hz == 0 {
 		return
 	}
@@ -4819,6 +4818,9 @@ func sigprof(pc, sp, lr uintptr, gp *g, mp *m) {
 		return
 	}
 
+	// 因为cpuprof是通过cas来实现lock free。这里变成了spinlock，如果是在
+	// 这些相关spinlock中触发sigprof会导致死锁
+	//
 	// On mips{,le}/arm, 64bit atomics are emulated with spinlocks, in
 	// runtime/internal/atomic. If SIGPROF arrives while the program is inside
 	// the critical section, it creates a deadlock (when writing the sample).
@@ -4906,6 +4908,9 @@ func sigprof(pc, sp, lr uintptr, gp *g, mp *m) {
 	}
 
 	if prof.hz != 0 {
+        // 会加锁atomic.Cas(&prof.signalLock, 0, 1)
+		// 而setcpuprofilerate也会加锁，如果在setcpuprofilerate加锁后触发SIGPROF，这里
+		// 就死锁了。setcpuprofilerate把m.profilehz=0之后再加锁。上面会检查跳过这次signal
 		cpuprof.add(gp, stk[:n])
 	}
 	getg().m.mallocing--
