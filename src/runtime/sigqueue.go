@@ -166,8 +166,9 @@ func signal_recv() uint32 {
 						sigNoteSleep(&sig.note)
 						break Receive
 					}
-					notetsleepg(&sig.note, -1) // 唤醒过程中会执行mDoFixup()和runSafePointFn()
-					// exitsyscall() -> no p(because STW) -> mPark -> mDoFixup
+					notetsleepg(&sig.note, -1)
+					// exitsyscall() -> no p(because STW) -> stopm -> wokeup and mDoFixup
+					//               -> Got P -> peempt -> gcstopm() -> stopm -> wokeup and mDoFixup
 					noteclear(&sig.note)
 
 					// sigReceiving之后有两种可能被唤醒:
