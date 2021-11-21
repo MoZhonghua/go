@@ -70,7 +70,7 @@ const (
 // sigsend delivers a signal from sighandler to the internal signal delivery queue.
 // It reports whether the signal was sent. If not, the caller typically crashes the program.
 // It runs from the signal handler, so it's limited in what it can do.
-func sigsend(s uint32) bool {
+func sigsend(s uint32) bool { // called in sighandler, should not block
 	bit := uint32(1) << uint(s&31)
 	if s >= uint32(32*len(sig.wanted)) {
 		return false
@@ -166,7 +166,8 @@ func signal_recv() uint32 {
 						sigNoteSleep(&sig.note)
 						break Receive
 					}
-					notetsleepg(&sig.note, -1)
+					notetsleepg(&sig.note, -1) // 唤醒过程中会执行mDoFixup()和runSafePointFn()
+					// exitsyscall() -> no p(because STW) -> mPark -> mDoFixup
 					noteclear(&sig.note)
 
 					// sigReceiving之后有两种可能被唤醒:

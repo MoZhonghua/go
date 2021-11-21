@@ -1903,6 +1903,10 @@ type cgothreadstart struct {
 // This function is allowed to have write barriers even if the caller
 // isn't because it borrows _p_.
 //
+// 只要Cgo=1则g0.stack一定是系统分配的，两种情况:
+//   1. go -> c: c运行在g0.stack上，保证兼容性，用c分配的栈
+//   2. 动态库: c -> go 此时线程是C创建的，已经有了栈
+//
 //go:yeswritebarrierrec
 func allocm(_p_ *p, fn func(), id int64) *m { // 直接new(m) + new(g0)
 	_g_ := getg()
@@ -2050,7 +2054,7 @@ func needm() {
 	// scheduling stack is, but we assume there's at least 32 kB,
 	// which is more than enough for us.
 	setg(mp.g0)
-	_g_ := getg()
+	_g_ := getg()  // 注意oneNewExtraM()没有分配systemstack
 	_g_.stack.hi = getcallersp() + 1024
 	_g_.stack.lo = getcallersp() - 32*1024
 	_g_.stackguard0 = _g_.stack.lo + _StackGuard
@@ -2095,7 +2099,7 @@ func oneNewExtraM() {
 	// The sched.pc will never be returned to, but setting it to
 	// goexit makes clear to the traceback routines where
 	// the goroutine stack ends.
-	mp := allocm(nil, nil, -1) // 分配好g0和gsinal，以及对应的stack
+	mp := allocm(nil, nil, -1) // 分配好g0和gsinal，以及对应的stack, (cgo=1不分配栈)
 	gp := malg(4096) // 创建好了curg
 	gp.sched.pc = abi.FuncPCABI0(goexit) + sys.PCQuantum
 	gp.sched.sp = gp.stack.hi
@@ -2134,6 +2138,22 @@ func oneNewExtraM() {
 	extraMCount++
 	unlockextra(mp)
 }
+
+
+// cgocallback流程
+//   c: go_sum(1, 2)
+//   go_sum(): generated c
+//      crosscall2_amd64()
+//   crosscall2_amd64: asm
+//      cgocallback
+//   cgocallback: asm
+//      needm
+//      runtime.cgocallbackg() // 在这里调用exitsyscall(),获取P,以及和GC同步
+//      dropm
+//   runtime.cgocallbackg(): go
+//      _cgoexp_5d9cd12d8e9c_go_sum()
+//   _cgoexp_5d9cd12d8e9c_go_sum: generated go
+//      go_sum(1, 2)  // go
 
 // dropm is called when a cgo callback has called needm but is now
 // done with the callback and returning back into the non-Go thread.
@@ -2269,7 +2289,7 @@ var newmHandoff struct {
 //
 // id is optional pre-allocated m ID. Omit by passing -1.
 //go:nowritebarrierrec
-func newm(fn func(), _p_ *p, id int64) {
+func newm(fn func(), _p_ *p, id int64) { // newm是分配M+创建线程; oneNewExtraM是只创建M，没有线程
 	mp := allocm(_p_, fn, id)
 	mp.doesPark = (_p_ != nil)
 	mp.nextp.set(_p_)
@@ -2434,7 +2454,7 @@ func mDoFixupAndOSYield() {
 // barriers.
 //
 //go:nowritebarrierrec
-func templateThread() {
+func templateThread() { // 这个过程中没有P
 	lock(&sched.lock)
 	sched.nmsys++
 	checkdead()
@@ -2465,7 +2485,7 @@ func templateThread() {
 // Stops execution of the current m until new work is available.
 // Returns with acquired P.
 func stopm() {
-	_g_ := getg()
+	_g_ := getg() // g = m.g0
 
 	if _g_.m.locks != 0 {
 		throw("stopm holding locks")
@@ -6598,4 +6618,8 @@ func doInit(t *initTask) {
 
 		t.state = 2 // initialization done
 	}
+}
+
+func DoAllThreadsSyscall(fn func(bool) bool) {
+	syscall_runtime_doAllThreadsSyscall(fn)
 }
