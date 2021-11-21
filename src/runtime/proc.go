@@ -4471,6 +4471,11 @@ func newproc1(fn *funcval, argp unsafe.Pointer, narg int32, callergp *g, callerp
 		}
 	}
 
+    // 栈布局为<args> <goexit/retaddress>, 假装是这样的调用
+	// fake() {
+	//  fn(args)
+	//  goexit()
+	// }
 	memclrNoHeapPointers(unsafe.Pointer(&newg.sched), unsafe.Sizeof(newg.sched))
 	newg.sched.sp = sp
 	newg.stktopsp = sp
@@ -4534,7 +4539,7 @@ func saveAncestors(callergp *g) *[]ancestorInfo {
 	copy(ancestors[1:], callerAncestors)
 
 	var pcs [_TracebackMaxFrames]uintptr
-	npcs := gcallers(callergp, 0, pcs[:])
+	npcs := gcallers(callergp, 0, pcs[:]) // 此时在systemstack中，curg.sched已经更新指向下一条指令
 	ipcs := make([]uintptr, npcs)
 	copy(ipcs, pcs[:])
 	ancestors[0] = ancestorInfo{
@@ -4558,7 +4563,7 @@ func gfput(_p_ *p, gp *g) {
 	stksize := gp.stack.hi - gp.stack.lo
 
 	if stksize != _FixedStack {
-		// non-standard stack size - free it.
+		// non-standard stack size - free it to cache
 		stackfree(gp.stack)
 		gp.stack.lo = 0
 		gp.stack.hi = 0
