@@ -1468,11 +1468,14 @@ func mstart1() {  // 运行在g0，不会被抢占，除非主动调用schedule/
 	}
 
 	if fn := _g_.m.mstartfn; fn != nil { // fn is passed by newm(fn)
-		fn() // 通常是做一些初始化操作，不会调度
+		// 两种情况:
+		// - 通常是做一些初始化操作，不会阻塞
+		// - runtime内部线程，比如sysmon，死循环，不绑定P
+		fn()
 	}
 
 	if _g_.m != &m0 {
-		acquirep(_g_.m.nextp.ptr())
+		acquirep(_g_.m.nextp.ptr()) // newm已经设置好P
 		_g_.m.nextp = 0
 	}
 	schedule()
@@ -2287,6 +2290,9 @@ var newmHandoff struct {
 // fn needs to be static and not a heap allocated closure.
 // May run with m.p==nil, so write barriers are not allowed.
 //
+// fn, _p_两种组合:
+//   - _p_ == nil, fn是死循环，比如sysmon，fn一定是nowritebarrierrec
+//   - _p_ != nil, fn做简单初始化操作，不阻塞，执行完之后调用schedule()
 // id is optional pre-allocated m ID. Omit by passing -1.
 //go:nowritebarrierrec
 func newm(fn func(), _p_ *p, id int64) { // newm是分配M+创建线程; oneNewExtraM是只创建M，没有线程
@@ -2484,6 +2490,8 @@ func templateThread() { // 这个过程中没有P
 
 // Stops execution of the current m until new work is available.
 // Returns with acquired P.
+// 这里没有longjmp，就是简单的阻塞在notesleep(&m.park)。在wakep()中通过
+// notewakeup()唤醒。stopm() 返回后一定是进行schedule或者直接execute(lockedg)
 func stopm() {
 	_g_ := getg() // g = m.g0
 
@@ -2501,6 +2509,12 @@ func stopm() {
 	mput(_g_.m)
 	unlock(&sched.lock)
 	mPark()
+	// M获取P有多种方式:
+	//  - pidleget() exitsyscallfast_pidle()
+	//  - cas(Psyscall, Prunning) exitsyscallfast()
+	//  - stopm(), 等返回时P已经设置好了
+	// 是由唤醒者分配P，不是M自己因为没有P而阻塞
+	// 等返回时就已经分配到P了
 	acquirep(_g_.m.nextp.ptr())
 	_g_.m.nextp = 0
 }
@@ -2629,7 +2643,7 @@ func handoffp(_p_ *p) {
 	}
 	lock(&sched.lock)
 	if sched.gcwaiting != 0 {
-		_p_.status = _Pgcstop
+		_p_.status = _Pgcstop // 不放入pidle队列中, 但是在allp中，startworld会切换会Prunning
 		sched.stopwait--
 		if sched.stopwait == 0 {
 			notewakeup(&sched.stopnote)
@@ -2875,6 +2889,9 @@ top:
 			atomic.Xadd(&sched.nmspinning, 1)
 		}
 
+		// invariant:
+		// - 只有m.spinning才会调用stealWork
+		// - sched.nspining = count(m.spinning == true); newm会暂时sched.nspining = count+1
 		gp, inheritTime, tnow, w, newWork := stealWork(now)
 		now = tnow
 		if gp != nil {
@@ -2952,6 +2969,7 @@ top:
 	}
 	pidleput(_p_)
 	unlock(&sched.lock)
+	// 这之后的代码都没有P
 
 	// Delicate dance: thread transitions from spinning to non-spinning
 	// state, potentially concurrently with submission of new work. We must
@@ -3565,6 +3583,7 @@ func checkTimers(pp *p, now int64) (rnow, pollUntil int64, ran bool) {
 		for len(pp.timers) > 0 {
 			// Note that runtimer may temporarily unlock
 			// pp.timersLock.
+			// tw == 0 => 执行了第一个timer并且删除或者重新添加到后面(period>0时)
 			if tw := runtimer(pp, now); tw != 0 {
 				if tw > 0 {
 					pollUntil = tw
@@ -3783,7 +3802,7 @@ func goexit0(gp *g) {
 		// Return to mstart, which will release the P and exit
 		// the thread.
 		if GOOS != "plan9" { // See golang.org/issue/22227.
-			gogo(&_g_.m.g0.sched)
+			gogo(&_g_.m.g0.sched) // longjmp，马上执行mexit()
 		} else {
 			// Clear lockedExt on plan9 since we may end up re-using
 			// this thread.
@@ -3915,13 +3934,15 @@ func reentersyscall(pc, sp uintptr) {
 	_g_.m.p = 0
 	atomic.Store(&pp.status, _Psyscall)
 	if sched.gcwaiting != 0 {
-		systemstack(entersyscall_gcwait)
+		systemstack(entersyscall_gcwait) // 单独函数，避免占用太多栈空间
 		save(pc, sp)
 	}
 
 	_g_.m.locks--
 }
 
+// syscall系列函数都是在用户栈中调用，不是在systemstack, 但是都是nosplit
+// 所以如果其中调用大的子函数时还是需要切换systemstack
 // Standard syscall entry used by the go syscall library and normal cgo calls.
 //
 // This is exported via linkname to assembly in the syscall package.
@@ -4348,8 +4369,13 @@ func malg(stacksize int32) *g {
 // untyped arguments in newproc's argument frame. Stack copies won't
 // be able to adjust them and stack splits won't be able to copy them.
 //
+// 都是把go sum(1,2)中的sum(1,2)包装成一个closure(在heap中)，然后传入, 因此siz总是0
+// siz!=0时需要把内容复制到栈上，然后调用fn。closure没有这个步骤，是由自动生成的wrap
+// 函数从DX指向的内容复制到栈，然后调用fn，而不是有newproc来执行这个操作
+//
 //go:nosplit
 func newproc(siz int32, fn *funcval) {
+	println("newproc: siz =", siz)
 	argp := add(unsafe.Pointer(&fn), sys.PtrSize)
 	gp := getg()
 	pc := getcallerpc()
