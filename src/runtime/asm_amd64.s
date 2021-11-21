@@ -237,7 +237,7 @@ DATA	runtime·mainPC+0(SB)/8,$runtime·main<ABIInternal>(SB)
 GLOBL	runtime·mainPC(SB),RODATA,$8
 
 TEXT runtime·breakpoint(SB),NOSPLIT,$0-0
-	BYTE	$0xcc
+	BYTE	$0xcc // int 3; 因为这条int指令只有一个字节。其他int指令不是1字节，不能保证任何地方都能用
 	RET
 
 TEXT runtime·asminit(SB),NOSPLIT,$0-0
