@@ -808,7 +808,7 @@ func mcommoninit(mp *m, id int64) {
 	_g_ := getg()
 
 	// g0 stack won't make sense for user (and is not necessary unwindable).
-	if _g_ != _g_.m.g0 {
+	if _g_ != _g_.m.g0 { // 可以不在systemstack?
 		callers(1, mp.createstack[:])
 	}
 
@@ -833,7 +833,7 @@ func mcommoninit(mp *m, id int64) {
 
 	// Add to allm so garbage collector doesn't free g->m
 	// when it is just in a register or thread-local storage.
-	mp.alllink = allm
+	mp.alllink = allm  // mexit()会从列表中删除
 
 	// NumCgoCall() iterates over allm w/o schedlock,
 	// so we need to publish it safely.
@@ -1825,7 +1825,6 @@ func syscall_runtime_doAllThreadsSyscall(fn func(bool) bool) {
 				if mp.procid == tid {
 					continue
 				}
-				// TODO(mzh): should be done = done && ... ?
 				done = atomic.Load(&mp.mFixup.used) == 0
 			}
 			if done {
@@ -1905,7 +1904,7 @@ type cgothreadstart struct {
 // isn't because it borrows _p_.
 //
 //go:yeswritebarrierrec
-func allocm(_p_ *p, fn func(), id int64) *m {
+func allocm(_p_ *p, fn func(), id int64) *m { // 直接new(m) + new(g0)
 	_g_ := getg()
 	acquirem() // disable GC because it can be called from sysmon
 	if _g_.m.p == 0 {
@@ -1944,7 +1943,7 @@ func allocm(_p_ *p, fn func(), id int64) *m {
 	// In case of cgo or Solaris or illumos or Darwin, pthread_create will make us a stack.
 	// Windows and Plan 9 will layout sched stack on OS stack.
 	if iscgo || mStackIsSystemAllocated() {
-		mp.g0 = malg(-1)
+		mp.g0 = malg(-1)  // g0不在allgs中，会被回收
 	} else {
 		mp.g0 = malg(8192 * sys.StackGuardMultiplier)
 	}
@@ -1961,11 +1960,11 @@ func allocm(_p_ *p, fn func(), id int64) *m {
 // needm is called when a cgo callback happens on a
 // thread without an m (a thread not created by Go).
 // In this case, needm is expected to find an m to use
-// and return with m, g initialized correctly.
+// and return with m, g initialized correctly.  // P是在initarray中初始化?
 // Since m and g are not set now (likely nil, but see below)
 // needm is limited in what routines it can call. In particular
 // it can only call nosplit functions (textflag 7) and cannot
-// do any scheduling that requires an m.
+// do any scheduling that requires an m. // 不能用mutex
 //
 // In order to avoid needing heavy lifting here, we adopt
 // the following strategy: there is a stack of available m's
@@ -1976,6 +1975,10 @@ func allocm(_p_ *p, fn func(), id int64) *m {
 // This serves as a simple spin lock that we can use even
 // without an m. The thread that locks the stack in this way
 // unlocks the stack by storing a valid stack head pointer.
+//
+// ABA: m0 -> m1 => preempt        => cas(head, m0, m1), m2 is lost
+//                  m0 -> m2 -> m1
+// lfstack通过在指针里增加tag来避免ABA问题
 //
 // In order to make sure that there is always an m structure
 // available to be stolen, we maintain the invariant that there
@@ -1993,6 +1996,7 @@ func allocm(_p_ *p, fn func(), id int64) *m {
 // put the m back on the list.
 //go:nosplit
 func needm() {
+	// 运行在C创建的线程上，栈也是C分配的
 	if (iscgo || GOOS == "windows") && !cgoHasExtraM {
 		// Can happen if C/C++ code calls Go from a global ctor.
 		// Can also happen on Windows if a global ctor uses a
@@ -2029,7 +2033,7 @@ func needm() {
 	// after exitsyscall makes sure it is okay to be
 	// running at all (that is, there's no garbage collection
 	// running right now).
-	mp.needextram = mp.schedlink == 0
+	mp.needextram = mp.schedlink == 0  // 不直接newextram()因为此时不能分配内存等
 	extraMCount--
 	unlockextra(mp.schedlink.ptr())
 
@@ -2053,8 +2057,10 @@ func needm() {
 
 	// Initialize this thread to use the m.
 	asminit()
-	minit()
+	minit() // C线程和m绑定了
 
+	// oneNewExtraM()里分配的m，已经分配好curg和g0, gsignal
+	// curg的sched里PC=goexit, SP=curg.stack.hi
 	// mp.curg is now a real goroutine.
 	casgstatus(mp.curg, _Gdead, _Gsyscall)
 	atomic.Xadd(&sched.ngsys, -1)
@@ -2082,6 +2088,7 @@ func newextram() {
 }
 
 // oneNewExtraM allocates an m and puts it on the extra list.
+// 只分配了M，没有创建对应的线程，用在cgocall里，有C线程，但是没有M，绑定M到C线程
 func oneNewExtraM() {
 	// Create extra goroutine locked to extra m.
 	// The goroutine is the context in which the cgo callback will run.
@@ -2089,7 +2096,7 @@ func oneNewExtraM() {
 	// goexit makes clear to the traceback routines where
 	// the goroutine stack ends.
 	mp := allocm(nil, nil, -1) // 分配好g0和gsinal，以及对应的stack
-	gp := malg(4096)
+	gp := malg(4096) // 创建好了curg
 	gp.sched.pc = abi.FuncPCABI0(goexit) + sys.PCQuantum
 	gp.sched.sp = gp.stack.hi
 	gp.sched.sp -= 4 * sys.PtrSize // extra space in case of reads slightly beyond frame

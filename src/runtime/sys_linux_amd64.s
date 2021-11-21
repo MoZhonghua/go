@@ -612,6 +612,8 @@ TEXT runtime·settls(SB),NOSPLIT,$32
 	MOVQ	$0x1002, DI	// ARCH_SET_FS
 	MOVQ	$SYS_arch_prctl, AX
 	SYSCALL
+	// 编译后是CMPQ $-0xfff, AX，两者相反
+	// 按照无符号比较的，因此-1是最大值 => if AX <= $-0xfff { ok }, 也就是返回值不是-N(n<0xfff)
 	CMPQ	AX, $0xfffffffffffff001
 	JLS	2(PC)
 	MOVL	$0xf1, 0xf1  // crash

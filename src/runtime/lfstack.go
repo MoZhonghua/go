@@ -24,7 +24,7 @@ type lfstack uint64
 
 func (head *lfstack) push(node *lfnode) {
 	node.pushcnt++
-	new := lfstackPack(node, node.pushcnt)
+	new := lfstackPack(node, node.pushcnt) // pushcnt解决ABA问题
 	if node1 := lfstackUnpack(new); node1 != node {
 		print("runtime: lfstack.push invalid packing: node=", node, " cnt=", hex(node.pushcnt), " packed=", hex(new), " -> node=", node1, "\n")
 		throw("lfstack.push")
