@@ -12,6 +12,10 @@ import (
 	"unsafe"
 )
 
+// 每个pollDesc(每个fd)只允许一个g读，一个g写。由调用者保证
+// 在../internal/poll/fd_mutex.go中实现，保证读和读串行，写和写串行，但是
+// 读写可以并行
+
 // Integrated network poller (platform-independent part).
 // A particular implementation (epoll/kqueue/port/AIX/Windows)
 // must define the following functions:

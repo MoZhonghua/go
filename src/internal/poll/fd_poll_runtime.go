@@ -41,6 +41,7 @@ func (pd *pollDesc) init(fd *FD) error {
 	if errno != 0 {
 		return errnoErr(syscall.Errno(errno))
 	}
+	// ctx: *runtime.pollDesc
 	pd.runtimeCtx = ctx
 	return nil
 }
@@ -58,6 +59,7 @@ func (pd *pollDesc) evict() {
 	if pd.runtimeCtx == 0 {
 		return
 	}
+	// 设置pollDesc.closing=true, 清理timer, 然后唤醒rg和wg
 	runtime_pollUnblock(pd.runtimeCtx)
 }
 
@@ -143,6 +145,7 @@ func (fd *FD) SetWriteDeadline(t time.Time) error {
 	return setDeadlineImpl(fd, t, 'w')
 }
 
+// 设置pollDesc的timer
 func setDeadlineImpl(fd *FD, t time.Time, mode int) error {
 	var d int64
 	if !t.IsZero() {
