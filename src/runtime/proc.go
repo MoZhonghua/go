@@ -57,6 +57,7 @@ var modinfo string
 //  - 如果找到新任务，则退出spinnging并执行任务
 //  - 如果没有找到新任务，也退出spinning并notesleep(&m.park)
 //  - 处于spinning的M必须有P!
+//  - 只有处于s状态的才会从其他P stealWork
 
 // sched.nspining和实际m.spinning=true的M数量关系:
 // 两者只会短时间不一致，但是马上会一致，修改两个值之间没有阻塞(线程本身可能被OS切换)
@@ -74,6 +75,7 @@ var modinfo string
 //     - wakep()
 //     - handoffp()当没有本地任务时
 //  1. schedule()找到新任务，执行前切换到non-s + wakep
+//     - 只要执行过一次任务就一定是non-s
 //  2. findrunnable()中
 //     - 检查其他P的任务队列前, 切换到non-s, 但是不wakep
 //     - 如果找到任务，切换回s
@@ -2937,6 +2939,7 @@ top:
 			pollUntil = w
 		}
 	}
+	stop:
 
 	// We have nothing to do.
 	//
@@ -3021,7 +3024,7 @@ top:
 	// thread: the system is fully loaded so no spinning threads are required.
 	// Also see "Worker thread parking/unparking" comment at the top of the file.
 	wasSpinning := _g_.m.spinning
-	if _g_.m.spinning {
+	if _g_.m.spinning {  // 需要先nmspinning-1，再重新检查
 		_g_.m.spinning = false
 		if int32(atomic.Xadd(&sched.nmspinning, -1)) < 0 {
 			throw("findrunnable: negative nmspinning")
