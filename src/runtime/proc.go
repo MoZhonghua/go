@@ -2914,6 +2914,11 @@ top:
 	// This is necessary to prevent excessive CPU consumption when
 	// GOMAXPROCS>>1 but the program parallelism is low.
 	procs := uint32(gomaxprocs)
+	// r:running task, s: spinning, i: idle
+	// P = r + i
+	// 2 * s < P - i
+	// 2 * s < r
+	//     s < r/2
 	if _g_.m.spinning || 2*atomic.Load(&sched.nmspinning) < procs-atomic.Load(&sched.npidle) {
 		if !_g_.m.spinning {
 			_g_.m.spinning = true
@@ -2939,7 +2944,6 @@ top:
 			pollUntil = w
 		}
 	}
-	stop:
 
 	// We have nothing to do.
 	//
