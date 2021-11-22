@@ -50,6 +50,35 @@ var modinfo string
 //    unparking as the additional threads will instantly park without discovering
 //    any work to do.
 //
+
+// parking: M在findrunnable循环中主动调用stopm, notesleep(&m.park)
+// unparking: 其他M调用notewake(&m.park)
+// spinning: findrunnable中短暂的状态
+//  - 如果找到新任务，则退出spinnging并执行任务
+//  - 如果没有找到新任务，也退出spinning并notesleep(&m.park)
+//  - 处于spinning的M必须有P!
+
+// sched.nspining和实际m.spinning=true的M数量关系:
+// 两者只会短时间不一致，但是马上会一致，修改两个值之间没有阻塞(线程本身可能被OS切换)
+// sched.nspinng永远>=0
+//   sched.nspinng+1：一定会有一个新M的m.spinning设置为true
+//   m.spinning设置为false, 则sched.nspinning一定会-1
+//
+// 保证当提交新任务时: npidle > 0时，spinning>0。需要考虑检查spinning>0之后，其他
+// M决定退出spinning状态?
+
+// 执行任务的M和spinning的M总数可以大于P，多余的spinning M由于获取不到P，会再次stopm
+
+// M在s和non-s切换点：
+//  0. startm()指定新唤醒M是否s, 之后两个点为s
+//     - wakep()
+//     - handoffp()当没有本地任务时
+//  1. schedule()找到新任务，执行前切换到non-s + wakep
+//  2. findrunnable()中
+//     - 检查其他P的任务队列前, 切换到non-s, 但是不wakep
+//     - 如果找到任务，切换回s
+
+// 这里都是考虑在产生新任务时是否需要唤醒新M，没有任务时spinning的M数应该为0
 // The current approach:
 //
 // This approach applies to three primary sources of potential work: readying a
