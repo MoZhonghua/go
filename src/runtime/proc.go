@@ -2297,7 +2297,7 @@ var newmHandoff struct {
 //go:nowritebarrierrec
 func newm(fn func(), _p_ *p, id int64) { // newm是分配M+创建线程; oneNewExtraM是只创建M，没有线程
 	mp := allocm(_p_, fn, id)
-	mp.doesPark = (_p_ != nil)
+	mp.doesPark = (_p_ != nil) // 有P的就说明是普通的M，之后没有任务或者获取不了P时，会调用stopm()等待在notesleep(&m.park)
 	mp.nextp.set(_p_)
 	mp.sigmask = initSigmask
 	if gp := getg(); gp != nil && gp.m != nil && (gp.m.lockedExt != 0 || gp.m.incgo) && GOOS != "plan9" {
@@ -4103,7 +4103,7 @@ func exitsyscall() {
 	_g_.m.locks--
 
 	// Call the scheduler.
-	mcall(exitsyscall0)
+	mcall(exitsyscall0) // stopm
 
 	// Scheduler returned, so we're allowed to run now.
 	// Delete the syscallsp information that we left for
@@ -4217,6 +4217,8 @@ func exitsyscall0(gp *g) {
 		// committing the release by unlocking sched.lock, otherwise we
 		// could race with another M transitioning gp from unlocked to
 		// locked.
+		// 这里的竞争不是指从locked -> not locked，这个转换只能是当前的M来做
+		// 而是指从not locked -> locked, 这是其他M做的，我们不应该认为是locked
 		locked = gp.lockedm != 0
 	} else if atomic.Load(&sched.sysmonwait) != 0 {
 		atomic.Store(&sched.sysmonwait, 0)
@@ -5825,7 +5827,7 @@ func schedtrace(detailed bool) {
 //
 // This does not stop already running user goroutines, so the caller
 // should first stop the world when disabling user goroutines.
-func schedEnableUser(enable bool) {
+func schedEnableUser(enable bool) { // mgc里使用，用来实现full STW gc，即GC过程中不允许运行用户g
 	lock(&sched.lock)
 	if sched.disable.user == !enable {
 		unlock(&sched.lock)
@@ -6001,7 +6003,7 @@ func (p pMask) clear(id int32) {
 //
 // TODO(prattmic): Additional targeted updates may improve the above cases.
 // e.g., updating the mask when stealing a timer.
-func updateTimerPMask(pp *p) {
+func updateTimerPMask(pp *p) { // timer和P绑定的，但是不是和_Prunning状态绑定，也就是非running P也可以有timer
 	if atomic.Load(&pp.numTimers) > 0 {
 		return
 	}
@@ -6060,6 +6062,8 @@ func pidleget() *p {
 
 // runqempty reports whether _p_ has no Gs on its local run queue.
 // It never returns true spuriously.
+// true  => no task,  确实没有
+// false => has tasks 可能没有
 func runqempty(_p_ *p) bool {
 	// Defend against a race where 1) _p_ has G1 in runqnext but runqhead == runqtail,
 	// 2) runqput on _p_ kicks G1 to the runq, 3) runqget on _p_ empties runqnext.
