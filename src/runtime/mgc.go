@@ -21,7 +21,9 @@
 // Hudson, R., and Moss, J.E.B. Copying Garbage Collection without stopping the world.
 // Concurrency and Computation: Practice and Experience 15(3-5), 2003.
 //
-// 1. GC performs sweep termination.
+// sweep termination就是启动新的GC，只是新GC要求上一轮的sweep全部完成
+//
+// 1. GC performs sweep termination. (start mark)
 //
 //    a. Stop the world. This causes all Ps to reach a GC safe-point.
 //
@@ -73,7 +75,12 @@
 //    setting up sweep state and disabling the write barrier.
 //
 //    b. Start the world. From this point on, newly allocated objects
-//    are white, and allocating sweeps spans before use if necessary.
+//    are white, and allocating sweeps spans before use if necessary. ??
+//    都是白色，怎么区分需要sweep的span？或者说一个span里怎么区分没标记的
+//    和新分配的？
+//    - mark termination阶段把当前所有span都记录下来(如果有需要sweep的对象)
+//    - 分配新对象只能从swept或者新分配的span里分配
+//    - 分配过程中会先从unswept列表里取出span做sweep，然后再分配
 //
 //    c. GC does concurrent sweeping in the background and in response
 //    to allocation. See description below.
@@ -121,7 +128,7 @@
 //
 // In order to prevent long pauses while scanning large objects and to
 // improve parallelism, the garbage collector breaks up scan jobs for
-// objects larger than maxObletBytes into "oblets" of at most
+// objects larger than maxObletBytes(128K) into "oblets" of at most
 // maxObletBytes. When scanning encounters the beginning of a large
 // object, it scans only the first oblet and enqueues the remaining
 // oblets as new scan jobs.
