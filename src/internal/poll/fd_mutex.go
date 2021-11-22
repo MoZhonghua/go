@@ -11,7 +11,7 @@ import "sync/atomic"
 // 每次decref()时，检查如果ref=0且close=1则调用destroy来关闭，semrelease(&fd.csema)
 //   设置close=1之后，ref只会降低(incref返回错误)，当ref=0时可以保证没有人再能访问fd
 
-// 初始值为全0?
+// 初始值为全0: ref=0没关系，只要close=0，就不会调用destroy
 // fdMutex is a specialized synchronization primitive that manages
 // lifetime of an fd and serializes access to Read, Write and Close
 // methods on FD.
