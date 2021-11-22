@@ -41,5 +41,6 @@ proc.go
 2021-11-22
 netpoll.go
 netpoll_epoll.go
+../internal/poll/*
 mgc.go ?
 malloc.go ?
