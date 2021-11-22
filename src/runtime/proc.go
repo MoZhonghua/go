@@ -3540,6 +3540,7 @@ func dropg() {
 	setGNoWB(&_g_.m.curg, nil)
 }
 
+// 这个函数是执行timer的唯一入口，在schedule()和findrunnable()里调用
 // checkTimers runs any timers for the P that are ready.
 // If now is not 0 it is the current time.
 // It returns the passed time or the current time if now was passed as 0.

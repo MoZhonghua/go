@@ -143,6 +143,7 @@ func poll_runtime_isPollServerDescriptor(fd uintptr) bool {
 	return netpollIsPollDescriptor(fd)
 }
 
+// 分配一个pollDesc，同时把fd加到epoll中
 //go:linkname poll_runtime_pollOpen internal/poll.runtime_pollOpen
 func poll_runtime_pollOpen(fd uintptr) (*pollDesc, int) {
 	pd := pollcache.alloc()
@@ -269,7 +270,7 @@ func poll_runtime_pollSetDeadline(pd *pollDesc, d int64, mode int) {
 	if mode == 'w' || mode == 'r'+'w' {
 		pd.wd = d
 	}
-	combo := pd.rd > 0 && pd.rd == pd.wd
+	combo := pd.rd > 0 && pd.rd == pd.wd // 如果读写的超时配置一样，只配置一个timer即可
 	rtf := netpollReadDeadline
 	if combo {
 		rtf = netpollDeadline
@@ -416,7 +417,8 @@ func netpollgoready(gp *g, traceskip int) {
 }
 
 // returns true if IO is ready, or false if timedout or closed
-// waitio - wait only for completed IO, ignore errors
+// waitio - wait only for completed IO, ignore errors：指gopark前是否检查错误，如果waitio=true，不检
+// 查，直接gopark
 func netpollblock(pd *pollDesc, mode int32, waitio bool) bool {
 	gpp := &pd.rg
 	if mode == 'w' {
@@ -452,6 +454,8 @@ func netpollblock(pd *pollDesc, mode int32, waitio bool) bool {
 	return old == pdReady
 }
 
+// return waiting rg, pd.rg = pdReady or nil
+// rg之后会被唤醒，然后rg会检查pd.rg，如果是pdReady说明可以读，否则是因为其他原因，比如读超时
 func netpollunblock(pd *pollDesc, mode int32, ioready bool) *g {
 	gpp := &pd.rg
 	if mode == 'w' {
@@ -481,6 +485,7 @@ func netpollunblock(pd *pollDesc, mode int32, ioready bool) *g {
 	}
 }
 
+// timer里调用
 func netpolldeadlineimpl(pd *pollDesc, seq uintptr, read, write bool) {
 	lock(&pd.lock)
 	// Seq arg is seq when the timer was set.

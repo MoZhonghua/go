@@ -751,6 +751,11 @@ type p struct {
 type schedt struct {
 	// accessed atomically. keep at top to ensure alignment on 32-bit systems.
 	goidgen   uint64
+
+	// 这两个变量保证同时只有一个M在调用netpoll(delay>0)。只在findrunnable()这样调用
+	// 同时其他M如果发现timer的最早时间比pollUntil早，会通过netpollBreak向pipe中发送一个字节唤醒
+	// netpoll的M
+	// netpoll(0)可以多个M调用，不阻塞.
 	lastpoll  uint64 // time of last network poll, 0 if currently polling
 	pollUntil uint64 // time to which current poll is sleeping
 
