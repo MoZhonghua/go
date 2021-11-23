@@ -2,6 +2,17 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+// 各个阶段gcphase转换和取值:
+//  - sweep termination(STW): Gcoff -> Gcmark
+//  - mark: Gcmark
+//    * 会执行并发的termination detection算法来决定什么时候进入mark termination阶段
+//  - mark termination(STW): Gcmark -> Gcmarktermination -> GCoff
+//  - sweep:
+//     * 并发sweep, 当所有span都清理完成后切换到Gcoff
+//     * 因为任务只会单调减少, 终止状态是稳定的, 很容易判断, sweepDrained=1 && sweepers=0
+//     * 在GCoff不表示都清理完, 需要获取startSema, 检查GCoff, 检查清理完成, 都满足才能启动新一轮GC
+//       (gcStart中实现)
+
 // Garbage collector (GC).
 //
 // The GC runs concurrently with mutator threads, is type accurate (aka precise), allows multiple
@@ -176,6 +187,10 @@ func gcinit() {
 
 // Temporary in order to enable register ABI work.
 // TODO(register args): convert back to local chan in gcenabled, passed to "go" stmts.
+// 原来的bgsweep(chan)是接收一个chan参数, 但是在register abi实现中, 会把所有defer/go的函数
+// 打包成closure, 也就是总是在heap上分配, runtime初始化过程中不保证能正常分配.
+// 通过这个全局变量, bgsweep()不需要参数, 也就不需要打包成closure, 避免了这个问题. 以后
+// 需要解决.
 var gcenable_setup chan int
 
 // gcenable is called after the bulk of the runtime initialization,
@@ -193,6 +208,7 @@ func gcenable() {
 	memstats.enablegc = true // now that runtime is initialized, GC is okay
 }
 
+// 32位更加通用, 很多32位CPU不支持64位数据的原子操作,需要通过spinlock模拟
 // Garbage collector phase.
 // Indicates to write barrier and synchronization task to perform.
 var gcphase uint32
@@ -202,16 +218,27 @@ var gcphase uint32
 // If you change the first four bytes, you must also change the write
 // barrier insertion code.
 var writeBarrier struct {
+	// *heapPtr = p 编译为:
+	// if writeBarrier.enabled { call gcWritebarrier(heapPtr, p) }
+	// 因此enabled这个变量的offset必须保持一致
 	enabled bool    // compiler emits a check of this before calling write barrier
 	pad     [3]byte // compiler uses 32-bit load for "enabled" field
-	needed  bool    // whether we need a write barrier for current GC phase
-	cgo     bool    // whether we need a write barrier for a cgo check
-	alignme uint64  // guarantee alignment so that compiler can use a 32 or 64-bit load
+
+	// 在gcWritebarrier()函数里会根据needed和cgo再走不同的流程, 比如非mark阶段needed=false
+	// 这个时候不用shade和加入workbuf
+	needed bool // whether we need a write barrier for current GC phase
+
+	// cgo是初始化时确定, 如果cgocheck=2会为1, 此时所有时间都会触发wb, 同时
+	// wbbuf的大小为1, 每次都flush, flush中会调用cgoCheck..., 检查是否把go的指针写入到C内存中
+	cgo     bool   // whether we need a write barrier for a cgo check
+	alignme uint64 // guarantee alignment so that compiler can use a 32 or 64-bit load
 }
 
 // gcBlackenEnabled is 1 if mutator assists and background mark
 // workers are allowed to blacken objects. This must only be set when
 // gcphase == _GCmark.
+// gcBlackenEnabled=1的时间段是是被包含在gcphase=_GCmark内的, 在开始和结束
+// 阶段gcBlackenEnabled=0?
 var gcBlackenEnabled uint32
 
 const (
@@ -222,6 +249,10 @@ const (
 
 //go:nosplit
 func setGCPhase(x uint32) {
+	old := atomic.Load(&gcphase)
+	if old == x {
+		throw("bad gcphase")
+	}
 	atomic.Store(&gcphase, x)
 	writeBarrier.needed = gcphase == _GCmark || gcphase == _GCmarktermination
 	writeBarrier.enabled = writeBarrier.needed || writeBarrier.cgo
@@ -246,6 +277,9 @@ const (
 	// worker should run without preemption.
 	gcMarkWorkerDedicatedMode
 
+	// gcBackgroundUtilization=0.25: 占用总CPU的25%, 如果0.25 * GOMAXPROCS为整数则
+	// 只有DedicatedMode, 非整数则会有多个P运行在DedicatedMode和一个P运行在FractionalMode
+	// 注意: 定义在P上, gc goroutine本身不区分. 实际两者没区别, 只在P运行gc workers时有有意义
 	// gcMarkWorkerFractionalMode indicates that a P is currently
 	// running the "fractional" mark worker. The fractional worker
 	// is necessary when GOMAXPROCS*gcBackgroundUtilization is not
@@ -275,6 +309,8 @@ var gcMarkWorkerModeStrings = [...]string{
 // pollFractionalWorkerExit reports whether a fractional mark worker
 // should self-preempt. It assumes it is called from the fractional
 // worker.
+// 通过work_time / (now - start) 比例来确定, work_time则是通过每次被调度运行时记录开始
+// 时间, 调度停止时计算本次运行时间, 累加上去
 func pollFractionalWorkerExit() bool {
 	// This should be kept in sync with the fractional worker
 	// scheduler logic in findRunnableGCWorker.
@@ -502,6 +538,11 @@ func gcWaitOnMark(n uint32) {
 		// Wait until sweep termination, mark, and mark
 		// termination of cycle N complete.
 		work.sweepWaiters.list.push(getg())
+
+		// 要先先切换为waiting再解锁. 因此只能由调度器实现, 不能自己实现. sleep了就没法解锁了.
+		// 解决这个race: g1    lock -> check, add to list -> unlock ->                             cas to sleep -> sleep
+		//               g2                                            lock -> setflag, cas to run -> unlock
+		// 会导致g1一直sleep
 		goparkunlock(&work.sweepWaiters.lock, waitReasonWaitForGCCycle, traceEvGoBlock, 1)
 	}
 }
@@ -606,7 +647,7 @@ func gcStart(trigger gcTrigger) {
 	// transition.
 	semacquire(&work.startSema)
 	// Re-check transition condition under transition lock.
-	if !trigger.test() {
+	if !trigger.test() { // !这里会检查gcphase != GCoff
 		semrelease(&work.startSema)
 		return
 	}

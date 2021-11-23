@@ -65,6 +65,9 @@ type mheap struct {
 	lock  mutex
 	pages pageAlloc // page allocation data structure
 
+	// 表示上次GC所有需要清理的span都已经处理,可以开始新的GC, 之前
+	// 是只要sweepDrained=1, 这个优化没啥意义且容易混乱, 已经改成需要
+	// sweepDrained=1 && sweepers=0
 	sweepgen     uint32 // sweep generation, see comment in mspan; written during STW
 	sweepDrained uint32 // all spans are swept or are being swept
 	sweepers     uint32 // number of active sweepone calls
