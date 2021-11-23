@@ -826,6 +826,12 @@ type schedt struct {
 
 	// safepointFn should be called on each P at the next GC
 	// safepoint if p.runSafePointFn is set.
+	// 调用点:
+	//  - pidleput()前
+	//  - schedule()
+	//  - handleoff()
+	//  - findrunnable()
+	//  - reentersyscall()
 	safePointFn   func(*p)
 	safePointWait int32
 	safePointNote note

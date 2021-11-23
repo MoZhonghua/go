@@ -237,14 +237,14 @@ var writeBarrier struct {
 // gcBlackenEnabled is 1 if mutator assists and background mark
 // workers are allowed to blacken objects. This must only be set when
 // gcphase == _GCmark.
-// gcBlackenEnabled=1的时间段是是被包含在gcphase=_GCmark内的, 在开始和结束
-// 阶段gcBlackenEnabled=0?
+// 总是在STW中修改
 var gcBlackenEnabled uint32
 
 const (
 	_GCoff             = iota // GC not running; sweeping in background, write barrier disabled
 	_GCmark                   // GC marking roots and workbufs: allocate black, write barrier ENABLED
 	_GCmarktermination        // GC mark termination: allocate black, P's help GC, write barrier ENABLED
+	// _GCmarktermination和_GCoff基本一样, 唯一的区别是在_GCmarktermination是不允许分配内存mallocgc
 )
 
 //go:nosplit
@@ -363,9 +363,11 @@ var work struct {
 	markrootNext uint32 // next markroot job
 	markrootJobs uint32 // number of markroot jobs
 
-	nproc  uint32
+	nproc  uint32  // 最多启动这么多个后台gcworker? 实际启动了gomaxprocs个
 	tstart int64
-	nwait  uint32
+	nwait  uint32  // 后台gcworker执行扫描任务时-1, 完成时+1
+	// nwait=0: 所有后台gcworker都在进行扫描
+	// nproc=nwait: 没有后台gcworker在进行扫描
 
 	// Number of roots of various root types. Set by gcMarkRootPrepare.
 	nDataRoots, nBSSRoots, nSpanRoots, nStackRoots int
@@ -1096,7 +1098,11 @@ func gcMarkTermination(nextTriggerRatio float64) {
 	// is necessary to sweep all spans, we need to ensure all
 	// mcaches are flushed before we start the next GC cycle.
 	systemstack(func() {
+		// 这个时候已经是在startTheWorld之后, P已经在运行, acquirep()也会
+		// 调用prepareForSweep(), 这里重复调用不影响, flushGen==sweepgen跳过
+		// 重要的是在P执行用户代码(分配内存前)需要把mcache中的span加入到unswept列表中
 		forEachP(func(_p_ *p) {
+			// forEachP在P执行, 不用考虑同步问题
 			_p_.mcache.prepareForSweep()
 		})
 	})
@@ -1214,6 +1220,9 @@ type gcBgMarkWorkerNode struct {
 func gcBgMarkWorker() {
 	gp := getg()
 
+	// 这个函数虽然是在runtime包中不会被异步抢占, 但是运行在用户栈上, 在栈
+	// 增长时可以被抢占, 切换到runnable, 放到runq中.
+
 	// We pass node to a gopark unlock function, so it can't be on
 	// the stack (see gopark). Prevent deadlock from recursively
 	// starting GC by disabling preemption.
@@ -1223,8 +1232,9 @@ func gcBgMarkWorker() {
 
 	node.gp.set(gp)
 
-	node.m.set(acquirem())
+	node.m.set(acquirem()) // m.locks++
 	notewakeup(&work.bgMarkReady)
+
 	// After this point, the background mark worker is generally scheduled
 	// cooperatively by gcController.findRunnableGCWorker. While performing
 	// work on the P, preemption is disabled because we are working on
@@ -1276,6 +1286,7 @@ func gcBgMarkWorker() {
 
 		// Preemption must not occur here, or another G might see
 		// p.gcMarkWorkerMode.
+		// 没有非nonsplit函数调用就没有抢占点
 
 		// Disable preemption so we can use the gcw. If the
 		// scheduler wants to preempt us, we'll stop draining,
@@ -1301,6 +1312,9 @@ func gcBgMarkWorker() {
 			throw("work.nwait was > work.nproc")
 		}
 
+		// 实在系统栈上执行，因此其他人可以正常扫描用户栈。
+		// 普通的用户g不同: 要么是处于停止状态由其他人扫描， 要么是自己扫描自己
+		// 两种情况都没并发运行代码
 		systemstack(func() {
 			// Mark our goroutine preemptible so its stack
 			// can be scanned. This lets two mark workers
@@ -1335,6 +1349,7 @@ func gcBgMarkWorker() {
 			case gcMarkWorkerIdleMode:
 				gcDrain(&pp.gcw, gcDrainIdle|gcDrainUntilPreempt|gcDrainFlushBgCredit)
 			}
+			// 如果有其他人在扫描当前g的栈，此时有_Gscan标记位，casgstatus会阻塞直到扫描完成
 			casgstatus(gp, _Gwaiting, _Grunning)
 		})
 
@@ -1530,6 +1545,14 @@ func gcSweep(mode gcMode) {
 		}
 		// Free workbufs eagerly.
 		prepareFreeWorkbufs()
+
+		/*
+		// TODO(mzh): free mcache
+		for _, p := range allp {
+			// forEachP在P执行, 不用考虑同步问题
+			p.mcache.prepareForSweep()
+		}
+		*/
 		for freeSomeWbufs(false) {
 		}
 		// All "free" events for this mark/sweep cycle have
@@ -1592,7 +1615,7 @@ func sync_runtime_registerPoolCleanup(f func()) {
 	poolcleanup = f
 }
 
-func clearpools() {
+func clearpools() { // gcStart()
 	// clear sync.Pools
 	if poolcleanup != nil {
 		poolcleanup()

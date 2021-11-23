@@ -455,6 +455,18 @@ type mspan struct {
 	// if sweepgen == h->sweepgen + 3, the span was swept and then cached and is still cached
 	// h->sweepgen is incremented by 2 after every GC
 
+	// mt1 = mark termination 1
+	// sg = mheap_.sweepgen
+	// mt1  ->  sweep  ->  gcStart -> mark -> mt2 -> ...   -> mt3
+	// sg-2                                   sg              sg+4
+	//
+	// 在mt1和mt2之间分配span.sweepgen=sg, 这些span需要在mt2和mt3之间清理
+
+	// sweepgen变换过程:
+	//  - mt1和mt2之间allocSpan(): mheap_.sweepgen => sg-2
+	//  - sweepLocker.tryAcquire(span): +1 => sg-1
+	//  - done sweep span: +1 => sg
+	//  - 清理后的span, >= sg, 根据是否进入cache?
 	sweepgen    uint32
 	divMul      uint32        // for divide by elemsize
 	allocCount  uint16        // number of allocated objects
