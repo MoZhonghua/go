@@ -1835,7 +1835,7 @@ func addfinalizer(p unsafe.Pointer, f *funcval, nret uintptr, fint *_type, ot *p
 		if gcphase != _GCoff {
 			base, _, _ := findObject(uintptr(p), 0, 0)
 			mp := acquirem()
-			if gcphase != _GCoff {
+			if gcphase != _GCoff {  // 不会抢占，也就是不会gcphase不会变
 				gcw := &mp.p.ptr().gcw
 				// Mark everything reachable from the object
 				// so it's retained for the finalizer.

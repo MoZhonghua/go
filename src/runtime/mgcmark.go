@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	fixedRootFinalizers = iota
+	fixedRootFinalizers = iota  // 这些位置每个记作1个root
 	fixedRootFreeGStacks
 	fixedRootCount
 
@@ -36,7 +36,7 @@ const (
 	// overhead in the scan loop (the scheduler check may perform
 	// a syscall, so its overhead is nontrivial). Higher values
 	// make the system less responsive to incoming work.
-	drainCheckThreshold = 100000
+	drainCheckThreshold = 100000 //字节数
 
 	// pagesPerSpanRoot indicates how many pages to scan from a span root
 	// at a time. Used by special root marking.
@@ -53,15 +53,15 @@ const (
 // some miscellany) and initializes scanning-related state.
 //
 // The world must be stopped.
-func gcMarkRootPrepare() {
+func gcMarkRootPrepare() {  // gcStart, STW
 	assertWorldStopped()
 
 	// Compute how many data and BSS root blocks there are.
 	nBlocks := func(bytes uintptr) int {
-		return int(divRoundUp(bytes, rootBlockBytes))
+		return int(divRoundUp(bytes, rootBlockBytes)) // 256k
 	}
 
-	work.nDataRoots = 0
+	work.nDataRoots = 0  // 是所有module中最大的一个，不是所有module之和
 	work.nBSSRoots = 0
 
 	// Scan globals.
@@ -93,6 +93,8 @@ func gcMarkRootPrepare() {
 	// is append-only.
 	mheap_.markArenas = mheap_.allArenas[:len(mheap_.allArenas):len(mheap_.allArenas)]
 	work.nSpanRoots = len(mheap_.markArenas) * (pagesPerArena / pagesPerSpanRoot)
+	// pagesPerArena=64M/8K=8K
+	// pagesPerSpanRoot=512: 每个arena划分成16个块，一个块4M
 
 	// Scan stacks.
 	//
@@ -100,12 +102,15 @@ func gcMarkRootPrepare() {
 	// ignore them because they begin life without any roots, so
 	// there's nothing to scan, and any roots they create during
 	// the concurrent phase will be caught by the write barrier.
+	// 新的g不用考虑，刚启动没有任何root，相当于已经扫描完成，通过hybrid barrier，mt
+	// 阶段和其他g一样不用重新扫描。传入的closure中数据是由创建者的wb来保护
 	work.nStackRoots = int(atomic.Loaduintptr(&allglen))
 
 	work.markrootNext = 0
 	work.markrootJobs = uint32(fixedRootCount + work.nDataRoots + work.nBSSRoots + work.nSpanRoots + work.nStackRoots)
 
 	// Calculate base indexes of each root type
+	// 一个假象数组，数据为 [fixedRoots... dataRoots... bssRoots... spanRoots... stackRoots]
 	work.baseData = uint32(fixedRootCount)
 	work.baseBSS = work.baseData + uint32(work.nDataRoots)
 	work.baseSpans = work.baseBSS + uint32(work.nBSSRoots)
@@ -132,7 +137,7 @@ func gcMarkRootCheck() {
 			return
 		}
 
-		if !gp.gcscandone {
+		if !gp.gcscandone {  // reset in gcResetMarkState(), gcStart(), before STW
 			println("gp", gp, "goid", gp.goid,
 				"status", readgstatus(gp),
 				"gcscandone", gp.gcscandone)

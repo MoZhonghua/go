@@ -1582,7 +1582,7 @@ func gcSweep(mode gcMode) {
 // the heap lock. See mheap for details.
 //
 //go:systemstack
-func gcResetMarkState() {
+func gcResetMarkState() {  // gcStart, before STW, 因为之后增加的g和arena不需要reset
 	// This may be called during a concurrent phase, so lock to make sure
 	// allgs doesn't change.
 	forEachG(func(gp *g) {
