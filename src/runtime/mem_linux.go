@@ -176,6 +176,6 @@ func sysMap(v unsafe.Pointer, n uintptr, sysStat *sysMemStat) {
 	}
 
 	if sysStat == &memstats.heap_sys {
-		print("sysMap: p = ", hex(uintptr(p)), ", size = ", n, ", pages = ", n/_PageSize, ", heap_sys: ", sysStat == &memstats.heap_sys, "\n")
+		// print("sysMap: p = ", hex(uintptr(p)), ", size = ", n, ", pages = ", n/_PageSize, ", heap_sys: ", sysStat == &memstats.heap_sys, "\n")
 	}
 }

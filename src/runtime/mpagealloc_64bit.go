@@ -77,7 +77,7 @@ func (p *pageAlloc) sysInit() {
 		// Reserve b bytes of memory anywhere in the address space.
 		b := alignUp(uintptr(entries)*pallocSumBytes, physPageSize)
 		r := sysReserve(nil, b)
-		print("sysReserve: size: ", b, " mapped to: ", r, "\n")
+		// print("sysReserve: size: ", b, " mapped to: ", r, "\n")
  
 		if r == nil {
 			throw("failed to reserve page summary memory")

@@ -1482,10 +1482,10 @@ func (l *linearAlloc) init(base, size uintptr, mapMemory bool) {
 }
 
 func (l *linearAlloc) alloc(size, align uintptr, sysStat *sysMemStat) unsafe.Pointer {
-	print("linearAlloc.alloc: ", l, ", l.next:", l.next, ", l.end: ", l.end, ", size: ", size, "\n")
+	// print("linearAlloc.alloc: ", l, ", l.next:", l.next, ", l.end: ", l.end, ", size: ", size, "\n")
 	p := alignUp(l.next, align)
 	if p+size > l.end {
-		print("  return nil\n")
+		// print("  return nil\n")
 		return nil
 	}
 	l.next = p + size

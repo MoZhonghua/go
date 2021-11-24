@@ -1410,7 +1410,7 @@ func (h *mheap) grow(npage uintptr) bool {
 	h.curArena.base = nBase
 
 	// Transition the space we're going to use from Reserved to Prepared.
-	print("sysMap: mheap.grow: npages = ", npage, ", base = ", hex(v), ", nBase = ", hex(nBase), "\n")
+	// print("sysMap: mheap.grow: npages = ", npage, ", base = ", hex(v), ", nBase = ", hex(nBase), "\n")
 	sysMap(unsafe.Pointer(v), nBase-v, &memstats.heap_sys)
 
 	// The memory just allocated counts as both released
