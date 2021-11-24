@@ -4414,7 +4414,7 @@ func malg(stacksize int32) *g {
 //
 //go:nosplit
 func newproc(siz int32, fn *funcval) {
-	println("newproc: siz =", siz)
+	// println("newproc: siz =", siz)
 	argp := add(unsafe.Pointer(&fn), sys.PtrSize)
 	gp := getg()
 	pc := getcallerpc()
