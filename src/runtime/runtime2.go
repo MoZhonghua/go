@@ -1008,6 +1008,16 @@ type _panic struct {
 	goexit    bool
 }
 
+// amd64/linux 栈布局
+//
+//  [ arg2 ]
+//  [ arg1 ] <- argp
+//  [ ret  ] <- sp just after call
+//  [ bp   ] <- varp: 指向的是top of local variables, *(varp-8)才是取最后一个var
+//  [ var3 ]
+//  [ var2 ]
+//  [ var1 ] <- sp after sub
+
 // stack traces
 type stkframe struct {
 	fn       funcInfo   // function being run
