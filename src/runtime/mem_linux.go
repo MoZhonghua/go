@@ -31,7 +31,7 @@ func sysAlloc(n uintptr, sysStat *sysMemStat) unsafe.Pointer {
 		return nil
 	}
 	sysStat.add(int64(n))
-	print("sysAlloc: p = ", hex(uintptr(p)), ", pages = ", n/_PageSize, "\n")
+	// print("sysAlloc: p = ", hex(uintptr(p)), ", pages = ", n/_PageSize, "\n")
 	return p
 }
 

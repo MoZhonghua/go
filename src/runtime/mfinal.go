@@ -13,6 +13,16 @@ import (
 	"unsafe"
 )
 
+// finalizer在两个地方
+//  - SetFinalizer(p, fn), 添加到span.special列表中
+//    * mark过程中不标记p，但是标记p指向的所有指针
+//    * sweep中，发现p是垃圾， queuefinalizer(), 添加到执行队列中finblock
+//  - finblock中, mark阶段还是要标记，这里要同时标记p和p指向的指针
+//    * 已经执行完的，会从finblock清除
+//    * 清除之后p不被标记, 可以真正释放p
+//
+// 两者都是notinheap，扫描需要注意
+
 // finblock is an array of finalizers to be executed. finblocks are
 // arranged in a linked list for the finalizer queue.
 //
@@ -92,7 +102,7 @@ func queuefinalizer(p unsafe.Pointer, fn *funcval, nret uintptr, fint *_type, ot
 			finc = (*finblock)(persistentalloc(_FinBlockSize, 0, &memstats.gcMiscSys))
 			finc.alllink = allfin
 			allfin = finc
-			if finptrmask[0] == 0 {
+			if finptrmask[0] == 0 { // 没有初始化
 				// Build pointer mask for Finalizer array in block.
 				// Check assumptions made in finalizer1 array above.
 				if (unsafe.Sizeof(finalizer{}) != 5*sys.PtrSize ||

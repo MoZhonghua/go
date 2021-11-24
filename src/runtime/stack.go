@@ -1250,8 +1250,12 @@ func freeStackSpans() {
 	unlock(&stackLarge.lock)
 }
 
+// 栈上的指针分为两类?：
+// - 直接的指针变量，称为locals
+// - 栈上的结构体，称为stackobject
 // getStackMap returns the locals and arguments live pointer maps, and
 // stack object list for frame.
+// TODO(mzh): find out what is stack object
 func getStackMap(frame *stkframe, cache *pcvalueCache, debug bool) (locals, args bitvector, objs []stackObjectRecord) {
 	targetpc := frame.continpc
 	if targetpc == 0 {

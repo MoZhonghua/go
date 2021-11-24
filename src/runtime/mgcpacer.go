@@ -10,10 +10,48 @@ import (
 	"unsafe"
 )
 
+// heapLive: 实时堆大小
+//   - 分配对象时: +对象字节数.
+//     * 为了避免每次alloc更新，选择是在从mcentral取span时加上这个span中未分配的字节数
+//   - MarkTermination: 一次性减去所有dead对象
+//     * 实际mark过程中记录标记过的对象字节数，mt阶段把heapLive直接更新为这个值
+
+// 以下变量都是指实时堆大小:
+//   Hg(n): 第n次GC的heapGoal, 目标是第n次GC的mark完成时正好heapGaol字节
+//   Hm(n): 第n次GC后存活的对象字节数
+//   Ht(n): 第n次GC触发时的字节数
+//   Ha(n): 第n次GC完成时实际的字节数
+
+// 特别注意: Hg(n) = 2 * Hm(n-1)， 但是预计扫描的字节数不是Hg(n)，而是Hm(n-1)
+// 在GC开始后, 如果正好在Hg(n)时结束mark，那么GC过程中:
+//  allocBytes:  Hg(n) - Ht(n)
+//  scanWork:    Hm(n-1)
+//  assistRatio: Hm(n-1) / (Hg(n) - Ht(n))
+
+// 只考虑mark阶段，sweep阶段不需要复杂的pacing机制
+// CPU利用率的问题主要是如何统计P在运行gcworker时的时长，然后除以
+// 总时长(即当前时间-开始时间)
+
+// 每次P开始执行任务(user/gc)时记录开始时间, 切换当前任务时记录结束时间
+// 这段时长就是user/gc占用的CPU时间。计算比例时分母是walltime(cpu time).
+// CPU time and heap time
+//  - cpu time: like standard wall clock time, but passes GOMAXPROCS times faster
+//  - heap time: measured in bytes and moves forward as mutators allocate
+
+// heapGoal作用: 不是指当heapInuse等于heapGoal启动GC，而是需要提前启动GC，当GC到达
+// mark termination阶段时的heapInuse==heapGoal，可以稍微小于heapGoal，但是不要超过
+// 为了达到这个目的需要考虑这些因素:
+// - 提前多少启动GC: trigger growth ratio, 动态调整
+// - GC中使用多少比例的CPU: 目标是保持稳定， 在[gcBackgroundUtilization, gcGoalUtilization]之间
+//    * 中间部分用来分配给assist
+//    * 如果程序没用满剩下的75%，则允许gc超过范围，尽快完成mark
+// - GC过程中用户分配内存的模式: 特别的如果大量malloc, 如何处理?
+// - 如何根据上次的GC的数据进行动态调整
+
 const (
 	// gcGoalUtilization is the goal CPU utilization for
 	// marking as a fraction of GOMAXPROCS.
-	gcGoalUtilization = 0.30
+	gcGoalUtilization = 0.30  // 多核的30%
 
 	// gcBackgroundUtilization is the fixed CPU utilization for background
 	// marking. It must be <= gcGoalUtilization. The difference between
@@ -28,25 +66,26 @@ const (
 	// mutator latency.
 	gcBackgroundUtilization = 0.25
 
+	// slack: 绳索的松弛部分；富余部分，闲置部分
 	// gcCreditSlack is the amount of scan work credit that can
 	// accumulate locally before updating gcController.scanWork and,
 	// optionally, gcController.bgScanCredit. Lower values give a more
 	// accurate assist ratio and make it more likely that assists will
 	// successfully steal background credit. Higher values reduce memory
 	// contention.
-	gcCreditSlack = 2000
+	gcCreditSlack = 2000 // in bytes?
 
 	// gcAssistTimeSlack is the nanoseconds of mutator assist time that
 	// can accumulate on a P before updating gcController.assistTime.
-	gcAssistTimeSlack = 5000
+	gcAssistTimeSlack = 5000 // 5微秒
 
 	// gcOverAssistWork determines how many extra units of scan work a GC
 	// assist does when an assist happens. This amortizes the cost of an
 	// assist by pre-paying for this many bytes of future allocations.
-	gcOverAssistWork = 64 << 10
+	gcOverAssistWork = 64 << 10 // 64k，assist启动时有一个目标，这里是可以超过这个目标的最大值
 
 	// defaultHeapMinimum is the value of heapMinimum for GOGC==100.
-	defaultHeapMinimum = 4 << 20
+	defaultHeapMinimum = 4 << 20 // 4M
 )
 
 func init() {
@@ -127,6 +166,10 @@ type gcControllerState struct {
 	// Read and written with the world stopped or with mheap_.lock held.
 	lastHeapGoal uint64
 
+	// span的缓存机制: mallocgc(obj) -> P.mcache.alloc(span) -> mheap_.mcentral.alloc(span)
+	// 只有P.mcache中的span用完了才会从mcentral获取，在这个时候heapLive加上新获取的span里
+	// 没有分配的slot的个数: 假定会全部用完，显然是高估了
+
 	// heapLive is the number of bytes considered live by the GC.
 	// That is: retained by the most recent GC plus allocated
 	// since then. heapLive ≤ memstats.heapAlloc, since heapAlloc includes
@@ -166,6 +209,7 @@ type gcControllerState struct {
 	// GC. After mark termination, heapLive == heapMarked, but
 	// unlike heapLive, heapMarked does not change until the
 	// next mark termination.
+    // 也就是heapLive随着alloc不断增加，然后在mt时一个断崖式下降直接赋值为heapMarked
 	heapMarked uint64
 
 	// scanWork is the total scan work performed this cycle. This

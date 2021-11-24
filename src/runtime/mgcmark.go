@@ -12,8 +12,10 @@ import (
 	"unsafe"
 )
 
+// 所有在heap的对象不用单独指定ptrmask，因为分配对象时在span中记录了ptrmask
+
 const (
-	fixedRootFinalizers = iota  // 这些位置每个记作1个root
+	fixedRootFinalizers = iota // 这些位置每个记作1个root
 	fixedRootFreeGStacks
 	fixedRootCount
 
@@ -53,7 +55,7 @@ const (
 // some miscellany) and initializes scanning-related state.
 //
 // The world must be stopped.
-func gcMarkRootPrepare() {  // gcStart, STW
+func gcMarkRootPrepare() { // gcStart, STW
 	assertWorldStopped()
 
 	// Compute how many data and BSS root blocks there are.
@@ -61,7 +63,7 @@ func gcMarkRootPrepare() {  // gcStart, STW
 		return int(divRoundUp(bytes, rootBlockBytes)) // 256k
 	}
 
-	work.nDataRoots = 0  // 是所有module中最大的一个，不是所有module之和
+	work.nDataRoots = 0 // 是所有module中最大的一个，不是所有module之和
 	work.nBSSRoots = 0
 
 	// Scan globals.
@@ -137,7 +139,7 @@ func gcMarkRootCheck() {
 			return
 		}
 
-		if !gp.gcscandone {  // reset in gcResetMarkState(), gcStart(), before STW
+		if !gp.gcscandone { // reset in gcResetMarkState(), gcStart(), before STW
 			println("gp", gp, "goid", gp.goid,
 				"status", readgstatus(gp),
 				"gcscandone", gp.gcscandone)
@@ -158,11 +160,12 @@ var oneptrmask = [...]uint8{1}
 // nowritebarrier is only advisory here.
 //
 //go:nowritebarrier
-func markroot(gcw *gcWork, i uint32) {
+func markroot(gcw *gcWork, i uint32) { // called in gcDrain/gcDrainN
 	// Note: if you add a case here, please also update heapdump.go:dumproots.
 	switch {
 	case work.baseData <= i && i < work.baseBSS:
 		for _, datap := range activeModules() {
+			// gcdatamask在模块初始化时已经从gcprog转换成bitvector，通过persistentalloc分配的
 			markrootBlock(datap.data, datap.edata-datap.data, datap.gcdatamask.bytedata, gcw, int(i-work.baseData))
 		}
 
@@ -172,6 +175,10 @@ func markroot(gcw *gcWork, i uint32) {
 		}
 
 	case i == fixedRootFinalizers:
+		// finalizer函数入参必须是一个指针类型，出参会分配空间，但是之后直接丢弃。因此finalizer本身
+		// 大小是固定的而且有指针的位置也是固定的，但是finptrmask是运行时动态初始化的
+		// 注意: 是全部的finalizer一起扫描
+		// 在GCmark阶段新增的finalizer会直接扫描一次，可能重复，不影响正确性 addfinalizer()
 		for fb := allfin; fb != nil; fb = fb.alllink {
 			cnt := uintptr(atomic.Load(&fb.cnt))
 			scanblock(uintptr(unsafe.Pointer(&fb.fin[0])), cnt*unsafe.Sizeof(fb.fin[0]), &finptrmask[0], gcw, nil)
@@ -187,6 +194,11 @@ func markroot(gcw *gcWork, i uint32) {
 		markrootSpans(gcw, int(i-work.baseSpans))
 
 	default:
+		// userg: 当前g， scang: 要扫描的g, 关系是固定的，scang一定只会被userg扫描一次
+		// 其他人不会扫描scang，容易死锁但是比较容易debug.
+		//
+		// userg不允许抢占，同时又要抢占scang，非常容易死锁
+		//   - scang可能处于不可抢占状态，且正在抢占userg
 		// the rest is scanning goroutine stacks
 		var gp *g
 		if work.baseStacks <= i && i < work.baseEnd {
@@ -202,7 +214,7 @@ func markroot(gcw *gcWork, i uint32) {
 		// needed only to output in traceback
 		status := readgstatus(gp) // We are not in a scan state
 		if (status == _Gwaiting || status == _Gsyscall) && gp.waitsince == 0 {
-			gp.waitsince = work.tstart
+			gp.waitsince = work.tstart // work.tstart set in gcMark, gcMarkTermination, STW
 		}
 
 		// scanstack must be done on the system stack in case
@@ -212,6 +224,8 @@ func markroot(gcw *gcWork, i uint32) {
 			// _Gwaiting to prevent self-deadlock. It may
 			// already be in _Gwaiting if this is a mark
 			// worker or we're in mark termination.
+			// 有几处代码是先cas(waiting) -> gcDrain() -> cas(running)
+			// 比如gcBgMarkWorker()和gcMarkDone()，两者都不是STW状态
 			userG := getg().m.curg
 			selfScan := gp == userG && readgstatus(userG) == _Grunning
 			if selfScan {
@@ -277,6 +291,7 @@ func markrootBlock(b0, n0 uintptr, ptrmask0 *uint8, gcw *gcWork, shard int) {
 //
 // This does not free stacks of dead Gs cached on Ps, but having a few
 // cached stacks around isn't a problem.
+// 没有gcw参数, 显然是不扫描，而是直接释放
 func markrootFreeGStacks() {
 	// Take list of dead Gs with stacks.
 	lock(&sched.gFree.lock)
@@ -305,6 +320,7 @@ func markrootFreeGStacks() {
 }
 
 // markrootSpans marks roots for one shard of markArenas.
+// shard=4MB, 512page
 //
 //go:nowritebarrier
 func markrootSpans(gcw *gcWork, shard int) {
@@ -322,7 +338,7 @@ func markrootSpans(gcw *gcWork, shard int) {
 	// Find the arena and page index into that arena for this shard.
 	ai := mheap_.markArenas[shard/(pagesPerArena/pagesPerSpanRoot)]
 	ha := mheap_.arenas[ai.l1()][ai.l2()]
-	arenaPage := uint(uintptr(shard) * pagesPerSpanRoot % pagesPerArena)
+	arenaPage := uint(uintptr(shard) * pagesPerSpanRoot % pagesPerArena) // 起始page在当前arena的偏移量
 
 	// Construct slice of bitmap which we'll iterate over.
 	specialsbits := ha.pageSpecials[arenaPage/8:]
@@ -450,6 +466,10 @@ retry:
 
 	// Perform assist work
 	systemstack(func() {
+		// 扩容一定是自己做的，在systemstack不可能
+		// 只能是缩容，因此func()不能修改栈上的变量?
+		// gp和scanWork不是引用，而是直接copy值到closure?
+		// systemstack标记为noescape, 汇编里func()本身就是在栈上的, 有点奇怪
 		gcAssistAlloc1(gp, scanWork)
 		// The user stack may have moved, so this can't touch
 		// anything on it until it returns from systemstack.
@@ -533,6 +553,7 @@ func gcAssistAlloc1(gp *g, scanWork int64) {
 	}
 
 	// gcDrainN requires the caller to be preemptible.
+	// 只是说可以被cas(Gwaiting, Gwaiting|Gscan), 没有主动释放P，且运行在systemstack, 不会被deschedule
 	casgstatus(gp, _Grunning, _Gwaiting)
 	gp.waitreason = waitReasonGCAssistMarking
 
@@ -696,7 +717,7 @@ func gcFlushBgCredit(scanWork int64) {
 //
 //go:nowritebarrier
 //go:systemstack
-func scanstack(gp *g, gcw *gcWork) {
+func scanstack(gp *g, gcw *gcWork) { // 在suspendG()之后调用
 	if readgstatus(gp)&_Gscan == 0 {
 		print("runtime:scanstack: gp=", gp, ", goid=", gp.goid, ", gp->atomicstatus=", hex(readgstatus(gp)), "\n")
 		throw("scanstack - bad status")
@@ -715,10 +736,11 @@ func scanstack(gp *g, gcw *gcWork) {
 		// ok
 	}
 
-	if gp == getg() {
+	if gp == getg() { // getg() = g0
 		throw("can't scan our own stack")
 	}
 
+	// TODO(mzh): why not always ask g to shrink itself at safepoint
 	if isShrinkStackSafe(gp) {
 		// Shrink the stack if not much of it is being used.
 		shrinkstack(gp)
@@ -969,7 +991,7 @@ const (
 // is set.
 //
 // If flags&gcDrainIdle != 0, gcDrain returns when there is other work
-// to do.
+// to do. // other work指runq里的任务
 //
 // If flags&gcDrainFractional != 0, gcDrain self-preempts when
 // pollFractionalWorkerExit() returns true. This implies
@@ -1024,6 +1046,7 @@ func gcDrain(gcw *gcWork, flags gcDrainFlags) {
 
 	// Drain heap marking jobs.
 	// Stop if we're preemptible or if someone wants to STW.
+	// sched.gcwaiting优先级高, 只要因为这个要求抢占，总是主动返回，然后可以在safepoint被deschedule
 	for !(gp.preempt && (preemptible || atomic.Load(&sched.gcwaiting) != 0)) {
 		// Try to keep work available on the global queue. We used to
 		// check if there were waiting workers, but it's better to

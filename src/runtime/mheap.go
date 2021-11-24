@@ -137,6 +137,8 @@ type mheap struct {
 	// This is accessed atomically.
 	reclaimCredit uintptr
 
+	// 这里是包括整个地址空间的映射。下面的allArenas []arenaIdx是
+	// 真正mmap的arena列表。遍历时用allArenas，然后在通过索引值确定arenas[l1][l2]
 	// arenas is the heap arena map. It points to the metadata for
 	// the heap for every arena frame of the entire usable virtual
 	// address space.

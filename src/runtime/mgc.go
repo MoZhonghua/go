@@ -1414,7 +1414,7 @@ func gcMarkWorkAvailable(p *p) bool {
 // gcMark runs the mark (or, for concurrent GC, mark termination)
 // All gcWork caches must be empty.
 // STW is in effect at this point.
-func gcMark(startTime int64) {
+func gcMark(startTime int64) { // called in gcMarkTermination, STW
 	if debug.allocfreetrace > 0 {
 		tracegc()
 	}
