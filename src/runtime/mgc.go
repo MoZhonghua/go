@@ -267,6 +267,15 @@ func setGCPhase(x uint32) {
 // workers and are distinguished by gcMarkWorkerMode.
 type gcMarkWorkerMode int
 
+
+// 总的worker数量是gomaxprocs, gcStart() -> gcBgMarkStartWorkers() -> 如果数量不足则启动更多的
+// 调度策略：
+//  - dedicated和fractional是在检查用户g之前
+//    * 这两个由25%总CPU限制
+//  - idle是在没有找到用户g之后调度
+//    * 这个不考虑CPU限制
+
+
 const (
 	// gcMarkWorkerNotWorker indicates that the next scheduled G is not
 	// starting work and the mode should be ignored.
