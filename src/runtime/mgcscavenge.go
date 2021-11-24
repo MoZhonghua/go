@@ -2,6 +2,15 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+// 在mark termination中：
+//   nextTriggerRatio = gcController.endCycle()
+//   gcController.lastHeapGoal = gcController.heapGoal
+// 	 memstats.last_heap_inuse = memstats.heap_inuse
+//   gcController.commit(nextTriggerRatio) // 计算新的heapGoal
+//   gcPaceScavenger()
+// 也就是说last_xxx指的是刚刚完成mt阶段的GC的数据, 实际都是只用这次mt中计算的数据
+// 和之前的GC没有直接关系
+
 // Scavenging free pages.
 //
 // This file implements scavenging (the release of physical pages backing mapped
@@ -122,6 +131,7 @@ func gcPaceScavenger() {
 		mheap_.scavengeGoal = ^uint64(0)
 		return
 	}
+
 	// Compute our scavenging goal.
 	goalRatio := float64(atomic.Load64(&gcController.heapGoal)) / float64(gcController.lastHeapGoal)
 	retainedGoal := uint64(float64(memstats.last_heap_inuse) * goalRatio)

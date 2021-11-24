@@ -2,6 +2,29 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+// We’ll call variables on the stack that have had their address taken “stack objects”.
+// 如果有指针指向这个so, 则说明是live，否则是dead，此时不应该标记so指向的对象
+// 否则会造成so指向的对象一直不释放
+// so := struct { ptr }
+// p := so
+// p = others  // 到这里，so对象还在栈上，且包含ptr，如果我们扫描栈时标记ptr则会导致ptr不释放
+//
+// 更加迷惑性的是:
+//   p := new(struct { ptr })
+//   p = others
+// 即使是new，逃逸分析后也分配在栈上，等价于上面的情况，但是第一感觉是p=others之后, ptr应该无效
+// 实际却不是
+
+// 需要扫描两次
+// stack object扫描分为两部分:
+//  - 如果后面有直接访问so的语句，正常扫描
+//  - 没有，在扫描其他指针时如果发现了指向so，此时才扫描so
+
+// We need mark in the live ptr bitmaps only those pointers which are live through direct (not via
+// pointer) accesses.
+
+// 逃逸分析: 如果函数创建的变量在函数结束后不会被访问则可以分配在栈上
+
 // Garbage collector: stack objects and stack tracing
 // See the design doc at https://docs.google.com/document/d/1un-Jn47yByHL7I0aVIP_uVCMxjdM5mpelJhiKlIqxkE/edit?usp=sharing
 // Also see issue 22350.

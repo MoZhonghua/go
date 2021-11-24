@@ -169,6 +169,8 @@ type gcControllerState struct {
 	// span的缓存机制: mallocgc(obj) -> P.mcache.alloc(span) -> mheap_.mcentral.alloc(span)
 	// 只有P.mcache中的span用完了才会从mcentral获取，在这个时候heapLive加上新获取的span里
 	// 没有分配的slot的个数: 假定会全部用完，显然是高估了
+	// gcMark()时:
+	// gcController.heapLive = work.bytesMarked
 
 	// heapLive is the number of bytes considered live by the GC.
 	// That is: retained by the most recent GC plus allocated
@@ -203,6 +205,14 @@ type gcControllerState struct {
 	// revise() method.
 	//
 	// Read and written atomically or with the world stopped.
+
+	// 随着alloc递增的:
+	//  - P.mcache释放回mcentral，此时加上span.scanAlloc
+	//     * mark结束后，将mcache全部释放，准备sweep时: 很少
+	//     * alloc过程中，mcache用完了，释放旧的到mcentral, 获取新的，此时加上旧span.scanAlloc
+	//  - gcMark(): mark termination， 和heapLive类似，断崖式下降，相当于减去dead对象对应的部分
+	//    * gcController.heapScan = uint64(gcController.scanWork)
+	//    * 和mark结束后，将mcache全部释放重复计数了，影响不大
 	heapScan uint64
 
 	// heapMarked is the number of bytes marked by the previous
@@ -336,6 +346,10 @@ func (c *gcControllerState) startCycle() {
 	if c.heapGoal < c.heapLive+1024*1024 {
 		c.heapGoal = c.heapLive + 1024*1024
 	}
+	
+
+	// 这里是希望只有dedicated gcworker，向上去整，如果和实际值差太多就
+	// 还是加入fractional gcworker
 
 	// Compute the background mark utilization goal. In general,
 	// this may not come out exactly. We round the number of
@@ -408,6 +422,8 @@ func (c *gcControllerState) startCycle() {
 // It should only be called when gcBlackenEnabled != 0 (because this
 // is when assists are enabled and the necessary statistics are
 // available).
+// 就是根据当前情况重新计算assistRatio: 启动时计算一次，然后在GC进行过程
+// 不断调整，计算原理和启动时计算基本一样
 func (c *gcControllerState) revise() {
 	gcPercent := c.gcPercent
 	if gcPercent < 0 {
@@ -415,9 +431,9 @@ func (c *gcControllerState) revise() {
 		// act like GOGC is huge for the below calculations.
 		gcPercent = 100000
 	}
-	live := atomic.Load64(&c.heapLive)
-	scan := atomic.Load64(&c.heapScan)
-	work := atomic.Loadint64(&c.scanWork)
+	live := atomic.Load64(&c.heapLive)  // 上次gc后存活对象+本次gc分配对象字节数
+	scan := atomic.Load64(&c.heapScan)  // heapLive中可以扫描的部分, 即去掉noscan对象和对象尾部没有指针部分
+	work := atomic.Loadint64(&c.scanWork) // 本次gc已经执行的工作，虚拟值，实际是heap中扫描的字节数
 
 	// Assume we're under the soft goal. Pace GC to complete at
 	// heapGoal assuming the heap is in steady-state.
@@ -432,6 +448,9 @@ func (c *gcControllerState) revise() {
 	//
 	// (This is a float calculation to avoid overflowing on
 	// 100*heapScan.)
+	// 比如gcPercent=100，到gc结束时，有2倍的heapScan，但是实际只有100/(100+100)的
+	// 比例是live，真正需要扫描的。假设是稳定的，那么当前的heapScan也是只有1/2是需要
+	// 扫描的
 	scanWorkExpected := int64(float64(scan) * 100 / float64(100+gcPercent))
 
 	if int64(live) > heapGoal || work > scanWorkExpected {
@@ -490,7 +509,7 @@ func (c *gcControllerState) revise() {
 // endCycle computes the trigger ratio for the next cycle.
 // userForced indicates whether the current GC cycle was forced
 // by the application.
-func (c *gcControllerState) endCycle(userForced bool) float64 {
+func (c *gcControllerState) endCycle(userForced bool) float64 { // 返回nextTriggerRatio
 	if userForced {
 		// Forced GC means this cycle didn't start at the
 		// trigger, so where it finished isn't good
