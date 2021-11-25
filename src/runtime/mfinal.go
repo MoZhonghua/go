@@ -13,6 +13,18 @@ import (
 	"unsafe"
 )
 
+// TODO(mzh): 确定reflectcall如何使用register abi的
+
+// fin(obj)的流程
+//  1. mark结束后: markbit = 0
+//  2. sweep(): 发现markbit = 0, 且有fin
+//     - markbit = 1
+//     - queuefinalizer(): fin.arg = obj
+//  3. 再次GC，此时在finq中，因此markbit = 1
+//  4. runfinq()
+//     - 完成后 fin.arg = nil
+//  5. 再次GC, markbit = 0 且没有fin，回收
+
 // finalizer在两个地方
 //  - SetFinalizer(p, fn), 添加到span.special列表中
 //    * mark过程中不标记p，但是标记p指向的所有指针
@@ -86,6 +98,11 @@ var finalizer1 = [...]byte{
 }
 
 // called by: sweep() -> freespecials() -> queuefinalizer()
+// 只是在sweep过程, 而sweep不完成，不能开始下一次GC，在GC过程这个queue是不会
+// 增加新元素的，可以并发扫描, 比如第一个finblock：
+//   - 扫描前已经执行完，从alllink移除了，这种本来也不用扫描，没关系
+//   - 扫描中同时在执行，也就是多扫描了执行完的fin，也不影响正确性
+// 实际是直接扫描全部finblock，包括执行完的。finblock只分配不删除
 func queuefinalizer(p unsafe.Pointer, fn *funcval, nret uintptr, fint *_type, ot *ptrtype) {
 	if gcphase != _GCoff {
 		// Currently we assume that the finalizer queue won't
@@ -145,7 +162,7 @@ func iterate_finq(callback func(*funcval, unsafe.Pointer, uintptr, *_type, *ptrt
 	}
 }
 
-func wakefing() *g {
+func wakefing() *g { // findrunnable()里调用
 	var res *g
 	lock(&finlock)
 	if fingwait && fingwake {
@@ -180,7 +197,7 @@ func runfinq() {
 	for {
 		lock(&finlock)
 		fb := finq
-		finq = nil
+		finq = nil // 把整个列表取走
 		if fb == nil {
 			gp := getg()
 			fing = gp
@@ -188,6 +205,11 @@ func runfinq() {
 			goparkunlock(&finlock, waitReasonFinalizerWait, traceEvGoBlock, 1)
 			continue
 		}
+
+		// RAX, RBX, RCX, RDI, RSI, R8, R9, R10, R11.
+		// IntArgRegs = 9
+		// const RegabiArgsInt = 1
+		// intArgRegs = abi.IntArgRegs * goexperiment.RegabiArgsInt = 9
 		argRegs = intArgRegs
 		unlock(&finlock)
 		if raceenabled {
@@ -200,6 +222,14 @@ func runfinq() {
 				var regs abi.RegArgs
 				var framesz uintptr
 				if argRegs > 0 {
+					// Register ABI调用栈
+					// [ register args spill space ] :能保证用不上?
+					// [ stack results ] : 必然小于f.nret
+					// [ stack args ] : 此处必为0
+					//
+					// fin函数只能接收一个interface{}参数或者指针参数，最多占用两个寄存器，而所有平台上
+					// 可用寄存器数都大于2，因此所有参数都可以通过寄存器传值
+					//
 					// The args can always be passed in registers if they're
 					// available, because platforms we support always have no
 					// argument registers available, or more than 2.
@@ -227,14 +257,18 @@ func runfinq() {
 				}
 				r := frame
 				if argRegs > 0 {
+					// 参数和返回值放到两个地方了: args在RegArgs对象里，result还是在frame
 					r = unsafe.Pointer(&regs.Ints)
 				} else {
+					// 参数和返回值都在frame
 					// frame is effectively uninitialized
 					// memory. That means we have to clear
 					// it before writing to it to avoid
 					// confusing the write barrier.
 					*(*[2]uintptr)(frame) = [2]uintptr{}
 				}
+
+				// 只能是这三种参数: *struct, interface{}, 接口(比如Reader)
 				switch f.fint.kind & kindMask {
 				case kindPtr:
 					// direct use of pointer
@@ -253,6 +287,8 @@ func runfinq() {
 					throw("bad kind in runfinq")
 				}
 				fingRunning = true
+				// 里面同样通过是否是register abi确定从哪里取参数
+				// 不用传argType，因为是通过fin本身保证会被标记，栈上的参数不扫描也没事
 				reflectcall(nil, unsafe.Pointer(f.fn), frame, uint32(framesz), uint32(framesz), uint32(framesz), &regs)
 				fingRunning = false
 
@@ -292,6 +328,9 @@ func runfinq() {
 // to which obj's type can be assigned, and can have arbitrary ignored return
 // values. If either of these is not true, SetFinalizer may abort the
 // program.
+//
+// 比如A->B, 第一次GC，A dead， A->B，B live，因此只执行fin(A)
+// 之后再次GC，此时B dead，执行fin(B)
 //
 // Finalizers are run in dependency order: if A points at B, both have
 // finalizers, and they are otherwise unreachable, only the finalizer

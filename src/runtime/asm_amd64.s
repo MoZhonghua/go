@@ -559,6 +559,7 @@ TEXT ·unspillArgs<ABIInternal>(SB),NOSPLIT,$0-0
 
 TEXT ·reflectcall(SB), NOSPLIT, $0-48
 	MOVLQZX frameSize+32(FP), CX
+    // 直接jmp，且在调用用于fn前不会被抢占，如果执行用户fn时被抢占，traceback看到的就是等价于直接调用call16(...)
 	DISPATCH(runtime·call16, 16)
 	DISPATCH(runtime·call32, 32)
 	DISPATCH(runtime·call64, 64)

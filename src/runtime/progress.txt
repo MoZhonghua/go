@@ -59,6 +59,7 @@ mgcwork.go
 mgcsweep.go
 mcache.go
 mcentral.go
-mfinal.go ?
+mfinal.go
+stubs.go ? // reflectcall
 mspanset.go ?
 mprof.go ?

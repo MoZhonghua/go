@@ -190,6 +190,18 @@ func asminit()
 func setg(gg *g)
 func breakpoint()
 
+// ...                      <- stackArgs + frameSize
+// [ reg arg2 spill space ]
+// [ reg arg1 spill space ] <- stackArgs + stackArgsSize
+// [ stack ret 2          ]
+// [ stack ret 1          ] <- stackArgs + stackRetOffset
+// [ stack arg 2          ]
+// [ stack arg 1          ] <- stackArgs
+
+// [stackArgsSize,  frameSize     ) : reg args spill space
+// [stackRetOffset, stackArgsSize ) : stack ret
+// [0,              stackRetOffset) : stack args
+
 // reflectcall calls fn with arguments described by stackArgs, stackArgsSize,
 // frameSize, and regArgs.
 //

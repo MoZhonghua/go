@@ -175,9 +175,9 @@ func markroot(gcw *gcWork, i uint32) { // called in gcDrain/gcDrainN
 		}
 
 	case i == fixedRootFinalizers:
+		// 这里是只需要执行的fin列表
 		// finalizer函数入参必须是一个指针类型，出参会分配空间，但是之后直接丢弃。因此finalizer本身
 		// 大小是固定的而且有指针的位置也是固定的，但是finptrmask是运行时动态初始化的
-		// 注意: 是全部的finalizer一起扫描
 		// 在GCmark阶段新增的finalizer会直接扫描一次，可能重复，不影响正确性 addfinalizer()
 		for fb := allfin; fb != nil; fb = fb.alllink {
 			cnt := uintptr(atomic.Load(&fb.cnt))
