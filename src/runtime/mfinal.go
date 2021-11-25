@@ -85,6 +85,7 @@ var finalizer1 = [...]byte{
 	0<<0 | 1<<1 | 1<<2 | 1<<3 | 1<<4 | 0<<5 | 1<<6 | 1<<7,
 }
 
+// called by: sweep() -> freespecials() -> queuefinalizer()
 func queuefinalizer(p unsafe.Pointer, fn *funcval, nret uintptr, fint *_type, ot *ptrtype) {
 	if gcphase != _GCoff {
 		// Currently we assume that the finalizer queue won't

@@ -71,6 +71,9 @@ type gcWork struct {
 	// next.
 	//
 	// Invariant: Both wbuf1 and wbuf2 are nil or neither are.
+	// put/get时总是从wbuf1， 直到这个wbuf满/空了， 则换另外一个
+	// wbuf，如果wbuf2满足条件则优先用wbuf2, 交换这两个变量值。否则
+	// 从全局池里取
 	wbuf1, wbuf2 *workbuf
 
 	// Bytes marked (blackened) on this gcWork. This is aggregated

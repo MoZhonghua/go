@@ -457,18 +457,22 @@ type mspan struct {
 	// if sweepgen == h->sweepgen + 3, the span was swept and then cached and is still cached
 	// h->sweepgen is incremented by 2 after every GC
 
-	// mt1 = mark termination 1
-	// sg = mheap_.sweepgen
-	// mt1  ->  sweep  ->  gcStart -> mark -> mt2 -> ...   -> mt3
-	// sg-2                                   sg              sg+4
+	// span.sweepgen变化:
+	//   - mcentral.cacheSpan(): span.sweengen=mheap_.sweepgen+3
+	//   - mcentral.uncacheSpan(s): case1: 在mt前
+	//       * 此时span.sweengen=mheap_.sweepgen+3
+	//       * 修改为span.sweengen=mheap_.sweepgen
+	//   - mcentral.uncacheSpan(s): case2: 在mt后
+	//       * 此时span.sweengen=mheap_.sweepgen+1, 因为后者已经+2
+	//       * 修改为span.sweengen=mheap_.sweepgen-1, 就是正常sweep流程
+	//   - sweep()
+	//       * 此时span.sweengen=mheap_.sweepgen-2
+	//       * 设置span.sweengen=mheap_.sweepgen-1，加锁
+	//       * 完成后span.sweengen=mheap_.sweepgen, 放到swept队列中
 	//
-	// 在mt1和mt2之间分配span.sweepgen=sg, 这些span需要在mt2和mt3之间清理
-
-	// sweepgen变换过程:
-	//  - mt1和mt2之间allocSpan(): mheap_.sweepgen => sg-2
-	//  - sweepLocker.tryAcquire(span): +1 => sg-1
-	//  - done sweep span: +1 => sg
-	//  - 清理后的span, >= sg, 根据是否进入cache?
+	//   在mcentral的unswept列表中的一定是:
+	//    - mt前: span.sweepgen = mheap_.sweepgen
+	//    - mt后: span.sweepgen = mheap_.sweepgen-2
 	sweepgen    uint32
 	divMul      uint32        // for divide by elemsize
 	allocCount  uint16        // number of allocated objects
@@ -2009,6 +2013,7 @@ func (b *gcBitsArena) tryAlloc(bytes uintptr) *gcBits {
 
 // newMarkBits returns a pointer to 8 byte aligned bytes
 // to be used for a span's mark bits.
+// TODO(mzh): who clear bits?
 func newMarkBits(nelems uintptr) *gcBits {
 	blocksNeeded := uintptr((nelems + 63) / 64)
 	bytesNeeded := blocksNeeded * 8

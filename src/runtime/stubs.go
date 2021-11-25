@@ -56,6 +56,7 @@ func mcall(fn func(*g))
 //
 // 标记为go:systemstack的函数同样会生成检查栈的prolog, 但是检查的是stackguard1，然后调用morestackc，
 // 直接throw
+// TODO(mzh): how systemstack disable preemption
 //
 //go:noescape
 func systemstack(fn func())

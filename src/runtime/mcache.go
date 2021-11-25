@@ -49,6 +49,9 @@ type mcache struct {
 	// was last flushed. If flushGen != mheap_.sweepgen, the spans
 	// in this mcache are stale and need to the flushed so they
 	// can be swept. This is done in acquirep.
+
+	// mark terminatio后要求所有的P上的mcache都把span加入到unswept列表中特别的是mt之后重来没再运行过
+	// 的P（也就是没有acquirep），因此在mt startworld之后通过forAllP执行flush
 	flushGen uint32
 }
 
@@ -85,7 +88,7 @@ func allocmcache() *mcache {
 	var c *mcache
 	systemstack(func() {
 		lock(&mheap_.lock)
-		c = (*mcache)(mheap_.cachealloc.alloc())
+		c = (*mcache)(mheap_.cachealloc.alloc()) // fixalloc, mcache专用
 		c.flushGen = mheap_.sweepgen
 		unlock(&mheap_.lock)
 	})
@@ -152,7 +155,7 @@ func (c *mcache) refill(spc spanClass) {
 	}
 	if s != &emptymspan {
 		// Mark this span as no longer cached.
-		if s.sweepgen != mheap_.sweepgen+3 {
+		if s.sweepgen != mheap_.sweepgen+3 { // mheap_.sweepgen每次mark termination时 +2
 			throw("bad sweepgen in refill")
 		}
 		mheap_.central[spc].mcentral.uncacheSpan(s)
@@ -221,6 +224,7 @@ func (c *mcache) allocLarge(size uintptr, needzero bool, noscan bool) (*mspan, b
 	// Deduct credit for this span allocation and sweep if
 	// necessary. mHeap_Alloc will also sweep npages, so this only
 	// pays the debt down to npage pages.
+    // 如果不够会不断sweepone()直到mheap_.pagesSwept足够大，或者sweep完成
 	deductSweepCredit(npages*_PageSize, npages)
 
 	spc := makeSpanClass(0, noscan)
@@ -251,6 +255,10 @@ func (c *mcache) allocLarge(size uintptr, needzero bool, noscan bool) (*mspan, b
 	return s, isZeroed
 }
 
+// called by:
+//  1. mt -> prepareForSweep()
+//  2. P.destroy() -> freemcache()
+//  3. STW但是不是GC:  updatememstats() -> flushallmcaches() -> flushmcache()
 func (c *mcache) releaseAll() {
 	// Take this opportunity to flush scanAlloc.
 	atomic.Xadd64(&gcController.heapScan, int64(c.scanAlloc))

@@ -56,7 +56,7 @@ type sweepdata struct {
 type sweepClass uint32
 
 const (
-	numSweepClasses            = numSpanClasses * 2
+	numSweepClasses            = numSpanClasses * 2 // 分为 partial 和 full
 	sweepClassDone  sweepClass = sweepClass(^uint32(0))
 )
 
@@ -87,6 +87,7 @@ func (s *sweepClass) clear() {
 // unswept lists for that class, indicated as a boolean
 // (true means "full").
 func (s sweepClass) split() (spc spanClass, full bool) {
+	// 清理时是spc顺序递增, s&1=0是full，说明优先清理full span
 	return spanClass(s >> 1), s&1 == 0
 }
 
@@ -95,7 +96,9 @@ func (s sweepClass) split() (spc spanClass, full bool) {
 // Returns nil if no such span exists.
 func (h *mheap) nextSpanForSweep() *mspan {
 	sg := h.sweepgen
-	for sc := sweep.centralIndex.load(); sc < numSweepClasses; sc++ {
+	// TODO(mzh): don't update sweep.centralIndex if not changed
+	oldSc := sweep.centralIndex.load()
+	for sc := oldSc; sc < numSweepClasses; sc++ {
 		spc, full := sc.split()
 		c := &h.central[spc].mcentral
 		var s *mspan
@@ -104,7 +107,7 @@ func (h *mheap) nextSpanForSweep() *mspan {
 		} else {
 			s = c.partialUnswept(sg).pop()
 		}
-		if s != nil {
+		if s != nil && sc > oldSc {
 			// Write down that we found something so future sweepers
 			// can start from here.
 			sweep.centralIndex.update(sc)
@@ -150,7 +153,12 @@ func finishsweep_m() {
 	// point.
 	wakeScavenger()
 
-	nextMarkBitArenaEpoch()
+	// span设计上是使用数据和markBits/allocBits分离的方案，避免用户代码有问题时
+	// 损坏GC数据。
+	// allocSpan时需要分配markBits/allocBits, sweep之后，allocBits设置为markBits, 同时清空markBits为
+	// 下次GC做准备。这个过程中有很多的alloc/free操作，这里是一个类似arena的优化，重视在每次GC开始前
+	// 统一释放即可
+	nextMarkBitArenaEpoch()  // gcStart() -> finishsweep_m() -> this
 }
 
 func bgsweep() {
@@ -515,6 +523,7 @@ func (sl *sweepLocked) sweep(preserve bool) bool {
 		// Check the first bitmap byte, where we have to be
 		// careful with freeindex.
 		obj := s.freeindex
+		// obj对应的gcmarkBit = 1 && allocBit = 0
 		if (*s.gcmarkBits.bytep(obj / 8)&^*s.allocBits.bytep(obj / 8))>>(obj%8) != 0 {
 			s.reportZombies()
 		}
@@ -527,7 +536,7 @@ func (sl *sweepLocked) sweep(preserve bool) bool {
 	}
 
 	// Count the number of free objects in this span.
-	nalloc := uint16(s.countAlloc())
+	nalloc := uint16(s.countAlloc()) // 用gcmarkBits来计算alloc && live的数量
 	nfreed := s.allocCount - nalloc
 	if nalloc > s.allocCount {
 		// The zombie check above should have caught this in
