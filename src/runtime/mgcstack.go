@@ -17,8 +17,8 @@
 
 // 需要扫描两次
 // stack object扫描分为两部分:
-//  - 如果后面有直接访问so的语句，通过stackptrmask正常扫描
-//  - 在扫描其他指针时如果发现了指向so，再扫描so对象
+//  - static dead/live: 如果后面有直接访问so的语句，通过stackptrmask正常扫描
+//  - mark dead/live: 在扫描其他指针时如果发现了指向so，再扫描so对象
 // 前者会导致so被扫描两次，影响不大
 
 // We need mark in the live ptr bitmaps only those pointers which are live through direct (not via

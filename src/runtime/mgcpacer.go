@@ -10,6 +10,12 @@ import (
 	"unsafe"
 )
 
+// scanned bytes 和 marked bytes 区别
+//  - 扫描需要遍历对象的中所有指针
+//  - 标记只需要设置一个bit位
+// 比如一个 x = [1G]byte 对象，标记的是8 + 1G字节，而扫描指需要8字节, 因此评估
+// mark阶段工作量时不能用heapLive，而是需要用heapScan
+
 // heapLive: 实时堆大小
 //   - 分配对象时: +对象字节数.
 //     * 为了避免每次alloc更新，选择是在从mcentral取span时加上这个span中未分配的字节数
