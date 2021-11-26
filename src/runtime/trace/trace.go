@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+// 在runtime/trace.go定义了各种事件的数据结构
+
 // Package trace contains facilities for programs to generate traces
 // for the Go execution tracer.
 //

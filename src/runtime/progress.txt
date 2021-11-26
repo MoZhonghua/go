@@ -64,5 +64,10 @@ stubs.go
 
 2021-11-26
 mspanset.go
-mprof.go ?
-malloc.go ?
+mprof.go
+malloc.go
+metrics.go
+metrics/*.go
+trace/*.go
+debug/*.go
+pprof/pprof.go ?

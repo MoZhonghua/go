@@ -13,8 +13,6 @@ import (
 	"unsafe"
 )
 
-// TODO(mzh): 确定reflectcall如何使用register abi的
-
 // fin(obj)的流程
 //  1. mark结束后: markbit = 0
 //  2. sweep(): 发现markbit = 0, 且有fin

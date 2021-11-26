@@ -987,6 +987,8 @@ func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
 	// be delayed till preemption is possible; isZeroed tracks that state.
 	isZeroed := true
 	if size <= maxSmallSize {
+		// 最小的class是8字节。这里优化是如果没有指针且小于16字节，打包到一个大的
+		// 对象里_TinySizeClass=2, 16字节。扫描时只要其中任意一个live，则整个16字节对象都存活。
 		if noscan && size < maxTinySize {
 			// Tiny allocator.
 			//
@@ -996,6 +998,7 @@ func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
 			// must be noscan (don't have pointers), this ensures that
 			// the amount of potentially wasted memory is bounded.
 			//
+			// 最小的class是8字节，这里的 2x/4x 都是和直接用8字节class分配对比
 			// Size of the memory block used for combining (maxTinySize) is tunable.
 			// Current setting is 16 bytes, which relates to 2x worst case memory
 			// wastage (when all but one subobjects are unreachable).
@@ -1060,6 +1063,8 @@ func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
 				c.tinyoffset = size
 			}
 			size = maxTinySize
+			// 需要走正常的gcAssist/debug/mProf等等流程，假装分配的大小是maxTinySize, x就是返回结果
+			// 可以看到tiny alloc简化了很多流程，不仅仅是节省内存， alloc性能也有很大提高
 		} else {
 			var sizeclass uint8
 			if size <= smallSizeMax-8 {

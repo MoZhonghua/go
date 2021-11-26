@@ -588,6 +588,9 @@ func (r *MemProfileRecord) Stack() []uintptr {
 // of calling MemProfile directly.
 func MemProfile(p []MemProfileRecord, inuseZero bool) (n int, ok bool) {
 	lock(&proflock)
+	// 两次mProf_NextCycle之间多次mProf_Flush只有第一次有实际效果，后面的
+	// 因为数据已经都重置为0，没实际效果
+	// mProf_NextCycle是在mt && stw时调用，因此不用考虑同步问题
 	// If we're between mProf_NextCycle and mProf_Flush, take care
 	// of flushing to the active profile so we only have to look
 	// at the active profile below.
