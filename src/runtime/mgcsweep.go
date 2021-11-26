@@ -96,7 +96,6 @@ func (s sweepClass) split() (spc spanClass, full bool) {
 // Returns nil if no such span exists.
 func (h *mheap) nextSpanForSweep() *mspan {
 	sg := h.sweepgen
-	// TODO(mzh): don't update sweep.centralIndex if not changed
 	oldSc := sweep.centralIndex.load()
 	for sc := oldSc; sc < numSweepClasses; sc++ {
 		spc, full := sc.split()
@@ -107,7 +106,7 @@ func (h *mheap) nextSpanForSweep() *mspan {
 		} else {
 			s = c.partialUnswept(sg).pop()
 		}
-		if s != nil && sc > oldSc {
+		if s != nil {
 			// Write down that we found something so future sweepers
 			// can start from here.
 			sweep.centralIndex.update(sc)
