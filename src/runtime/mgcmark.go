@@ -1592,24 +1592,3 @@ func gcMarkTinyAllocs() {
 		greyobject(c.tiny, 0, 0, span, gcw, objIndex)
 	}
 }
-
-
-type markdebugdata struct {
-	g   unsafe.Pointer
-	obj uintptr
-}
-
-func (d *markdebugdata) needlog(gp *g) bool {
-	return d.g != nil && d.g == unsafe.Pointer(gp)
-}
-
-var markdebug markdebugdata
-
-func SetMarkDebug(obj uintptr) {
-	markdebug.g = unsafe.Pointer(getg())
-	markdebug.obj = obj
-}
-
-func Getg() unsafe.Pointer {
-	return unsafe.Pointer(getg())
-}

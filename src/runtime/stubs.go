@@ -54,9 +54,13 @@ func mcall(fn func(*g))
 //	})
 //	... use x ...
 //
-// 标记为go:systemstack的函数同样会生成检查栈的prolog, 但是检查的是stackguard1，然后调用morestackc，
+// 禁止抢占:
+// 1. 标记为go:systemstack的函数同样会生成检查栈的prolog, 但是检查的是stackguard1，然后调用morestackc，
 // 直接throw
-// TODO(mzh): how systemstack disable preemption
+//
+// 2. 设置setg(m.g0)
+//   - 异步抢占时是设置m.curg中的抢占字段
+//   - sighandler检查的getg()的标志位，此时为g0/gsignal，认为不需要抢占，异步抢占永远不成功
 //
 //go:noescape
 func systemstack(fn func())
