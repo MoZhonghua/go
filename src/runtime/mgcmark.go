@@ -1603,3 +1603,7 @@ func SetMarkDebug(obj uintptr) {
 	markdebug.g = unsafe.Pointer(getg())
 	markdebug.obj = obj
 }
+
+func Getg() unsafe.Pointer {
+	return unsafe.Pointer(getg())
+}
