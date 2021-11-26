@@ -1555,7 +1555,7 @@ func gcSweep(mode gcMode) {
 		prepareFreeWorkbufs()
 
 		/*
-			// TODO(mzh): free mcache
+			// TODO(mzh): should flush P.mcache before sweeping
 			for _, p := range allp {
 				// forEachP在P执行, 不用考虑同步问题
 				p.mcache.prepareForSweep()
