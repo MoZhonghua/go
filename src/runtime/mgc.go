@@ -523,6 +523,7 @@ func GC() {
 	// another mark termination.
 	mp := acquirem()
 	cycle := atomic.Load(&work.cycles)
+
 	if cycle == n+1 || (gcphase == _GCmark && cycle == n+2) {
 		mProf_PostSweep()
 	}

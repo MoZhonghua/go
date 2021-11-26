@@ -12,6 +12,8 @@ import (
 	"unsafe"
 )
 
+// 内存分配mprof: key = <调用栈stk, size>
+
 // NOTE(rsc): Everything here could use cas if contention became an issue.
 var proflock mutex
 
@@ -113,6 +115,9 @@ type memRecord struct {
 	// We store cycle C here because there's a window between when
 	// C becomes the active cycle and when we've flushed it to
 	// active.
+
+	// 每个mt 和 mt之间总是只会写入2个cycle，多一个是为了可以并发flush
+	// flush是在startTheWorld之后
 	future [3]memRecordCycle
 }
 
@@ -141,7 +146,7 @@ var (
 	mbuckets  *bucket // memory profile buckets
 	bbuckets  *bucket // blocking profile buckets
 	xbuckets  *bucket // mutex profile buckets
-	buckhash  *[179999]*bucket
+	buckhash  *[179999]*bucket  // 1.4M，注意是指针，需要动态分配
 	bucketmem uintptr
 
 	mProf struct {
@@ -156,6 +161,8 @@ var (
 	}
 )
 
+// 必须是3的倍数, 否则不连续。比如依赖uint32本身的wrap，uint32::Max % 3 = 0 和 0 % 3 = 0
+// cycle对应的future下标就不正确了
 const mProfCycleWrap = uint32(len(memRecord{}.future)) * (2 << 24)
 
 // newBucket allocates a bucket with the given type and number of stack entries.
@@ -276,7 +283,7 @@ func eqslice(x, y []uintptr) bool {
 // This is called by mark termination during STW so allocations and
 // frees after the world is started again count towards a new heap
 // profiling cycle.
-func mProf_NextCycle() {
+func mProf_NextCycle() { // mark termination中调用, 然后startTheWorld, mProf_Flush
 	lock(&proflock)
 	// We explicitly wrap mProf.cycle rather than depending on
 	// uint wraparound because the memRecord.future ring does not
@@ -293,7 +300,7 @@ func mProf_NextCycle() {
 // This is called by GC after mark termination starts the world. In
 // contrast with mProf_NextCycle, this is somewhat expensive, but safe
 // to do concurrently.
-func mProf_Flush() {
+func mProf_Flush() { // 这里已经startTheWorld，用3个就是为保证flush前不会写入
 	lock(&proflock)
 	if !mProf.flushed {
 		mProf_FlushLocked()
@@ -337,7 +344,7 @@ func mProf_PostSweep() {
 }
 
 // Called by malloc to record a profiled block.
-func mProf_Malloc(p unsafe.Pointer, size uintptr) {
+func mProf_Malloc(p unsafe.Pointer, size uintptr) { // 分配内存时调用, 不是每次都调用，随机采样
 	var stk [maxStack]uintptr
 	nstk := callers(4, stk[:])
 	lock(&proflock)
@@ -359,7 +366,7 @@ func mProf_Malloc(p unsafe.Pointer, size uintptr) {
 }
 
 // Called when freeing a profiled block.
-func mProf_Free(b *bucket, size uintptr) {
+func mProf_Free(b *bucket, size uintptr) { // sweep时调用，在mspan的special列表中
 	lock(&proflock)
 	c := mProf.cycle
 	mp := b.mp()
@@ -369,6 +376,8 @@ func mProf_Free(b *bucket, size uintptr) {
 	unlock(&proflock)
 }
 
+// 平均阻塞这么多个cpu tick(tsc)记录一次阻塞事件
+// 类似于mprof里的平均每分配多少字节记录一次malloc事件
 var blockprofilerate uint64 // in CPU ticks
 
 // SetBlockProfileRate controls the fraction of goroutine blocking events
@@ -377,6 +386,7 @@ var blockprofilerate uint64 // in CPU ticks
 //
 // To include every blocking event in the profile, pass rate = 1.
 // To turn off profiling entirely, pass rate <= 0.
+// 纳秒和tick换算关系: 1 ns = tickspersecond()/(1000**3) ticks
 func SetBlockProfileRate(rate int) {
 	var r int64
 	if rate <= 0 {
@@ -394,6 +404,12 @@ func SetBlockProfileRate(rate int) {
 	atomic.Store64(&blockprofilerate, uint64(r))
 }
 
+// 一般的模式是:
+// t0 = cputicks()
+// gopark()
+//    releasetime = cputicks()  //这两句是其他goroutine执行
+//    goready()
+// blockevent(releasetime - t0)
 func blockevent(cycles int64, skip int) {
 	if cycles <= 0 {
 		cycles = 1
@@ -427,6 +443,11 @@ func saveblockevent(cycles, rate int64, skip int, which bucketType) {
 	b := stkbucket(which, 0, stk[:nstk], true)
 
 	if which == blockProfile && cycles < rate {
+		// 同一个block点，所有长时间(cycles >= rate)的block总是会记录
+		// 而(cycles < rate)的之后cycles/rate的比例会被记录，这里反向
+		// 补偿回来:
+		//  - count:  1 => count = 1/(cycles/rate) = rate/cycles
+		//  - cycles: cycles => cycles  / (cycles/rate) = rate
 		// Remove sampling bias, see discussion on http://golang.org/cl/299991.
 		b.bp().count += float64(rate) / float64(cycles)
 		b.bp().cycles += rate
@@ -500,7 +521,7 @@ func (r *StackRecord) Stack() []uintptr {
 // memory profiling rate should do so just once, as early as
 // possible in the execution of the program (for example,
 // at the beginning of main).
-var MemProfileRate int = defaultMemProfileRate(512 * 1024)
+var MemProfileRate int = defaultMemProfileRate(512 * 1024) //指平均分配512k内存采样一次malloc
 
 // defaultMemProfileRate returns 0 if disableMemoryProfiling is set.
 // It exists primarily for the godoc rendering of MemProfileRate

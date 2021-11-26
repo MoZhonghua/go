@@ -315,6 +315,9 @@ func send(c *hchan, sg *sudog, ep unsafe.Pointer, unlockf func(), skip int) {
 	gp.param = unsafe.Pointer(sg)
 	sg.success = true
 	if sg.releasetime != 0 {
+		// wait时设置为-1，也就说要求记录释放时间（wakeup时间）
+		// 那边唤醒后会用这个时间减去wait的时间t0，得到阻塞在chan的时间
+		// 不包括wakeup到schedule的时间
 		sg.releasetime = cputicks()
 	}
 	goready(gp, skip+1)
