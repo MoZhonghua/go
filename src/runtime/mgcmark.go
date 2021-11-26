@@ -1594,10 +1594,16 @@ func gcMarkTinyAllocs() {
 }
 
 
-var markdebug struct {
+type markdebugdata struct {
 	g   unsafe.Pointer
 	obj uintptr
 }
+
+func (d *markdebugdata) needlog(gp *g) bool {
+	return d.g != nil && d.g == unsafe.Pointer(gp)
+}
+
+var markdebug markdebugdata
 
 func SetMarkDebug(obj uintptr) {
 	markdebug.g = unsafe.Pointer(getg())

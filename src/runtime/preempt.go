@@ -103,6 +103,9 @@ type suspendGState struct {
 //
 //go:systemstack
 func suspendG(gp *g) suspendGState {
+	if unsafe.Pointer(gp) == markdebug.g {
+		println("suspendG: g =", gp)
+	}
 	if mp := getg().m; mp.curg != nil && readgstatus(mp.curg) == _Grunning {
 		// Since we're on the system stack of this M, the user
 		// G is stuck at an unsafe point. If another goroutine
@@ -229,6 +232,9 @@ func suspendG(gp *g) suspendGState {
 				now := nanotime()
 				if now >= nextPreemptM {
 					nextPreemptM = now + yieldDelay/2
+					if markdebug.g == unsafe.Pointer(gp) {
+						println("preemptM: send signal: gp =", gp)
+					}
 					preemptM(asyncM)
 				}
 			}
