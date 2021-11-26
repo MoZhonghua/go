@@ -2,6 +2,27 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+// locals和args的问题:
+/*
+func x() {
+    v := [2]*int { nil, p }
+ 	y(v)
+}
+
+func y(v [2]*int) { }
+*/
+
+// x的栈空间内有两个[2]*int变量，一个对应v，另外一个对应调用y时复制的参数
+// 可以理解为，函数调用前总是复制所有参数到栈底，然后call
+//
+// 函数调用要求参数在栈上的位置是连续且按照参数顺序排列的，因此不能直接用locals
+// 而是总是复制所有参数
+//
+// 栈扫描时:
+//   - y.locals = 0，没有局部变量
+//   - y.args   = 2，调用y前复制到栈上的v
+//   - x.locals = 2，也就是只扫描变量v，不需要扫描调用y前复制到栈底的args
+
 // We’ll call variables on the stack that have had their address taken “stack objects”.
 // 如果有指针指向这个so, 则说明是live，否则是dead，此时不应该标记so指向的对象
 // 否则会造成so指向的对象一直不释放
