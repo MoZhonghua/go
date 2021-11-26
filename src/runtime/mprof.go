@@ -445,9 +445,9 @@ func saveblockevent(cycles, rate int64, skip int, which bucketType) {
 	if which == blockProfile && cycles < rate {
 		// 同一个block点，所有长时间(cycles >= rate)的block总是会记录
 		// 而(cycles < rate)的之后cycles/rate的比例会被记录，这里反向
-		// 补偿回来:
-		//  - count:  1 => count = 1/(cycles/rate) = rate/cycles
-		//  - cycles: cycles => cycles  / (cycles/rate) = rate
+		// 补偿回来，都乘以rate/cyclesl放大:
+		//  - count:  1 =>  1 * rate/cycles
+		//  - cycles: cycles => cycles  * (rate/cycles) = rate
 		// Remove sampling bias, see discussion on http://golang.org/cl/299991.
 		b.bp().count += float64(rate) / float64(cycles)
 		b.bp().cycles += rate
