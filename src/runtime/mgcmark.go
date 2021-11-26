@@ -768,11 +768,18 @@ func scanstack(gp *g, gcw *gcWork) { // 在suspendG()之后调用
 	}
 
 	// Scan the stack. Accumulate a list of stack objects.
-	scanframe := func(frame *stkframe, unused unsafe.Pointer) bool {
-		scanframeworker(frame, &state, gcw)
+	scanframe := func(frame *stkframe, gp unsafe.Pointer) bool {
+		if gp == markdebug.g {
+			f := findfunc(frame.pc)
+			println("  func =", funcname(f), "funcID =", f.funcID)
+		}
+		scanframeworker(frame, &state, gcw, gp)
 		return true
 	}
-	gentraceback(^uintptr(0), ^uintptr(0), 0, gp, 0, nil, 0x7fffffff, scanframe, nil, 0)
+	if unsafe.Pointer(gp) == markdebug.g {
+		println("debug scan stack: g =", gp)
+	}
+	gentraceback(^uintptr(0), ^uintptr(0), 0, gp, 0, nil, 0x7fffffff, scanframe, unsafe.Pointer(gp), 0)
 
 	// Find additional pointers that point into the stack from the heap.
 	// Currently this includes defers and panics. See also function copystack.
@@ -887,10 +894,13 @@ func scanstack(gp *g, gcw *gcWork) { // 在suspendG()之后调用
 
 // Scan a stack frame: local variables and function arguments/results.
 //go:nowritebarrier
-func scanframeworker(frame *stkframe, state *stackScanState, gcw *gcWork) {
+func scanframeworker(frame *stkframe, state *stackScanState, gcw *gcWork, gp unsafe.Pointer) {
 	if _DebugGC > 1 && frame.continpc != 0 {
 		print("scanframe ", funcname(frame.fn), "\n")
 	}
+
+	shouldDebug := gp == markdebug.g
+	_ = shouldDebug
 
 	isAsyncPreempt := frame.fn.valid() && frame.fn.funcID == funcID_asyncPreempt
 	isDebugCall := frame.fn.valid() && frame.fn.funcID == funcID_debugCallV2
@@ -937,16 +947,29 @@ func scanframeworker(frame *stkframe, state *stackScanState, gcw *gcWork) {
 	}
 
 	locals, args, objs := getStackMap(frame, &state.cache, false)
+	if shouldDebug {
+		// println("    func =", funcname(frame.fn), "funcID =", frame.fn.funcID)
+		println("    framesize =", frame.varp - frame.sp)
+		println("    locals =", locals.n)
+		println("    args   =", args.n)
+	}
+	shouldDebug = shouldDebug && hasPrefix(funcname(frame.fn), "main.")
 
 	// Scan local variables if stack frame has been allocated.
 	if locals.n > 0 {
 		size := uintptr(locals.n) * sys.PtrSize
 		scanblock(frame.varp-size, size, locals.bytedata, gcw, state)
+		if shouldDebug {
+			println("      scan locals: start =", hex(frame.varp-size), "end =", hex(frame.varp))
+		}
 	}
 
 	// Scan arguments.
 	if args.n > 0 {
 		scanblock(frame.argp, uintptr(args.n)*sys.PtrSize, args.bytedata, gcw, state)
+		if shouldDebug {
+			println("      scan args: start =", hex(frame.argp), "end =", hex(frame.argp + 8 * uintptr(args.n)))
+		}
 	}
 
 	// Add all stack objects to the stack object list.
@@ -1568,4 +1591,15 @@ func gcMarkTinyAllocs() {
 		gcw := &p.gcw
 		greyobject(c.tiny, 0, 0, span, gcw, objIndex)
 	}
+}
+
+
+var markdebug struct {
+	g   unsafe.Pointer
+	obj uintptr
+}
+
+func SetMarkDebug(obj uintptr) {
+	markdebug.g = unsafe.Pointer(getg())
+	markdebug.obj = obj
 }
