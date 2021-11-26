@@ -1255,7 +1255,6 @@ func freeStackSpans() {
 // - 栈上的结构体，称为stackobject
 // getStackMap returns the locals and arguments live pointer maps, and
 // stack object list for frame.
-// TODO(mzh): find out what is stack object
 func getStackMap(frame *stkframe, cache *pcvalueCache, debug bool) (locals, args bitvector, objs []stackObjectRecord) {
 	targetpc := frame.continpc
 	if targetpc == 0 {
