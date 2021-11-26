@@ -53,13 +53,16 @@ mgcmark.go
 mgcpacer.go
 mgcstack.go
 
-2021-11-24
+2021-11-25
 mgcstack.go
 mgcwork.go
 mgcsweep.go
 mcache.go
 mcentral.go
 mfinal.go
-stubs.go ? // reflectcall
-mspanset.go ?
+stubs.go
+
+2021-11-26
+mspanset.go
 mprof.go ?
+malloc.go ?
