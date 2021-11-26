@@ -1420,6 +1420,8 @@ func cgoContextPCs(ctxt uintptr, buf []uintptr) {
 }
 
 func Systemstack(f func()) {
+	g := getg()
+	println("Systemstack: g =", g, "g0 =", g.m.g0)
 	systemstack(func() {
 		f()
 	})

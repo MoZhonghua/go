@@ -267,14 +267,12 @@ func setGCPhase(x uint32) {
 // workers and are distinguished by gcMarkWorkerMode.
 type gcMarkWorkerMode int
 
-
 // 总的worker数量是gomaxprocs, gcStart() -> gcBgMarkStartWorkers() -> 如果数量不足则启动更多的
 // 调度策略：
 //  - dedicated和fractional是在检查用户g之前
 //    * 这两个由25%总CPU限制
 //  - idle是在没有找到用户g之后调度
 //    * 这个不考虑CPU限制
-
 
 const (
 	// gcMarkWorkerNotWorker indicates that the next scheduled G is not
@@ -372,9 +370,9 @@ var work struct {
 	markrootNext uint32 // next markroot job
 	markrootJobs uint32 // number of markroot jobs
 
-	nproc  uint32  // 最多启动这么多个后台gcworker? 实际启动了gomaxprocs个
+	nproc  uint32 // 最多启动这么多个后台gcworker? 实际启动了gomaxprocs个
 	tstart int64
-	nwait  uint32  // 后台gcworker执行扫描任务时-1, 完成时+1
+	nwait  uint32 // 后台gcworker执行扫描任务时-1, 完成时+1
 	// nwait=0: 所有后台gcworker都在进行扫描
 	// nproc=nwait: 没有后台gcworker在进行扫描
 
@@ -1557,11 +1555,11 @@ func gcSweep(mode gcMode) {
 		prepareFreeWorkbufs()
 
 		/*
-		// TODO(mzh): free mcache
-		for _, p := range allp {
-			// forEachP在P执行, 不用考虑同步问题
-			p.mcache.prepareForSweep()
-		}
+			// TODO(mzh): free mcache
+			for _, p := range allp {
+				// forEachP在P执行, 不用考虑同步问题
+				p.mcache.prepareForSweep()
+			}
 		*/
 		for freeSomeWbufs(false) {
 		}
@@ -1592,7 +1590,7 @@ func gcSweep(mode gcMode) {
 // the heap lock. See mheap for details.
 //
 //go:systemstack
-func gcResetMarkState() {  // gcStart, before STW, 因为之后增加的g和arena不需要reset
+func gcResetMarkState() { // gcStart, before STW, 因为之后增加的g和arena不需要reset
 	// This may be called during a concurrent phase, so lock to make sure
 	// allgs doesn't change.
 	forEachG(func(gp *g) {
