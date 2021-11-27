@@ -70,4 +70,8 @@ metrics.go
 metrics/*.go
 trace/*.go
 debug/*.go
+
+2021-11-26
+../reflect/makefunc.go
+../reflect/abi.go ?
 pprof/pprof.go ?

@@ -21,6 +21,9 @@ type RegArgs struct {
 
 	// Fields above this point are known to assembly.
 
+	// 静态生成ptrmask中这里都是指针, 扫描时都会检查.下面的ReturnIsPtr是指
+	// 会把对应Ints复制到这里, 其他值清零, 保证扫描正常
+	// 这个复制过程必须是不可抢占的，否则没复制的寄存器指向的对象释放
 	// Ptrs is a space that duplicates Ints but with pointer type,
 	// used to make pointers passed or returned  in registers
 	// visible to the GC by making the type unsafe.Pointer.

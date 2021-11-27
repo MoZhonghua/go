@@ -10,6 +10,10 @@ import (
 	"unsafe"
 )
 
+// 哪些参数放到寄存器里的规则在这个文件里定义:
+// ../../src/cmd/compile/abi-internal.md
+// https://go.googlesource.com/go/+/refs/heads/dev.regabi/src/cmd/compile/internal-abi.md
+
 // These variables are used by the register assignment
 // algorithm in this file.
 //
@@ -62,6 +66,9 @@ const (
 	abiStepFloatReg             // copy to/from FP register
 )
 
+// 参数和abiStep不是意义对应的，一个参数可能对应多个abiStep，所以
+// 需要valueStart来记录. 比如string类型可以放到寄存器中,需要占用两个
+// 也就是需要两个abiStep
 // abiSeq represents a sequence of ABI instructions for copying
 // from a series of reflect.Values to a call frame (for call arguments)
 // or vice-versa (for call results).
@@ -338,6 +345,11 @@ type abiDesc struct {
 	// to spill argument registers into in case of preemption in
 	// reflectcall's stack frame.
 	stackCallArgsSize, retOffset, spill uintptr
+	// args栈为:
+	//  [0, stackCallArgsSize)  [ retOffset, offset + out.stackBytes) [align, align+spill)
+	//                        对齐8字节                         对齐8字节
+	// 实际上: stackCallArgsSize = call.stackBytes
+	//         retOffset = align(stackCallArgsSize, 8)
 
 	// stackPtrs is a bitmap that indicates whether
 	// each word in the ABI stack space (stack-assigned
@@ -454,6 +466,7 @@ func newAbiDesc(t *funcType, rcvr *rtype) abiDesc {
 		if stkStep != nil {
 			addTypeBits(stackPtrs, stkStep.stkOff, res)
 		} else {
+			// 参数要么全都在寄存器中，要么全部在stack，不会有一半在寄存器的情况
 			for _, st := range out.stepsForValue(i) {
 				if st.kind == abiStepPointer {
 					outRegPtrs.Set(st.ireg)

@@ -27,6 +27,19 @@
 // makeFuncStub must be ABIInternal because it is placed directly
 // in function values.
 // This frame contains two locals. See the comment above LOCAL_RETVALID.
+//
+// 栈布局为:
+//
+// [ args     ] <- fp: makeFuncStub本身声明是没有参数，但是调用MakeFunc()生成的closure有参数a
+// [ ret      ]
+// [ bp       ]
+// [ RegArgs  ] sp+40  272字节
+// [ RetValid ] sp+32
+// [ &RegArgs ] sp+24  // 最后4个word是用来调用callReflect的参数
+// [ &Retvalid] sp+16
+// [ fp       ] sp+8
+// [ CxtReg   ] sp+0  // &funcval, *makeFuncImpl
+// func callReflect(ctxt *makeFuncImpl, frame unsafe.Pointer, retValid *bool, regs *abi.RegArgs)
 TEXT ·makeFuncStub<ABIInternal>(SB),(NOSPLIT|WRAPPER),$312
 	NO_LOCAL_POINTERS
 	// NO_LOCAL_POINTERS is a lie. The stack map for the two locals in this
@@ -58,6 +71,7 @@ TEXT ·makeFuncStub<ABIInternal>(SB),(NOSPLIT|WRAPPER),$312
 // methodValueCall must be ABIInternal because it is placed directly
 // in function values.
 // This frame contains two locals. See the comment above LOCAL_RETVALID.
+// func callMethod(ctxt *methodValue, frame unsafe.Pointer, retValid *bool, regs *abi.RegArgs)
 TEXT ·methodValueCall<ABIInternal>(SB),(NOSPLIT|WRAPPER),$312
 	NO_LOCAL_POINTERS
 	// NO_LOCAL_POINTERS is a lie. The stack map for the two locals in this

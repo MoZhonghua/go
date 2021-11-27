@@ -2011,10 +2011,27 @@ func (b *gcBitsArena) tryAlloc(bytes uintptr) *gcBits {
 	return &b.bits[start]
 }
 
+func newMarkBits(nelems uintptr) *gcBits {
+	if nelems == 73 {
+		println("newMarkBits: nelems =", nelems)
+	}
+	blocksNeeded := uintptr((nelems + 63) / 64)
+	bytesNeeded := blocksNeeded * 8
+
+	p := newMarkBits2(nelems)
+	for i := uintptr(0); i < bytesNeeded; i++ {
+		x := *(addb((*byte)(p), i))
+		if x != 0 {
+			throw("bad markBits")
+		}
+	}
+	return p
+}
+
 // newMarkBits returns a pointer to 8 byte aligned bytes
 // to be used for a span's mark bits.
 // TODO(mzh): who clear bits?
-func newMarkBits(nelems uintptr) *gcBits {
+func newMarkBits2(nelems uintptr) *gcBits {
 	blocksNeeded := uintptr((nelems + 63) / 64)
 	bytesNeeded := blocksNeeded * 8
 

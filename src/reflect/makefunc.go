@@ -11,11 +11,42 @@ import (
 	"unsafe"
 )
 
+// 基本使用模式:
+/*
+func sum(args []reflect.Value) []reflect.Value {
+	a, b := args[0], args[1]
+	return []reflect.Value{reflect.ValueOf(a.Int() + b.Int())}
+}
+func makeSum(fptr interface{}) {
+	fn := reflect.ValueOf(fptr).Elem()
+	v := reflect.MakeFunc(fn.Type(), sum)
+	fn.Set(v)
+}
+var intSum func(int, int) int
+makeSum(&intSum)
+intSum(100, 200)
+*/
+
+/*
+栈扫描中的问题: 首先代码都是提前编译好的，也就是intSum本质还是一个funcval
+funcval.fn指向静态的代码。正常的函数参数（包括入参和出参）都是固定的，而就是给定funcval.fn
+值，args的布局和ptrmask都是固定的，编译器提前写好。
+
+但是在这里，参数时不确定的，而且组合无穷多，而funcval.fn是一个固定值，因此
+在栈扫描中不能直接编译器静态生成的argmap。
+
+应该用MakeFunc()传入的fn.Type()的argmap，这个值应该写在某个地方，让栈扫描过程能
+找到正确的argmap, 比如写到funcval.fn这个函数栈的固定位置(栈底)
+*/
+
 // makeFuncImpl is the closure value implementing the function
 // returned by MakeFunc.
 // The first three words of this type must be kept in sync with
 // methodValue and runtime.reflectMethodValue.
 // Any changes should be reflected in all three.
+// 可以接收任意参数列表的closure，参数类型信息是在创建closure时记录下来
+// 栈扫描要特别处理
+// funcval只要求第一个字段指向代码，因此这个结构体本身可以作为一个funcval
 type makeFuncImpl struct {
 	makeFuncCtxt
 	ftyp *funcType
@@ -55,6 +86,8 @@ func MakeFunc(typ Type, fn func(args []Value) (results []Value)) Value {
 	// Indirect Go func value (dummy) to obtain
 	// actual code address. (A Go func value is a pointer
 	// to a C function pointer. https://golang.org/s/go11func.)
+	// 这里是要取出code这个值
+	// dummy = &funcval { fn = code, ... captured data ... }
 	dummy := makeFuncStub
 	code := **(**uintptr)(unsafe.Pointer(&dummy))
 
@@ -75,8 +108,9 @@ func MakeFunc(typ Type, fn func(args []Value) (results []Value)) Value {
 	return Value{t, unsafe.Pointer(impl), flag(Func)}
 }
 
+// TODO(mzh): fix doc: It expects a *callReflectFunc is wrong
 // makeFuncStub is an assembly function that is the code half of
-// the function returned from MakeFunc. It expects a *callReflectFunc
+// the function returned from MakeFunc. It expects a *makeFuncImpl
 // as its context register, and its job is to invoke callReflect(ctxt, frame)
 // where ctxt is the context register and frame is a pointer to the first
 // word in the passed-in argument frame.

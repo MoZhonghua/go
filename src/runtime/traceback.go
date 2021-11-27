@@ -665,6 +665,8 @@ type reflectMethodValue struct {
 // TODO(josharian): once we do mid-stack inlining,
 // call getArgInfo directly from getArgInfoFast and stop returning an ok bool.
 func getArgInfoFast(f funcInfo, needArgMap bool) (arglen uintptr, argmap *bitvector, ok bool) {
+	// 只有在needArgMap && f.args == _ArgsSizeUnknown返回ok=false
+	// 否则总是返回true
 	return uintptr(f.args), nil, !(needArgMap && f.args == _ArgsSizeUnknown)
 }
 
@@ -681,6 +683,7 @@ func getArgInfo(frame *stkframe, f funcInfo, needArgMap bool, ctxt *funcval) (ar
 	if needArgMap && f.args == _ArgsSizeUnknown {
 		// Extract argument bitmaps for reflect stubs from the calls they made to reflect.
 		switch funcname(f) {
+		// TODO(mzh): what's this? stack layout?
 		case "reflect.makeFuncStub", "reflect.methodValueCall":
 			// These take a *reflect.methodValue as their
 			// context register.

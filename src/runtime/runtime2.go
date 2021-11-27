@@ -1029,6 +1029,9 @@ type stkframe struct {
 	varp     uintptr    // top of local variables
 	argp     uintptr    // pointer to function arguments
 	arglen   uintptr    // number of bytes at argp
+
+	// 正常函数static/closure在编译器就能计算args的ptrmask，但是
+	// 某些特殊函数需要单独处理，此时frame.argmap不为nil，栈扫描时需要用这个
 	argmap   *bitvector // force use of this argmap
 }
 
