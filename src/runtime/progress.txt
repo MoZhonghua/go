@@ -73,5 +73,6 @@ debug/*.go
 
 2021-11-26
 ../reflect/makefunc.go
-../reflect/abi.go ?
+../reflect/abi.go
+../reflect/type.go ?
 pprof/pprof.go ?

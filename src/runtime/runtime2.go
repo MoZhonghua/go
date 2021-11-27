@@ -207,6 +207,23 @@ type iface struct {
 	data unsafe.Pointer
 }
 
+// 对应interface{}对象, 普通值v转换为interface{}规则为:
+//  - 如果v是指针, 比如*int, 则 eface { _type: typeof(*int), data: v }
+//  - 如果v是接口对象，比如io.Reader
+//     - 这进行解封, eface { _type: iface.itab.type, data: iface.data }
+//  - 其他情况, 比如int/struct, 则总是分配内存p, 然后复制v到新分配的内存
+//     - *p = v
+//     - eface { _type: typeof(int), data: p }
+//     - 优化: 对于小整数，不分配内存，直接用指向staticuint64s数组中对应值的指针
+//         - eface里的值是只读的，共享没问题
+//         - iface.go, convT64等
+//
+// 判断两个interface{}对象是否相等：
+//   - 先比较type_是否相同，特别的是如果_type=nil，则直接返回true
+//   - 在比较data是否相同: 不能直接比较值相等，比如上面的int类型转的interface{}，
+//     指针地址不一样，但是应该比较int值，而不是指针
+//      * 如果可以直接比较指针，则返回 v1.data == v2.data
+//      * 否则比较type.equal(v1.data, v2.data)
 type eface struct {
 	_type *_type
 	data  unsafe.Pointer
