@@ -13,6 +13,10 @@
 //
 // See "The Laws of Reflection" for an introduction to reflection in Go:
 // https://golang.org/doc/articles/laws_of_reflection.html
+//
+// ValueOf(x)是否可以调用Value.Set(): 考虑一个函数f(x): x是传值，在f里修改x
+// 不会导致调用者的x改变，因此不可以调用Set
+// 如果x是一个指针，则*x=v 可以改变调用者的x值，因此ValueOf(x).Elem()是可以Set的
 package reflect
 
 import (
