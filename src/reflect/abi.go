@@ -169,6 +169,9 @@ func (a *abiSeq) addArg(t *rtype) *abiStep {
 // If the receiver was stack-assigned, returns the single
 // abiStep describing that translation, and nil otherwise.
 // Returns true if the receiver is a pointer.
+//
+// iface函数表中的函数全部都是接受*T, 即使是T -> R, 编译器也会自动生成*T.m函数
+// itab表中存的是这个自动生成的函数
 func (a *abiSeq) addRcvr(rcvr *rtype) (*abiStep, bool) {
 	// The receiver is always one word.
 	a.valueStart = append(a.valueStart, len(a.steps))
