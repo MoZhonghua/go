@@ -53,10 +53,17 @@ type Type interface {
 	// Method returns the i'th method in the type's method set.
 	// It panics if i is not in the range [0, NumMethod()).
 	//
+	// Method.Func => 包含函数PC指针
+	// Method.Type => 函数签名
 	// For a non-interface type T or *T, the returned Method's Type and Func
 	// fields describe a function whose first argument is the receiver,
 	// and only exported methods are accessible.
 	//
+	//
+	// 由于都是ValueOf接受interface{}参数，而iface->eface总是还原为原始类型.
+	// 需要传入*iface, reflect.TypeOf(*iface).Elem().
+	// receiver虽然一定是指针，但是类型不定，因此不返回。同样函数表只知道
+	// 每个函数的签名，但是实际指向哪个函数不确定，填nil
 	// For an interface type, the returned Method's Type field gives the
 	// method signature, without a receiver, and the Func field is nil.
 	//
@@ -281,6 +288,10 @@ const (
 type tflag uint8
 
 const (
+	// 三层结构：
+	//  - 通用的rtype结构
+	//  - 根据普通类型，加上对应类型的数据
+	//  - 额外附加的uncommonType数据
 	// tflagUncommon means that there is a pointer, *uncommonType,
 	// just beyond the outer type structure.
 	//
@@ -332,8 +343,13 @@ type rtype struct {
 type method struct {
 	name nameOff // name of method
 	mtyp typeOff // method type (without receiver)
-	ifn  textOff // fn used in interface call (one-word receiver)
-	tfn  textOff // fn used for normal method call
+
+	// 比如func (f F) m() {}
+	// ifn不是指向F.m，而是指向自动生成的wrapper, *F.m
+	ifn textOff // fn used in interface call (one-word receiver)
+
+	// 正常的F.m
+	tfn textOff // fn used for normal method call
 }
 
 // uncommonType is present only for defined types or types with methods
@@ -464,6 +480,7 @@ type structType struct {
 // If tag data is present, it also has a varint-encoded length
 // followed by the tag itself.
 //
+// TODO(mzh): methods that are defined in a different package??
 // If the import path follows, then 4 bytes at the end of
 // the data form a nameOff. The import path is only set for concrete
 // methods that are defined in a different package than their type.
@@ -797,6 +814,7 @@ func (t *rtype) uncommon() *uncommonType {
 
 func (t *rtype) String() string {
 	s := t.nameOff(t.str).name()
+	// 为了复用*typename这个字符串，应该返回typename,所以要去掉开始的*
 	if t.tflag&tflagExtraStar != 0 {
 		return s[1:]
 	}
@@ -1142,6 +1160,19 @@ type StructField struct {
 	Type      Type      // field type
 	Tag       StructTag // field tag string
 	Offset    uintptr   // offset within struct, in bytes
+
+	// 要考虑embedded字段, 比如这里的"c"字段, index为[1, 0, 1]
+	/*
+	struct {
+		a int
+		struct {
+			struct {
+				b int
+				c int
+			}
+		}
+	}
+	*/
 	Index     []int     // index sequence for Type.FieldByIndex
 	Anonymous bool      // is an embedded field
 }
@@ -1539,6 +1570,7 @@ func implements(T, V *rtype) bool {
 			tmName := t.nameOff(tm.name)
 			vm := &v.methods[j]
 			vmName := V.nameOff(vm.name)
+			// T, V都是iface，直接比较方法列表即可，不用考虑reciever的问题
 			if vmName.name() == tmName.name() && V.typeOff(vm.typ) == t.typeOff(tm.typ) {
 				if !tmName.isExported() {
 					tmPkgPath := tmName.pkgPath()
