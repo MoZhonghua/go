@@ -143,6 +143,7 @@ func makeMethodValue(op string, v Value) Value {
 	rcvr := Value{v.typ, v.ptr, fl}
 
 	// v.Type returns the actual type of the method value.
+	// 返回是不带reciever版本的funcType
 	ftyp := (*funcType)(unsafe.Pointer(v.Type().(*rtype)))
 
 	// Indirect Go func value (dummy) to obtain

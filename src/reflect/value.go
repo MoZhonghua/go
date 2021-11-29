@@ -13,6 +13,43 @@ import (
 	"unsafe"
 )
 
+/*
+type F struct { }
+func (f F) M0() {}
+
+f := &F{}
+reflect.ValueOf(f).MethodByName("M0")
+*/
+
+// M0对应的4种funcval:
+//  - funcval { fn: F.M0 }
+//     * rtype.method[i].tfn
+//     * 源代码定义函数，接收值reciever
+//  - funcval { fn: *F.M0 }
+//     * rtype.method[i].tfn
+//     * 自动生成代码，接收指针reciever
+//  - funcval { fn: F.M0-fm,  F{} }
+//     * 自动生成代码+闭包，funcval存的是F{}对象, 调用时不需要传reciver
+//     * 不出现在rtype中, 仅当代码中有 k := f.M0 是才会生成
+//  - funcval { fn: *F.M0-fm, &F{} }
+//     * 自动生成代码+闭包，存的是&F{}指针, 调用时不需要传reciver
+//     * 不出现在rtype中, 仅当方法定义为*F.M0, 且有k = f.M0才会生成
+//     * 如果是方法定义是F.M0, 则也是用F.M0-fm，不会单独生成*F.M0-fm
+
+// Value.MethodByName("...") 返回的值Method Value:
+//   * Method Value { typ: *F, ptr: f, flag: flagMethod | method_index=0}
+//     注意: typ是*F, ptr指向是f，不是函数类型；flag里标识这个Value是Method。看作一个lazy object
+//   * fmt.Printf时，会调用Value.Interface{}, 转换为一个Func类型Value
+//     最终打印的是函数指针里的代码地址, 都是指向同一个代码地址, methodValueCall()
+//
+// Method Value有两种调用方式:
+//   * Method.Call()
+//      - 走runtime.reflectcall流程
+//   * x = Method.Interface().(func(int)); x(100)
+//      - Interface()返回一个funcval，fn总是指向methodValueCall()
+//      - methodValueCall最终还是走reflectcall流程
+//
+
 // reflectcall的基本模式:
 //  - 根据funcType计算出函数需要的参数(入参和出参, Reg/Stack/Spill)的栈布局
 //  - 按照布局生成对应的调用数据Stack和RegArgs对象
@@ -22,6 +59,15 @@ import (
 //    - 调用真正的函数
 //  - 把函数的返回值(栈上和寄存器中)复制到Stack和RegArgs对象
 //  - 把Stack和RegArgs结果再复制到refletcall调用者的栈和寄存器中
+
+// Value.Call的Value有多种方式获得:
+//  - var m func(); ValueOf(m)
+//  - ValueOf(f).MethodByName("M")
+//  - ValueOf(f.M)
+// 最终都是转换为一个funcval，然后根据funcType构造栈数据, 最终reflectcall/call64复制栈数据到真正的栈,
+// 调用funcval,复制返回值
+
+// Method.Interface() 返回是一个funcval, 此时
 
 const ptrSize = 4 << (^uintptr(0) >> 63) // unsafe.Sizeof(uintptr(0)) but an ideal const
 
@@ -82,7 +128,7 @@ type flag uintptr
 const (
 	flagKindWidth        = 5 // there are 27 kinds
 	flagKindMask    flag = 1<<flagKindWidth - 1
-	flagStickyRO    flag = 1 << 5
+	flagStickyRO    flag = 1 << 5 // 这两个只和是否导出有关，和是否可以Assignable无关, 或者说Assignable要求是导出的字段
 	flagEmbedRO     flag = 1 << 6
 	flagIndir       flag = 1 << 7
 	flagAddr        flag = 1 << 8
@@ -371,8 +417,10 @@ var callGC bool // for testing; see TestCallMethodJump
 const debugReflectCall = false
 
 func (v Value) call(op string, in []Value) []Value {
+	println("Value.call")
 	// Get function pointer, type.
 	t := (*funcType)(unsafe.Pointer(v.typ))
+	println("  v.typ.Name =", t.String())
 	var (
 		fn       unsafe.Pointer
 		rcvr     Value
@@ -861,7 +909,7 @@ func methodReceiver(op string, v Value, methodIndex int) (rcvrtype *rtype, t *fu
 			panic("reflect: " + op + " of method on nil interface value")
 		}
 		rcvrtype = iface.itab.typ
-		fn = unsafe.Pointer(&iface.itab.fun[i])
+		fn = unsafe.Pointer(&iface.itab.fun[i]) // fn是需要reciever的
 		t = (*funcType)(unsafe.Pointer(tt.typeOff(m.typ)))
 	} else {
 		rcvrtype = v.typ
@@ -873,6 +921,8 @@ func methodReceiver(op string, v Value, methodIndex int) (rcvrtype *rtype, t *fu
 		if !v.typ.nameOff(m.name).isExported() {
 			panic("reflect: " + op + " of unexported method")
 		}
+
+		// ifn是有reciever参数的, 不带reciever参数版本为F.M-fm，不在rtype里
 		ifn := v.typ.textOff(m.ifn)
 		fn = unsafe.Pointer(&ifn)
 		t = (*funcType)(unsafe.Pointer(v.typ.typeOff(m.mtyp)))
@@ -1165,6 +1215,11 @@ func (v Value) Elem() Value {
 		if v.typ.NumMethod() == 0 {
 			eface = *(*interface{})(v.ptr)
 		} else {
+			// v.ptr 为 *iface
+			// *v.ptr = iface
+			// (eface)(*v.ptr) 把iface转成eface, 由编译器生成转换代码
+			// eface.type = iface.itab.type
+			// eface.data = iface.data
 			eface = (interface{})(*(*interface {
 				M()
 			})(v.ptr))

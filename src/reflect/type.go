@@ -108,6 +108,8 @@ type Type interface {
 
 	// Name returns the type's name within its package for a defined type.
 	// For other (non-defined) types it returns the empty string.
+	// 如果是unexported类型也返回空, 但是rtype.str实际指向一个name数据，通过rtype.String()
+	// 可以取出这个名字
 	Name() string
 
 	// PkgPath returns a defined type's package path, that is, the import path
@@ -912,8 +914,8 @@ func (t *rtype) Method(i int) (m Method) {
 	println("rtype.Method i =", i)
 	println("  len(in) =", len(in))
 	println("  len(out) =", len(out))
-	println("  tfn =", p.tfn)
-	println("  ifn =", p.ifn)
+	println("  tfn =", t.textOff(p.tfn))
+	println("  ifn =", t.textOff(p.ifn))
 	mt := FuncOf(in, out, ft.IsVariadic())
 	m.Type = mt
 	tfn := t.textOff(p.tfn)
