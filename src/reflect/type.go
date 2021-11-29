@@ -19,6 +19,27 @@
 // 如果x是一个指针，则*x=v 可以改变调用者的x值，因此ValueOf(x).Elem()是可以Set的
 package reflect
 
+// 说到底，newobject/mark/reflect等只需要一个rtype来描述类型信息，这个rtype可能
+// 是编译阶段生成，也可以是reflect动态生成，只要保证两者生成的信息兼容，对后面的
+// 处理没有任何影响。
+
+// Method的reciever参数问题:
+//  编译器生成的T.rtype会带一个method列表，每个method对应一个funcType, 这个funcType
+//  里的函数类型里是不带reciever的, rtype.Method()方法返回的类型会补上reciever参数
+//  总结:
+//    - rtype总是不带reciever的: implements()函数直接比较，不用考虑reciever的问题
+//    - rtype的中函数指针有两个ifn, tfn，前者接收ptr类型，后者可以接收value类型
+//        - 可能一样，比如代码里就是*F.m
+//        - 这里指向的汇编代码函数是要求reciever的
+//    - MethodByName()/Method(i)等返回的Method带reciever
+
+// non-defined type
+// type S struct { a int }
+// var x struct { a int }
+// 这里TypeOf(x)是个non-defined type, 如下特性:
+//  1. TypeOf(x).Name()和PkgPath()返回空值
+//  2. s S和x之间可以相互赋值: TypeOf(x).AssignableTo(S) 返回 true
+
 import (
 	"internal/unsafeheader"
 	"strconv"
@@ -717,6 +738,7 @@ func resolveTextOff(rtype unsafe.Pointer, off int32) unsafe.Pointer
 // addReflectOff adds a pointer to the reflection lookup map in the runtime.
 // It returns a new ID that can be used as a typeOff or textOff, and will
 // be resolved correctly. Implemented in the runtime package.
+// 返回的是一个负数，方便调试，表示是reflect动态生成的类型数据, 可能是name/rtype等
 func addReflectOff(ptr unsafe.Pointer) int32
 
 // resolveReflectName adds a name to the reflection lookup map in the runtime.
@@ -876,7 +898,10 @@ func (t *rtype) Method(i int) (m Method) {
 	mtyp := t.typeOff(p.mtyp)
 	ft := (*funcType)(unsafe.Pointer(mtyp))
 	in := make([]Type, 0, 1+len(ft.in()))
+
+	// NOTE: 这里补上了reciever类型
 	in = append(in, t)
+
 	for _, arg := range ft.in() {
 		in = append(in, arg)
 	}
@@ -884,6 +909,11 @@ func (t *rtype) Method(i int) (m Method) {
 	for _, ret := range ft.out() {
 		out = append(out, ret)
 	}
+	println("rtype.Method i =", i)
+	println("  len(in) =", len(in))
+	println("  len(out) =", len(out))
+	println("  tfn =", p.tfn)
+	println("  ifn =", p.ifn)
 	mt := FuncOf(in, out, ft.IsVariadic())
 	m.Type = mt
 	tfn := t.textOff(p.tfn)
@@ -1570,7 +1600,7 @@ func implements(T, V *rtype) bool {
 			tmName := t.nameOff(tm.name)
 			vm := &v.methods[j]
 			vmName := V.nameOff(vm.name)
-			// T, V都是iface，直接比较方法列表即可，不用考虑reciever的问题
+			// T, V都是iface，方法列表里的函数类型是不包括reciever的
 			if vmName.name() == tmName.name() && V.typeOff(vm.typ) == t.typeOff(tm.typ) {
 				if !tmName.isExported() {
 					tmPkgPath := tmName.pkgPath()
@@ -1604,6 +1634,8 @@ func implements(T, V *rtype) bool {
 		tmName := t.nameOff(tm.name)
 		vm := vmethods[j]
 		vmName := V.nameOff(vm.name)
+		// NOTE: vm.mtyp不包括reciever参数的函数类型
+		// 因为是通过v.methods()获取的，那么返回的函数列表一定是以v类型为reciever
 		if vmName.name() == tmName.name() && V.typeOff(vm.mtyp) == t.typeOff(tm.typ) {
 			if !tmName.isExported() {
 				tmPkgPath := tmName.pkgPath()

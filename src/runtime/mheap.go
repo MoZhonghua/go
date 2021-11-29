@@ -2012,9 +2012,6 @@ func (b *gcBitsArena) tryAlloc(bytes uintptr) *gcBits {
 }
 
 func newMarkBits(nelems uintptr) *gcBits {
-	if nelems == 73 {
-		println("newMarkBits: nelems =", nelems)
-	}
 	blocksNeeded := uintptr((nelems + 63) / 64)
 	bytesNeeded := blocksNeeded * 8
 

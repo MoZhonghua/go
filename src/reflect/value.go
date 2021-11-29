@@ -13,6 +13,16 @@ import (
 	"unsafe"
 )
 
+// reflectcall的基本模式:
+//  - 根据funcType计算出函数需要的参数(入参和出参, Reg/Stack/Spill)的栈布局
+//  - 按照布局生成对应的调用数据Stack和RegArgs对象
+//  - 调用汇编函数call/makeFuncStub/...
+//    - 根据Stack的大小跳转到对对应的callXX(比如call64)函数
+//    - 根据传入的Stack和RegArgs对象，复制到栈上和寄存器中
+//    - 调用真正的函数
+//  - 把函数的返回值(栈上和寄存器中)复制到Stack和RegArgs对象
+//  - 把Stack和RegArgs结果再复制到refletcall调用者的栈和寄存器中
+
 const ptrSize = 4 << (^uintptr(0) >> 63) // unsafe.Sizeof(uintptr(0)) but an ideal const
 
 // Value is the reflection interface to a Go value.
@@ -42,6 +52,8 @@ type Value struct {
 
 	// Pointer-valued data or, if flagIndir is set, pointer to data.
 	// Valid when either flagIndir is set or typ.pointers() is true.
+	// 对象本身是指针类型，那么ptr就是对象值
+	// 否则都是单独分配内存，即使是int32这种可以放到64位指针的中数据
 	ptr unsafe.Pointer
 
 	// flag holds metadata about the value.
@@ -132,6 +144,7 @@ func packEface(v Value) interface{} {
 		// Value is direct, and so is the interface.
 		e.word = v.ptr
 	}
+	// 这这里不能有抢占点，比如函数调用或者异步抢占点
 	// Now, fill in the type portion. We're very careful here not
 	// to have any operation between the e.word and e.typ assignments
 	// that would let the garbage collector observe the partially-built
@@ -322,6 +335,7 @@ func (v Value) CanAddr() bool {
 // If CanSet returns false, calling Set or any type-specific
 // setter (e.g., SetBool, SetInt) will panic.
 func (v Value) CanSet() bool {
+	// 即flag&flagAddr == flagAddr 且 v.flag&flagRO == 0
 	return v.flag&(flagAddr|flagRO) == flagAddr
 }
 
