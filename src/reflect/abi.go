@@ -170,8 +170,10 @@ func (a *abiSeq) addArg(t *rtype) *abiStep {
 // abiStep describing that translation, and nil otherwise.
 // Returns true if the receiver is a pointer.
 //
-// iface函数表中的函数全部都是接受*T, 即使是T -> R, 编译器也会自动生成*T.m函数
-// itab表中存的是这个自动生成的函数
+// 对于接收value reciever的成员函数，编译器会自动生成一个接收ptr receiver的wrapper函数
+// rtype.method[i]有两个字段指向这两个函数:
+//  - ifn: ptr reciever
+//  - tfn: value/ptr reciever, same as definition in user source code
 func (a *abiSeq) addRcvr(rcvr *rtype) (*abiStep, bool) {
 	// The receiver is always one word.
 	a.valueStart = append(a.valueStart, len(a.steps))
@@ -189,6 +191,8 @@ func (a *abiSeq) addRcvr(rcvr *rtype) (*abiStep, bool) {
 		ok = a.assignIntN(0, ptrSize, 1, 0b0)
 		ptr = false
 	}
+
+	// 如果不启用RegABI，那么要放到栈上
 	if !ok {
 		a.stackAssign(ptrSize, ptrSize)
 		return &a.steps[len(a.steps)-1], ptr

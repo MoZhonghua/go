@@ -972,8 +972,13 @@ func align(x, n uintptr) uintptr {
 //
 // regs contains the argument values passed in registers and will contain
 // the values returned from ctxt.fn in registers.
+
+// f := v.MethodByName("M").Interface().(func(int))
+// f(1000)
+// frame指向用户调用点的栈，即f(1000)的参数地址，*frame[0]=1000
 func callMethod(ctxt *methodValue, frame unsafe.Pointer, retValid *bool, regs *abi.RegArgs) {
 	rcvr := ctxt.rcvr
+	// methodFn期待的args是(reciver, 1000)
 	rcvrType, valueFuncType, methodFn := methodReceiver("call", rcvr, ctxt.method)
 
 	// There are two ABIs at play here.
@@ -1026,6 +1031,7 @@ func callMethod(ctxt *methodValue, frame unsafe.Pointer, retValid *bool, regs *a
 		// architectures. This is OK for now, but this needs to be fixed
 		// before supporting the register ABI on big endian architectures.
 
+		// TODO(mzh): wrong comments. code fixed but comments not deleted
 		// If the value ABI passes the value on the stack,
 		// then the method ABI does too, because it has strictly
 		// fewer arguments. Simply copy between the two.

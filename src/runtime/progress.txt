@@ -74,5 +74,11 @@ debug/*.go
 2021-11-26
 ../reflect/makefunc.go
 ../reflect/abi.go
-../reflect/type.go ?
+../reflect/type.go
+
+2021-11-29
+../reflect/type.go
+../reflect/value.go
+
+2021-11-30
 pprof/pprof.go ?
