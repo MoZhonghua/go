@@ -735,7 +735,7 @@ mapped:
 		if l2 == nil {
 			// Allocate an L2 arena map.
 			l2 = (*[1 << arenaL2Bits]*heapArena)(persistentalloc(unsafe.Sizeof(*l2), sys.PtrSize, nil))
-			print("alloc []*heapArea: ", unsafe.Sizeof(*l2), "\n")
+			// print("alloc []*heapArea: ", unsafe.Sizeof(*l2), "\n")
 			if l2 == nil {
 				throw("out of memory allocating heap arena map")
 			}
@@ -745,7 +745,7 @@ mapped:
 		if l2[ri.l2()] != nil {
 			throw("arena already initialized")
 		}
-		print("create arena map: v: ", v, ", ri: ", ri, ", ri.l2(): ", ri.l2(), "\n")
+		// print("create arena map: v: ", v, ", ri: ", ri, ", ri.l2(): ", ri.l2(), "\n")
 		var r *heapArena
 		r = (*heapArena)(h.heapArenaAlloc.alloc(unsafe.Sizeof(*r), sys.PtrSize, &memstats.gcMiscSys))
 		if r == nil {

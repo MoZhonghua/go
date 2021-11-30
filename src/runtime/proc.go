@@ -794,7 +794,7 @@ func schedinit() {
 		// to ensure runtime·modinfo is kept in the resulting binary.
 		modinfo = ""
 	}
-	dump_consts()
+	// dump_consts()
 }
 
 func dump_consts() {
