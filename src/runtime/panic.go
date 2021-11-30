@@ -43,6 +43,8 @@ defer相关逻辑:
    - call defer_.fn
       * fn的调用栈没有特别处理，就是相当于在gopanic()里正常调用funcval
       * 如果fn调用了recover(), 会设置_panic.recoverd=true
+	    - recover只能恢复和something()这个_defer绑定的panic，也就是gopanic()创建的_panic
+		- 显然recover()必须在something()里直接调用，否则getcallersp()指向something()，不能正常recover
    - 检查_panic.recoverd, 如果为true，则gogo(_defer.pc, _defer.sp), AX=1, 也就是2中的流程
    - 处理下一个，如果所有defer都处理完了，打印gopanic()调用栈，退出程序
 */
@@ -1032,6 +1034,9 @@ func gopanic(e interface{}) {
 	// gopanic frame (stack scanning is slow...)
 	addOneOpenDeferFrame(gp, getcallerpc(), unsafe.Pointer(getcallersp()))
 
+	// invariant:
+	//  - _defer只会执行一次
+	//  - _defer只会和一个_panic绑定
 	for {
 		d := gp._defer
 		if d == nil {
@@ -1075,6 +1080,7 @@ func gopanic(e interface{}) {
 				addOneOpenDeferFrame(gp, 0, nil)
 			}
 		} else {
+			// fn()中调用recover()会检查这个值, getcallersp() == gp.p.argp
 			p.argp = unsafe.Pointer(getargp())
 
 			if goexperiment.RegabiDefer {
@@ -1106,12 +1112,20 @@ func gopanic(e interface{}) {
 			freedefer(d)
 		}
 		if p.recovered {
+			// 在这之后gp._panic指向的前一个_panic
+
+			// 根本问题是recover之后要跳转到哪里，两种情况:
+			//   - Goexit()中执行defer, 然后defer里panic，再被其他defer recover，此时跳转会Goexti执
+			//     行defer的下一条指令，知道defer都处理完
+			//   - 其他情况，跳回到创建defer recover那条语句的下一条指令，AX=1，然后直接deferreturn
 			gp._panic = p.link
 			if gp._panic != nil && gp._panic.goexit && gp._panic.aborted {
 				// A normal recover would bypass/abort the Goexit.  Instead,
 				// we return to the processing loop of the Goexit.
 				// mcall不允许传入的funcval不允许访问栈上的数据，因为在funcval执行完成前这个
 				// goroutine可能被调度到其他P，导致栈失效。这里用sigcode0和sigcode1来传递参数
+
+				// gp._panic.sp指向Goexit中call deferCallSave的下一条指令
 				gp.sigcode0 = uintptr(gp._panic.sp)
 				gp.sigcode1 = uintptr(gp._panic.pc)
 				mcall(recovery)
@@ -1158,6 +1172,7 @@ func gopanic(e interface{}) {
 				}
 			}
 
+			// 继续切换到下一个_panic
 			gp._panic = p.link
 			// Aborted panics are marked but remain on the g.panic list.
 			// Remove them from the list.
@@ -1214,6 +1229,7 @@ func getargp() uintptr {
 //
 // TODO(rsc): Once we commit to CopyStackAlways,
 // this doesn't need to be nosplit.
+// recover() 编译为 gorecover(getcallersp())
 //go:nosplit
 func gorecover(argp uintptr) interface{} {
 	// Must be in a function running as part of a deferred call during the panic.

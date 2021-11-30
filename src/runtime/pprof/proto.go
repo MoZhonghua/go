@@ -214,7 +214,6 @@ func (b *profileBuilder) pbMapping(tag int, id, base, limit, offset uint64, file
 	b.pb.endMessage(tag, start)
 }
 
-// 只有一个PC地址，这里是为了展开inline的调用栈，缓存起来，避免每次都重新展开
 func allFrames(addr uintptr) ([]runtime.Frame, symbolizeFlag) {
 	// Expand this one address using CallersFrames so we can cache
 	// each expansion. In general, CallersFrames takes a whole
@@ -453,6 +452,10 @@ func (b *profileBuilder) appendLocsForStack(locs []uint64, stk []uintptr) (newLo
 	}
 	return locs
 }
+
+// traceback里返回的PC包括inline展开后的PC，而pprof proto要求是每个Sample的Location列表
+// 只包含展开前的PC，然后在一个Location的Line{function+line}列表里放inline展开后的调用列表，因此需要想
+// 办法识别inline展开的PC序列
 
 // pcDeck is a helper to detect a sequence of inlined functions from
 // a stack trace returned by the runtime.
