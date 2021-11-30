@@ -103,7 +103,7 @@ type suspendGState struct {
 //
 //go:systemstack
 func suspendG(gp *g) suspendGState {
-	if unsafe.Pointer(gp) == markdebug.g {
+	if markdebug.needlog(gp) {
 		println("suspendG: g =", gp)
 	}
 	if mp := getg().m; mp.curg != nil && readgstatus(mp.curg) == _Grunning {
@@ -232,7 +232,7 @@ func suspendG(gp *g) suspendGState {
 				now := nanotime()
 				if now >= nextPreemptM {
 					nextPreemptM = now + yieldDelay/2
-					if markdebug.g == unsafe.Pointer(gp) {
+					if markdebug.needlog(gp) {
 						println("preemptM: send signal: gp =", gp)
 					}
 					preemptM(asyncM)

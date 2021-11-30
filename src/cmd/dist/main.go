@@ -156,6 +156,8 @@ func main() {
 	}
 
 	xinit()
+	xprintf("GOROOT_FINAL=%v\n", goroot_final)
+	xprintf("GOROOT=%v\n", goroot)
 	xmain()
 	xexit(0)
 }
@@ -172,6 +174,8 @@ func xmain() {
 		flag.PrintDefaults()
 		os.Exit(2)
 	}
+	xprintf("run command: %v\n", cmd)
+	xprintf("=============================\n")
 	if f, ok := commands[cmd]; ok {
 		f()
 	} else {

@@ -775,8 +775,8 @@ nextLevel:
 			// We found a sufficiently large run of free pages straddling
 			// some boundary, so compute the address and return it.
 			addr := levelIndexToOffAddr(l, i).add(uintptr(base) * pageSize).addr()
-			print("pageAlloc.find()\n")
-			print("  npages: ", npages, ", addr: ", addr, "\n")
+			// print("pageAlloc.find()\n")
+			// print("  npages: ", npages, ", addr: ", addr, "\n")
 			return addr, p.findMappedAddr(firstFree.base)
 		}
 		if l == 0 {

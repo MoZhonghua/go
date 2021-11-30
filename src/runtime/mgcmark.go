@@ -769,14 +769,14 @@ func scanstack(gp *g, gcw *gcWork) { // 在suspendG()之后调用
 
 	// Scan the stack. Accumulate a list of stack objects.
 	scanframe := func(frame *stkframe, gp unsafe.Pointer) bool {
-		if gp == markdebug.g {
+		if markdebug.needlog((*g)(gp)) {
 			f := findfunc(frame.pc)
 			println("  func =", funcname(f), "funcID =", f.funcID)
 		}
 		scanframeworker(frame, &state, gcw, gp)
 		return true
 	}
-	if unsafe.Pointer(gp) == markdebug.g {
+	if markdebug.needlog((*g)(gp)) {
 		println("debug scan stack: g =", gp)
 	}
 	gentraceback(^uintptr(0), ^uintptr(0), 0, gp, 0, nil, 0x7fffffff, scanframe, unsafe.Pointer(gp), 0)
@@ -899,7 +899,7 @@ func scanframeworker(frame *stkframe, state *stackScanState, gcw *gcWork, gp uns
 		print("scanframe ", funcname(frame.fn), "\n")
 	}
 
-	shouldDebug := gp == markdebug.g
+	shouldDebug := markdebug.needlog((*g)(gp))
 	_ = shouldDebug
 
 	isAsyncPreempt := frame.fn.valid() && frame.fn.funcID == funcID_asyncPreempt

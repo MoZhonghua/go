@@ -3,6 +3,13 @@
 # Use of this source code is governed by a BSD-style
 # license that can be found in the LICENSE file.
 
+
+# 编译流程./make.bash -v:
+#   1. 设置各种环境变量，找到一个已有go
+#   2. 用这个go正常编译./cmd/dist/，生成./cmd/dist/dist
+#   3. ./cmd/dist/dist bootstrap -a -v
+#   4. 由dist完成其他全部流程
+
 # See golang.org/s/go15bootstrap for an overview of the build process.
 
 # Environment variables that control make.bash:
@@ -65,7 +72,13 @@
 
 set -e
 
+# go env
+# go help environment
+
+# GOENV指向一个文件路径，go会从这个文件读取env配置
 export GOENV=off
+
+# 最终安装路径应该是GOROOT_FINAL/go, 如果有GOBIN会安装到这个路径
 unset GOBIN # Issue 14340
 unset GOFLAGS
 unset GO111MODULE
@@ -104,6 +117,7 @@ fi
 # Test for bad SELinux.
 # On Fedora 16 the selinux filesystem is mounted at /sys/fs/selinux,
 # so loop through the possible selinux mount points.
+# allow_execstack: Allow unconfined executables to make their stack executable
 for se_mount in /selinux /sys/fs/selinux
 do
 	if [ -d $se_mount -a -f $se_mount/booleans/allow_execstack -a -x /usr/sbin/selinuxenabled ] && /usr/sbin/selinuxenabled; then
@@ -130,6 +144,7 @@ if [ "$(uname -s)" = "GNU/kFreeBSD" ]; then
 	export CGO_ENABLED=0
 fi
 
+# [Requesting program interpreter: /lib64/ld-linux-x86-64.so.2] => GO_LDSO=/lib64/ld-linux-x86-64.so.2
 # Test which linker/loader our system is using, if GO_LDSO is not set.
 if [ -z "$GO_LDSO" ] && type readelf >/dev/null 2>&1; then
 	if echo "int main() { return 0; }" | ${CC:-cc} -o ./test-musl-ldso -x c - >/dev/null 2>&1; then
@@ -154,6 +169,9 @@ fi
 
 export GOROOT_BOOTSTRAP=${GOROOT_BOOTSTRAP:-$HOME/go1.4}
 export GOROOT="$(cd .. && pwd)"
+
+# 遍历PATH中的所有go，找到第一个默认GOROOT和当前需要编译的版本路径不一样的go，设置
+# GOROOT_BOOTSTRAP为这个go的默认GOROOT, 结果为GOROOT_BOOTSTRAP=/usr/lib/go
 IFS=$'\n'; for go_exe in $(type -ap go); do
 	if [ ! -x "$GOROOT_BOOTSTRAP/bin/go" ]; then
 		goroot=$(GOROOT='' GOOS='' GOARCH='' "$go_exe" env GOROOT)
@@ -161,12 +179,14 @@ IFS=$'\n'; for go_exe in $(type -ap go); do
 			GOROOT_BOOTSTRAP=$goroot
 		fi
 	fi
+
 done; unset IFS
 if [ ! -x "$GOROOT_BOOTSTRAP/bin/go" ]; then
 	echo "ERROR: Cannot find $GOROOT_BOOTSTRAP/bin/go." >&2
 	echo "Set \$GOROOT_BOOTSTRAP to a working Go tree >= Go 1.4." >&2
 	exit 1
 fi
+
 # Get the exact bootstrap toolchain version to help with debugging.
 # We clear GOOS and GOARCH to avoid an ominous but harmless warning if
 # the bootstrap doesn't support them.
@@ -184,13 +204,19 @@ rm -f cmd/dist/dist
 GOROOT="$GOROOT_BOOTSTRAP" GOOS="" GOARCH="" GO111MODULE=off "$GOROOT_BOOTSTRAP/bin/go" build -o cmd/dist/dist ./cmd/dist
 
 # -e doesn't propagate out of eval, so check success by hand.
-eval $(./cmd/dist/dist env -p || echo FAIL=true)
+#eval $(./cmd/dist/dist env -p || echo FAIL=true)
 if [ "$FAIL" = true ]; then
 	exit 1
 fi
 
 if $verbose; then
 	echo
+fi
+
+if [ "$1" = "-d" ]; then
+	env | grep GO
+	shift
+	exit 0
 fi
 
 if [ "$1" = "--dist-tool" ]; then
@@ -206,6 +232,13 @@ fi
 # Run dist bootstrap to complete make.bash.
 # Bootstrap installs a proper cmd/dist, built with the new toolchain.
 # Throw ours, built with Go 1.4, away after bootstrap.
+
+if $verbose; then
+	echo "####### Run ./cmd/dist/dist env -p #######"
+	./cmd/dist/dist env -p
+	echo "##########################################"
+fi
+
 ./cmd/dist/dist bootstrap -a $vflag $GO_DISTFLAGS "$@"
 rm -f ./cmd/dist/dist
 

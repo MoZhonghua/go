@@ -4,6 +4,8 @@
 // license that can be found in the LICENSE file.
 -->
 
+syntet tree -> ast tree -> ssa -> ssa lowered -> machine code
+
 ## Introduction to the Go compiler
 
 `cmd/compile` contains the main packages that form the Go compiler. The compiler

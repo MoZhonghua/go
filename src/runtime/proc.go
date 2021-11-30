@@ -5680,7 +5680,7 @@ func retake(now int64) uint32 {
 				pd.schedtick = uint32(t)
 				pd.schedwhen = now
 			} else if pd.schedwhen+forcePreemptNS <= now {
-				if unsafe.Pointer(_p_.m.ptr().curg) != markdebug.g {
+				if _p_.m != 0 && unsafe.Pointer(_p_.m.ptr().curg) != markdebug.g {
 					preemptone(_p_)
 				}
 				// In case of syscall, preemptone() doesn't

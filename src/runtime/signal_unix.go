@@ -327,7 +327,7 @@ func doSigPreempt(gp *g, ctxt *sigctxt) {
 	// Check if this G wants to be preempted and is safe to
 	// preempt.
 	if wantAsyncPreempt(gp) {
-		if markdebug.g == unsafe.Pointer(gp) {
+		if markdebug.needlog(gp) {
 			isOk, _ := isAsyncSafePoint(gp, ctxt.sigpc(), ctxt.sigsp(), ctxt.siglr())
 			println("doSigPreempt: gp =", gp, "wantAsyncPreempt =", wantAsyncPreempt(gp), "canPreempt =", isOk)
 			f := findfunc(ctxt.sigpc())

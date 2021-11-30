@@ -246,6 +246,7 @@ func xinit() {
 	if err := ioutil.WriteFile(pathf("%s/go.mod", workdir), []byte("module bootstrap"), 0666); err != nil {
 		fatalf("cannot write stub go.mod: %s", err)
 	}
+	xprintf("work dir: %v\n", workdir)
 	xatexit(rmworkdir)
 
 	tooldir = pathf("%s/pkg/tool/%s_%s", goroot, gohostos, gohostarch)
@@ -625,6 +626,7 @@ func startInstall(dir string) chan struct{} {
 // runInstall installs the library, package, or binary associated with dir,
 // which is relative to $GOROOT/src.
 func runInstall(pkg string, ch chan struct{}) {
+	xprintf("runInstall pkg = %v\n", pkg)
 	if pkg == "net" || pkg == "os/user" || pkg == "crypto/x509" {
 		fatalf("go_bootstrap cannot depend on cgo package %s", pkg)
 	}
@@ -644,6 +646,7 @@ func runInstall(pkg string, ch chan struct{}) {
 	}
 
 	workdir := pathf("%s/%s", workdir, pkg)
+	xprintf("  [%v] workdir = %v\n", pkg, workdir)
 	xmkdirall(workdir)
 
 	var clean []string
@@ -661,6 +664,7 @@ func runInstall(pkg string, ch chan struct{}) {
 	// on the name. There should be no "main" packages in vendor, since
 	// 'go mod vendor' will only copy imported packages there.
 	ispkg := !strings.HasPrefix(pkg, "cmd/") || strings.Contains(pkg, "/internal/") || strings.Contains(pkg, "/vendor/")
+	xprintf("  install %v: dir = %v; ispkg = %v\n", name, dir, ispkg)
 
 	// Start final link command line.
 	// Note: code below knows that link.p[targ] is the target.
@@ -673,6 +677,7 @@ func runInstall(pkg string, ch chan struct{}) {
 		// Go library (package).
 		ispackcmd = true
 		link = []string{"pack", packagefile(pkg)}
+		xprintf("  [%v] link = %#v\n", name, link)
 		targ = len(link) - 1
 		xmkdirall(filepath.Dir(link[targ]))
 	} else {
@@ -693,6 +698,7 @@ func runInstall(pkg string, ch chan struct{}) {
 		targ = len(link) - 1
 	}
 	ttarg := mtime(link[targ])
+	xprintf("  [%v] mtime target = %v\n", name, ttarg)
 
 	// Gather files that are sources for this target.
 	// Everything in that directory, and any target-specific
@@ -708,10 +714,13 @@ func runInstall(pkg string, ch chan struct{}) {
 		return !strings.HasPrefix(p, ".") && (!strings.HasPrefix(p, "_") || !strings.HasSuffix(p, ".go"))
 	})
 
+	xprintf("  [%v] files = %v\n", name, len(files))
+
 	for _, dt := range deptab {
 		if pkg == dt.prefix || strings.HasSuffix(dt.prefix, "/") && strings.HasPrefix(pkg, dt.prefix) {
 			for _, p := range dt.dep {
 				p = os.ExpandEnv(p)
+				xprintf("  [%v] add extra dep: %v\n", name, p)
 				files = append(files, p)
 			}
 		}
@@ -753,6 +762,7 @@ func runInstall(pkg string, ch chan struct{}) {
 		}
 		return true
 	})
+	xprintf("  [%v] target is stale = %v\n", name, stale)
 
 	// If there are no files to compile, we're done.
 	if len(files) == 0 {
@@ -771,8 +781,10 @@ func runInstall(pkg string, ch chan struct{}) {
 			pathf("%s/src/runtime/textflag.h", goroot), 0)
 		copyfile(pathf("%s/pkg/include/funcdata.h", goroot),
 			pathf("%s/src/runtime/funcdata.h", goroot), 0)
+			/*
 		copyfile(pathf("%s/pkg/include/asm_ppc64x.h", goroot),
 			pathf("%s/src/runtime/asm_ppc64x.h", goroot), 0)
+			*/
 	}
 
 	// Generate any missing files; regenerate existing ones.
@@ -818,6 +830,7 @@ func runInstall(pkg string, ch chan struct{}) {
 	}
 	sort.Strings(sortedImports)
 
+	xprintf("  [%v] install deps: %v\n", name, importMap)
 	for _, dep := range importMap {
 		startInstall(dep)
 	}
@@ -1114,16 +1127,19 @@ var cleanlist = []string{
 func clean() {
 	for _, name := range cleanlist {
 		path := pathf("%s/src/%s", goroot, name)
+		xprintf("clean dir: %v\n", path)
 		// Remove generated files.
 		for _, elem := range xreaddir(path) {
 			for _, gt := range gentab {
 				if strings.HasPrefix(elem, gt.nameprefix) {
+					xprintf("  rm generated file: %v\n", pathf("%s/%s", path, elem))
 					xremove(pathf("%s/%s", path, elem))
 				}
 			}
 		}
 		// Remove generated binary named for directory.
 		if strings.HasPrefix(name, "cmd/") {
+			xprintf("  rm binary: %v\n", pathf("%s/%s", path, name[4:]))
 			xremove(pathf("%s/%s", path, name[4:]))
 		}
 	}
@@ -1131,6 +1147,7 @@ func clean() {
 	// remove runtimegen files.
 	path := pathf("%s/src/runtime", goroot)
 	for _, elem := range runtimegen {
+		xprintf("rm runtime gen file: %v\n", pathf("%s/%s", path, elem))
 		xremove(pathf("%s/%s", path, elem))
 	}
 
@@ -1557,6 +1574,7 @@ func checkNotStale(goBinary string, targets ...string) {
 // We list all supported platforms in this list, so that this is the
 // single point of truth for supported platforms. This list is used
 // by 'go tool dist list'.
+// cgoEnabled["x"]为false也会列出，也就是说其他功能都支持，只有cgo问题
 var cgoEnabled = map[string]bool{
 	"aix/ppc64":       true,
 	"darwin/amd64":    true,
