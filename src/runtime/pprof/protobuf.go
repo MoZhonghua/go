@@ -31,6 +31,11 @@ func (b *protobuf) uint64(tag int, x uint64) {
 }
 
 func (b *protobuf) uint64s(tag int, x []uint64) {
+	// varint编码, 数据长度不定。而长度不定导致写入长度本身要占用的字节数也不定
+	// 先编码数据，再编码长度。然后把数据后移，再长度移到开头。
+	// TODO(mzh): 可以预估长度字段本身占用的字节数，如果正确则不用复制
+
+	// Use packed encoding
 	if len(x) > 2 {
 		// Use packed encoding
 		n1 := len(b.data)

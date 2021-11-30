@@ -103,6 +103,8 @@ type memRecord struct {
 
 	// active is the currently published profile. A profiling
 	// cycle can be accumulated into active once its complete.
+	// active是从程序开始一直累加，返回给用户的也是这个数据, 每条记录
+	// 都是对应一个<stkframe, size>
 	active memRecordCycle
 
 	// future records the profile events we're counting for cycles

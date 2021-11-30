@@ -6,6 +6,10 @@ package pprof
 
 import "unsafe"
 
+// 普通map最大区别:
+//   - hash -> item list， 而普通map是hash -> block list
+//   - 访问命中item时，会把命中的item移动到最前面
+
 // A profMap is a map from (stack, tag) to mapEntry.
 // It grows without bound, but that's assumed to be OK.
 type profMap struct {

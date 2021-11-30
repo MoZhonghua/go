@@ -87,7 +87,7 @@ func scaleHeapSample(count, size, rate int64) (int64, int64) {
 	}
 
 	avgSize := float64(size) / float64(count)
-	scale := 1 / (1 - math.Exp(-avgSize/float64(rate)))
+	scale := 1 / (1 - math.Exp(-avgSize/float64(rate))) // 指数分布
 
 	return int64(float64(count) * scale), int64(float64(size) * scale)
 }

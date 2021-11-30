@@ -70,9 +70,15 @@ const (
 )
 
 const (
+	// 用的是这个PB里的tag值: https://github.com/google/pprof/blob/master/proto/profile.proto
 	// message Profile
+
+	// 一个Sample里有多个Value(int64)，每个Value的名称和单位由SampleType数组定义
+	// len([]Sample.Value) == len([]SampleType)
 	tagProfile_SampleType        = 1  // repeated ValueType
 	tagProfile_Sample            = 2  // repeated Sample
+
+	// Mapping是指executable/dso的信息和对应的内存映射信息
 	tagProfile_Mapping           = 3  // repeated Mapping
 	tagProfile_Location          = 4  // repeated Location
 	tagProfile_Function          = 5  // repeated Function
@@ -208,6 +214,7 @@ func (b *profileBuilder) pbMapping(tag int, id, base, limit, offset uint64, file
 	b.pb.endMessage(tag, start)
 }
 
+// 只有一个PC地址，这里是为了展开inline的调用栈，缓存起来，避免每次都重新展开
 func allFrames(addr uintptr) ([]runtime.Frame, symbolizeFlag) {
 	// Expand this one address using CallersFrames so we can cache
 	// each expansion. In general, CallersFrames takes a whole
@@ -241,6 +248,7 @@ func allFrames(addr uintptr) ([]runtime.Frame, symbolizeFlag) {
 
 type locInfo struct {
 	// location id assigned by the profileBuilder
+	// proto文件里，一个location id是对应一个PC的，这里额外记录了inline展开后的PC列表
 	id uint64
 
 	// sequence of PCs, including the fake PCs returned by the traceback

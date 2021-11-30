@@ -2,6 +2,17 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+// mprof.go 记录每个GC周期的allocs/frees, 在mt阶段汇总到active，读取数据时返回active数据
+// cpuprof.go 动态开始记录，然后写入ringbuffer，另一个goroutine从ringbuffer读取并写入用户提供的
+//            writer, 最后动态停止. 没有累计概念.
+
+// label如何工作g.labels (unsafe.Pointer)字段
+//   - 调用SetGoroutineLabels(labels)会设置当前curg.labels字段
+//   - go something()新建的goroutine会继承创建者的labels: newg.labels = curg.labels
+//   - runtime收集sample时会读取curg.labels字段并附加到sample中
+//   - 对runtime来说, labels只是一个指针，在pprof包中，指向一个map[string]string对象, 一个label是一
+//   个键值对
+
 // Package pprof writes runtime profiling data in the format expected
 // by the pprof visualization tool.
 //
@@ -115,6 +126,7 @@ import (
 // If there has been no garbage collection at all, the heap profile reports
 // all known allocations. This exception helps mainly in programs running
 // without garbage collection enabled, usually for debugging purposes.
+// 指读取数据时是把3个cycle数据汇总active，然后返回。正常情况下实在mt阶段flush，读取时不用 mprof.go:610
 //
 // The heap profile tracks both the allocation sites for all live objects in
 // the application memory and for all objects allocated since the program start.
@@ -133,6 +145,7 @@ import (
 type Profile struct {
 	name  string
 	mu    sync.Mutex
+	// 这是value -> stktrace 的map
 	m     map[interface{}][]uintptr
 	count func() int
 	write func(io.Writer, int) error

@@ -12,6 +12,41 @@ import (
 	"unsafe"
 )
 
+/*
+defer相关逻辑:
+
+比如在函数f1()中:
+ 1. defer something(); 以栈上分配_defer为例
+    - something()打包成funcval
+    - 在栈上构建_defer对象
+    - call deferprocStack(*_defer)，加到g.defer链表头
+      * 设置pc和sp， pc指向call deferprocStack下一条指令, sp指向f1()的栈底
+      * 设置AX=0，即返回值为0
+    - deferprocStack返回，根据AX值两种流程:
+      * call deferprocStack()返回到这里，AX=0，正常往下执行
+      * gogo(_defer.pc, defer_.sp)跳转过来，something()里调用recover(), AX=1
+        等价于在f1()在defer something()之后直接return，继续执行完f1()的其他defer，然后返回f1()调用者
+
+ 2. 函数正常返回执行defer
+    - return语句变成调用deferreturn
+    - deferreturn取出第一个defer，然后通过call jmpdefer(_defer.fn, sp of f1)来跳转到something()
+       - something()开始执行时的栈结构等价于从f1()直接调用something()，唯一的区别是ret地址指向
+         f1()中call deferreturn这条指令
+       - 修改ret地址: ret = ret - 5: amd64中call deferreturn指令为5字节
+       - long jump to something()
+    - something()执行完之后return，再次到call deferreturn
+    - 直到当前frame中的所有defer完成，deferreturn正常ret回到f1()，f1()正常ret
+
+3. panic时执行defer, panic("x")编译为call gopanic("x")
+   - gopanic()正常创建frame，在栈上分配_panic对象，g._panic = &_panic
+   - 取出g._defer第一个, _defer.panic = &_panic
+   - call defer_.fn
+      * fn的调用栈没有特别处理，就是相当于在gopanic()里正常调用funcval
+      * 如果fn调用了recover(), 会设置_panic.recoverd=true
+   - 检查_panic.recoverd, 如果为true，则gogo(_defer.pc, _defer.sp), AX=1, 也就是2中的流程
+   - 处理下一个，如果所有defer都处理完了，打印gopanic()调用栈，退出程序
+*/
+
 // We have two different ways of doing defers. The older way involves creating a
 // defer record at the time that a defer statement is executing and adding it to a
 // defer chain. This chain is inspected by the deferreturn call at all function
@@ -1075,6 +1110,8 @@ func gopanic(e interface{}) {
 			if gp._panic != nil && gp._panic.goexit && gp._panic.aborted {
 				// A normal recover would bypass/abort the Goexit.  Instead,
 				// we return to the processing loop of the Goexit.
+				// mcall不允许传入的funcval不允许访问栈上的数据，因为在funcval执行完成前这个
+				// goroutine可能被调度到其他P，导致栈失效。这里用sigcode0和sigcode1来传递参数
 				gp.sigcode0 = uintptr(gp._panic.sp)
 				gp.sigcode1 = uintptr(gp._panic.pc)
 				mcall(recovery)
