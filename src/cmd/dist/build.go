@@ -1292,10 +1292,12 @@ func cmdbootstrap() {
 
 	var noBanner, noClean bool
 	var debug bool
+	var stopattoolchain int
 	flag.BoolVar(&rebuildall, "a", rebuildall, "rebuild all")
 	flag.BoolVar(&debug, "d", debug, "enable debugging of bootstrap process")
 	flag.BoolVar(&noBanner, "no-banner", noBanner, "do not print banner")
 	flag.BoolVar(&noClean, "no-clean", noClean, "print deprecation warning")
+	flag.IntVar(&stopattoolchain, "stop", 0, "stop after build toolchain X")
 
 	xflagparse(0)
 
@@ -1347,9 +1349,10 @@ func cmdbootstrap() {
 
 	timelog("build", "toolchain1")
 	checkCC()
-	bootstrapBuildTools()
 
-	os.Exit(0)
+	// 生成 go/pkg/bootstrap/bin/{compile,link,asm}
+	// 再复制到 go/pkg/tool/linux_amd64/{compile,link, asm}
+	bootstrapBuildTools()
 
 	// Remember old content of $GOROOT/bin for comparison below.
 	oldBinFiles, _ := filepath.Glob(pathf("%s/bin/*", goroot))
@@ -1366,8 +1369,19 @@ func cmdbootstrap() {
 
 	timelog("build", "go_bootstrap")
 	xprintf("Building Go bootstrap cmd/go (go_bootstrap) using Go toolchain1.\n")
+
+	run("", ShowOutput, "/usr/bin/go", "env")
+
+	// GOROOT="/home/mozhonghua/go/src/github.com/golang/go"
+	// GOTOOLDIR=$GOROOT/pkg/tool/linux_amd64/ : 使用新刚刚编译出来的compile/link/asm
+
+	// 生成go/pkg/linux_amd64/runtime.a
 	install("runtime") // dependency not visible in sources; also sets up textflag.h
+
+	// 生成go/pkg/tool/linux_amd64/go_bootstrap
+	// cmd/go会特别处理， 设置-o go_bootstrap
 	install("cmd/go")
+
 	if vflag > 0 {
 		xprintf("\n")
 	}
@@ -1375,10 +1389,15 @@ func cmdbootstrap() {
 	gogcflags = os.Getenv("GO_GCFLAGS") // we were using $BOOT_GO_GCFLAGS until now
 	goldflags = os.Getenv("GO_LDFLAGS") // we were using $BOOT_GO_LDFLAGS until now
 	goBootstrap := pathf("%s/go_bootstrap", tooldir)
+	// goBootstrap => /home/mozhonghua/go/src/github.com/golang/go/pkg/tool/linux_amd64/go_bootstrap
 	cmdGo := pathf("%s/go", gobin)
 	if debug {
 		run("", ShowOutput|CheckExit, pathf("%s/compile", tooldir), "-V=full")
 		copyfile(pathf("%s/compile1", tooldir), pathf("%s/compile", tooldir), writeExec)
+	}
+
+	if stopattoolchain > 0 && stopattoolchain <= 1 {
+		os.Exit(0)
 	}
 
 	// To recap, so far we have built the new toolchain
@@ -1410,6 +1429,10 @@ func cmdbootstrap() {
 		run("", ShowOutput|CheckExit, pathf("%s/compile", tooldir), "-V=full")
 		run("", ShowOutput|CheckExit, pathf("%s/buildid", tooldir), pathf("%s/pkg/%s_%s/runtime/internal/sys.a", goroot, goos, goarch))
 		copyfile(pathf("%s/compile2", tooldir), pathf("%s/compile", tooldir), writeExec)
+	}
+
+	if stopattoolchain > 0 && stopattoolchain <= 1 {
+		os.Exit(0)
 	}
 
 	// Toolchain2 should be semantically equivalent to toolchain1,
