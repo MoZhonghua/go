@@ -664,7 +664,7 @@ func runInstall(pkg string, ch chan struct{}) {
 	// on the name. There should be no "main" packages in vendor, since
 	// 'go mod vendor' will only copy imported packages there.
 	ispkg := !strings.HasPrefix(pkg, "cmd/") || strings.Contains(pkg, "/internal/") || strings.Contains(pkg, "/vendor/")
-	xprintf("  install %v: dir = %v; ispkg = %v\n", name, dir, ispkg)
+	xprintf("  [%v] dir = %v; ispkg = %v\n", name, dir, ispkg)
 
 	// Start final link command line.
 	// Note: code below knows that link.p[targ] is the target.
@@ -714,8 +714,6 @@ func runInstall(pkg string, ch chan struct{}) {
 		return !strings.HasPrefix(p, ".") && (!strings.HasPrefix(p, "_") || !strings.HasSuffix(p, ".go"))
 	})
 
-	xprintf("  [%v] files = %v\n", name, len(files))
-
 	for _, dt := range deptab {
 		if pkg == dt.prefix || strings.HasSuffix(dt.prefix, "/") && strings.HasPrefix(pkg, dt.prefix) {
 			for _, p := range dt.dep {
@@ -726,13 +724,13 @@ func runInstall(pkg string, ch chan struct{}) {
 		}
 	}
 	files = uniq(files)
-
 	// Convert to absolute paths.
 	for i, p := range files {
 		if !filepath.IsAbs(p) {
 			files[i] = pathf("%s/%s", dir, p)
 		}
 	}
+	xprintf("  [%v] files = %v\n", name, len(files))
 
 	// Is the target up-to-date?
 	var gofiles, sfiles, missing []string
@@ -781,10 +779,10 @@ func runInstall(pkg string, ch chan struct{}) {
 			pathf("%s/src/runtime/textflag.h", goroot), 0)
 		copyfile(pathf("%s/pkg/include/funcdata.h", goroot),
 			pathf("%s/src/runtime/funcdata.h", goroot), 0)
-			/*
-		copyfile(pathf("%s/pkg/include/asm_ppc64x.h", goroot),
-			pathf("%s/src/runtime/asm_ppc64x.h", goroot), 0)
-			*/
+		/*
+			copyfile(pathf("%s/pkg/include/asm_ppc64x.h", goroot),
+				pathf("%s/src/runtime/asm_ppc64x.h", goroot), 0)
+		*/
 	}
 
 	// Generate any missing files; regenerate existing ones.
@@ -830,12 +828,12 @@ func runInstall(pkg string, ch chan struct{}) {
 	}
 	sort.Strings(sortedImports)
 
-	xprintf("  [%v] install deps: %v\n", name, importMap)
+	// xprintf("  [%v] install deps: %v\n", name, importMap)
 	for _, dep := range importMap {
 		startInstall(dep)
 	}
 	for _, dep := range importMap {
-		install(dep)
+		install(dep) // 等待dep编译成.a并复制到安转根目录GOROOT/pkg/linux_amd64/pkg.a完成
 	}
 
 	if goos != gohostos || goarch != gohostarch {
@@ -868,6 +866,15 @@ func runInstall(pkg string, ch chan struct{}) {
 		asmArgs = append(asmArgs, "-compiling-runtime")
 	}
 
+	// go build ./pkg 过程
+	//   - 收集依赖关系，build所有依赖为.a文件，生成importcfg文件，包含每个依赖对应的.a文件路径
+	//   - 如果有.s文件，调用asm -gensymabis 生成 go_asm.h 文件，包含go结构体各个字段偏移量
+	//   - 如果有.s文件，调用asm 编译每个.s文件对对应.o文件
+	//   - 调用compile -pack编译所有.go文件为一个_go_.a文件, 里面只有一个_go_.o
+	//   - 判断是要生成.a 还是 exec:
+	//      * 把上面生成的.s文件生成的.o文件用追加到_go_.a文件, 复制到GOROOT/pkg/linux_amd64/pkg.a
+	//      * 调用link所有.a和.o链接为可执行文件
+
 	// Collect symabis from assembly code.
 	var symabis string
 	if len(sfiles) > 0 {
@@ -883,6 +890,8 @@ func runInstall(pkg string, ch chan struct{}) {
 	}
 
 	// Build an importcfg file for the compiler.
+	// compiler看到的依赖必须是已经编译成.a文件的包，go build需要按照依赖顺序
+	// 依次compile package到.a文件, 然后在importcfg文件中明确每个依赖package对应.a文件
 	buf := &bytes.Buffer{}
 	for _, imp := range sortedImports {
 		if imp == "unsafe" {
@@ -964,12 +973,14 @@ func runInstall(pkg string, ch chan struct{}) {
 
 	if ispackcmd {
 		xremove(link[targ])
+		xprintf("  [%v] do pack: dst = %v; src = %v; extra = %v\n", name, link[targ], archive, len(link[targ+1:]))
 		dopack(link[targ], archive, link[targ+1:])
 		return
 	}
 
 	// Remove target before writing it.
 	xremove(link[targ])
+	xprintf("  [%v] do link = %v\n", name, link)
 	bgrun(&wg, "", link...)
 	bgwait(&wg)
 }
@@ -1041,7 +1052,6 @@ func shouldbuild(file, pkg string) bool {
 	if strings.Contains(name, "_test") {
 		return false
 	}
-
 	// Check file contents for // +build lines.
 	for _, p := range strings.Split(readfile(file), "\n") {
 		p = strings.TrimSpace(p)
@@ -1056,7 +1066,7 @@ func shouldbuild(file, pkg string) bool {
 		if code == "package documentation" {
 			return false
 		}
-		if code == "package main" && pkg != "cmd/go" && pkg != "cmd/cgo" {
+		if code == "package main" && pkg != "cmd/go" && pkg != "cmd/cgo" && !strings.HasPrefix(pkg, "cmd/") {
 			return false
 		}
 		if !strings.HasPrefix(p, "//") {

@@ -136,6 +136,7 @@ func (r *importReader) readKeyword(kw string) {
 			return
 		}
 	}
+	// keyword之后应该是非ID字符
 	if isIdent(r.peekByte(false)) {
 		r.syntaxError()
 	}
@@ -247,6 +248,10 @@ func readimports(file string) []string {
 	return imports
 }
 
+// import "xx" 只要xx的第一部分包含"."， 比如golang.org，那么代码就是在vendor目录
+// 下。根据引用者所在的目录，选择src/vendor 和 src/cmd/vendor中的一个。根本上是保证
+// 能找到xx所在的代码目录.
+
 // resolveVendor returns a unique package path imported with the given import
 // path from srcDir.
 //
@@ -261,6 +266,7 @@ func resolveVendor(imp, srcDir string) string {
 	} else {
 		first = imp[:i]
 	}
+
 	isStandard := !strings.Contains(first, ".")
 	if isStandard {
 		return imp
