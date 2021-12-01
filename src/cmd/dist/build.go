@@ -730,8 +730,6 @@ func runInstall(pkg string, ch chan struct{}) {
 			files[i] = pathf("%s/%s", dir, p)
 		}
 	}
-	xprintf("  [%v] files = %v\n", name, len(files))
-
 	// Is the target up-to-date?
 	var gofiles, sfiles, missing []string
 	stale := rebuildall
@@ -760,6 +758,8 @@ func runInstall(pkg string, ch chan struct{}) {
 		}
 		return true
 	})
+
+	xprintf("  [%v] gofiles = %v; asmfiles = %v\n", name, len(gofiles), len(sfiles))
 	xprintf("  [%v] target is stale = %v\n", name, stale)
 
 	// If there are no files to compile, we're done.
@@ -1348,6 +1348,8 @@ func cmdbootstrap() {
 	timelog("build", "toolchain1")
 	checkCC()
 	bootstrapBuildTools()
+
+	os.Exit(0)
 
 	// Remember old content of $GOROOT/bin for comparison below.
 	oldBinFiles, _ := filepath.Glob(pathf("%s/bin/*", goroot))
