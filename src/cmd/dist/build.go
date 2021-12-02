@@ -4,6 +4,29 @@
 
 package main
 
+// compile命令需要通过显示传入所有.go文件列表和importcfg，不管mod, vendor等机制，这些都是
+// 由go命令来完成。
+
+// 在bootstrap中，这些是由dist来完成，做了大量简化，只需处理自举用到的包。
+
+// 需要完成如下工作:
+//   1. 选择哪个go命令
+//   2. go会选择哪个toolchain
+//       - 默认为 $GOROOT/pkg/tool/linux_amd64/...
+//       - 通过GOTOOLDIR设置
+//   3. runtime代码路径: $GOROOT/runtime
+//   4. import xxx: 怎么找到xxx包所在路径
+//       - $GOROOT/xxx
+//       - $GOPATH/xxx
+//       - GO111MODULE: go.mod
+//       - vendor/
+//   5. 如果是install xxx，exe安装路径是
+//       - 如果xxx是在 GOROOT 下，则到$GOROOT/bin/或者$GOTOOLDIR/bin
+//       - 其他则$GOBIN（默认值为$GOPATH/bin, $HOME/go/bin如果GOPATH未设置）
+//   6. 如果是install xxx，普通package安装路径
+//       - 如果xxx是在 GOROOT 下，则到$GOROOT/pkg/linux_amd64/下
+//       - 其他则$GOCACHE下
+
 import (
 	"bytes"
 	"encoding/json"
@@ -1292,17 +1315,25 @@ func cmdbootstrap() {
 
 	var noBanner, noClean bool
 	var debug bool
-	var stopattoolchain int
+	var stopAt int
 	flag.BoolVar(&rebuildall, "a", rebuildall, "rebuild all")
 	flag.BoolVar(&debug, "d", debug, "enable debugging of bootstrap process")
 	flag.BoolVar(&noBanner, "no-banner", noBanner, "do not print banner")
 	flag.BoolVar(&noClean, "no-clean", noClean, "print deprecation warning")
-	flag.IntVar(&stopattoolchain, "stop", 0, "stop after build toolchain X")
+	flag.IntVar(&stopAt, "stop", 0, "stop after build toolchain X")
 
 	xflagparse(0)
 
 	if noClean {
 		xprintf("warning: --no-clean is deprecated and has no effect; use 'go install std cmd' instead\n")
+	}
+
+	checkStop := func(step int) {
+		xprintf("====================step %d done==================\n", step)
+		if stopAt != 0 && stopAt <= step {
+			os.Exit(0)
+		}
+		fmt.Scanln()
 	}
 
 	// Set GOPATH to an internal directory. We shouldn't actually
@@ -1370,7 +1401,7 @@ func cmdbootstrap() {
 	timelog("build", "go_bootstrap")
 	xprintf("Building Go bootstrap cmd/go (go_bootstrap) using Go toolchain1.\n")
 
-	run("", ShowOutput, "/usr/bin/go", "env")
+	checkStop(1)
 
 	// GOROOT="/home/mozhonghua/go/src/github.com/golang/go"
 	// GOTOOLDIR=$GOROOT/pkg/tool/linux_amd64/ : 使用新刚刚编译出来的compile/link/asm
@@ -1389,6 +1420,9 @@ func cmdbootstrap() {
 	gogcflags = os.Getenv("GO_GCFLAGS") // we were using $BOOT_GO_GCFLAGS until now
 	goldflags = os.Getenv("GO_LDFLAGS") // we were using $BOOT_GO_LDFLAGS until now
 	goBootstrap := pathf("%s/go_bootstrap", tooldir)
+
+	run("", ShowOutput, goBootstrap, "env")
+
 	// goBootstrap => /home/mozhonghua/go/src/github.com/golang/go/pkg/tool/linux_amd64/go_bootstrap
 	cmdGo := pathf("%s/go", gobin)
 	if debug {
@@ -1396,25 +1430,24 @@ func cmdbootstrap() {
 		copyfile(pathf("%s/compile1", tooldir), pathf("%s/compile", tooldir), writeExec)
 	}
 
-	if stopattoolchain > 0 && stopattoolchain <= 1 {
-		os.Exit(0)
-	}
+	checkStop(2)
 
+	// mk(source_code, goroot, toolchain, go)
 	// To recap, so far we have built the new toolchain
 	// (cmd/asm, cmd/cgo, cmd/compile, cmd/link)
 	// using Go 1.4's toolchain and go command.
 	// Then we built the new go command (as go_bootstrap)
 	// using the new toolchain and our own build logic (above).
 	//
-	//	toolchain1 = mk(new toolchain, go1.4 toolchain, go1.4 cmd/go)
-	//	go_bootstrap = mk(new cmd/go, toolchain1, cmd/dist)
+	//	toolchain1 = mk(new toolchain, go1.4 goroot, go1.4 toolchain, go1.4 cmd/go)
+	//	go_bootstrap = mk(new cmd/go, new goroot, toolchain1, cmd/dist)
 	//
 	// The toolchain1 we built earlier is built from the new sources,
 	// but because it was built using cmd/go it has no build IDs.
 	// The eventually installed toolchain needs build IDs, so we need
 	// to do another round:
 	//
-	//	toolchain2 = mk(new toolchain, toolchain1, go_bootstrap)
+	//	toolchain2 = mk(new toolchain, new goroot, toolchain1, go_bootstrap)
 	//
 	timelog("build", "toolchain2")
 	if vflag > 0 {
@@ -1431,9 +1464,7 @@ func cmdbootstrap() {
 		copyfile(pathf("%s/compile2", tooldir), pathf("%s/compile", tooldir), writeExec)
 	}
 
-	if stopattoolchain > 0 && stopattoolchain <= 1 {
-		os.Exit(0)
-	}
+	checkStop(3)
 
 	// Toolchain2 should be semantically equivalent to toolchain1,
 	// but it was built using the new compilers instead of the Go 1.4 compilers,
@@ -1449,7 +1480,7 @@ func cmdbootstrap() {
 	// To keep the behavior the same in both non-release and release builds,
 	// we force-install everything here.
 	//
-	//	toolchain3 = mk(new toolchain, toolchain2, go_bootstrap)
+	//	toolchain3 = mk(new toolchain, new goroot, toolchain2, go_bootstrap)
 	//
 	timelog("build", "toolchain3")
 	if vflag > 0 {
@@ -1463,6 +1494,8 @@ func cmdbootstrap() {
 		copyfile(pathf("%s/compile3", tooldir), pathf("%s/compile", tooldir), writeExec)
 	}
 	checkNotStale(goBootstrap, append(toolchain, "runtime/internal/sys")...)
+
+	checkStop(4)
 
 	if goos == oldgoos && goarch == oldgoarch {
 		// Common case - not setting up for cross-compilation.
@@ -1495,6 +1528,9 @@ func cmdbootstrap() {
 		os.Setenv("CC", compilerEnvLookup(defaultcc, goos, goarch))
 		xprintf("Building packages and commands for target, %s/%s.\n", goos, goarch)
 	}
+
+	// go help install
+	// standard packages (like fmt), meta-patterns (std, cmd, all)
 	targets := []string{"std", "cmd"}
 	if goos == "js" && goarch == "wasm" {
 		// Skip the cmd tools for js/wasm. They're not usable.
@@ -1509,6 +1545,8 @@ func cmdbootstrap() {
 		checkNotStale(goBootstrap, append(toolchain, "runtime/internal/sys")...)
 		copyfile(pathf("%s/compile4", tooldir), pathf("%s/compile", tooldir), writeExec)
 	}
+
+	checkStop(5)
 
 	// Check that there are no new files in $GOROOT/bin other than
 	// go and gofmt and $GOOS_$GOARCH (target bin when cross-compiling).
@@ -1544,6 +1582,8 @@ func cmdbootstrap() {
 		os.Setenv("GOARCH", goarch)
 		os.Setenv("CC", oldcc)
 	}
+
+	checkStop(6)
 
 	// Print trailing banner unless instructed otherwise.
 	if !noBanner {
