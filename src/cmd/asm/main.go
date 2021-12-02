@@ -26,6 +26,7 @@ func main() {
 	log.SetFlags(0)
 	log.SetPrefix("asm: ")
 
+	log.Printf("=======asm2")
 	buildcfg.Check()
 	GOARCH := buildcfg.GOARCH
 

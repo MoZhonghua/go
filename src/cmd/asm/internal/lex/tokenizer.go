@@ -16,6 +16,8 @@ import (
 	"cmd/internal/src"
 )
 
+var _ TokenReader = (*Tokenizer)(nil)
+
 // A Tokenizer is a simple wrapping of text/scanner.Scanner, configured
 // for our purposes and made a TokenReader. It forms the lowest level,
 // turning text from readers into tokens.

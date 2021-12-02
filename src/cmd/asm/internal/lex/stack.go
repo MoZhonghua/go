@@ -10,8 +10,12 @@ import (
 	"cmd/internal/src"
 )
 
+// 处理#include指令，尤其是嵌套#include，类似递归，可以用栈来实现
 // A Stack is a stack of TokenReaders. As the top TokenReader hits EOF,
 // it resumes reading the next one down.
+
+var _ TokenReader = (*Stack)(nil)
+
 type Stack struct {
 	tr []TokenReader
 }

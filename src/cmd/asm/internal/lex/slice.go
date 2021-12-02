@@ -10,6 +10,8 @@ import (
 	"cmd/internal/src"
 )
 
+var _ TokenReader = (*Slice)(nil)
+
 // A Slice reads from a slice of Tokens.
 type Slice struct {
 	tokens []Token

@@ -18,12 +18,16 @@ import (
 	"cmd/internal/src"
 )
 
+// 处理include，宏定义和展开， #ifdef条件指令
+
+var _ TokenReader = (*Input)(nil)
+
 // Input is the main input: a stack of readers and some macro definitions.
 // It also handles #include processing (by pushing onto the input stack)
 // and parses and instantiates macro definitions.
 type Input struct {
 	Stack
-	includes        []string
+	includes        []string // include dir, -I /usr/include/
 	beginningOfLine bool
 	ifdefStack      []bool
 	macros          map[string]*Macro
@@ -124,6 +128,9 @@ func (in *Input) Next() ScanToken {
 			if !in.beginningOfLine {
 				in.Error("'#' must be first item on line")
 			}
+
+			// #xxxx 会在内部处理掉xxx指令， 对外等价于 #\n, 中间没有内容
+			// 如果把\n也吃掉了，则返回true，标记已经是新一行了
 			in.beginningOfLine = in.hash()
 			in.text = "#"
 			return '#'
@@ -137,6 +144,7 @@ func (in *Input) Next() ScanToken {
 				in.invokeMacro(macro)
 				continue
 			}
+			// 注意下面的判断如果当前块是disabled，会直接跳过
 			fallthrough
 		default:
 			if tok == scanner.EOF && len(in.ifdefStack) > 0 {
@@ -165,7 +173,9 @@ func (in *Input) hash() bool {
 	if tok != scanner.Ident {
 		in.expectText("expected identifier after '#'")
 	}
+	// in.enabled() => len(in.ifdefStack) == 0 || in.ifdefStack[len(in.ifdefStack)-1]
 	if !in.enabled() {
+		// 如果当前块已经是disabled，只需要处理可能导致变成enabled()的指令
 		// Can only start including again if we are at #else or #endif but also
 		// need to keep track of nested #if[n]defs.
 		// We let #line through because it might affect errors.
@@ -232,6 +242,7 @@ func (in *Input) defineMacro(name string, args []string, tokens []Token) {
 // macroDefinition returns the list of formals and the tokens of the definition.
 // The argument list is nil for no parens on the definition; otherwise a list of
 // formal argument names.
+// 宏定义必须在一行，实际上是用多行，用 \ 连接为一行，这个是在tokenizer里处理
 func (in *Input) macroDefinition(name string) ([]string, []Token) {
 	prevCol := in.Stack.Col()
 	tok := in.Stack.Next()
@@ -394,7 +405,7 @@ func (in *Input) collectArgument(macro *Macro) ([]Token, ScanToken) {
 func (in *Input) ifdef(truth bool) {
 	name := in.macroName()
 	in.expectNewline("#if[n]def")
-	if !in.enabled() {
+	if !in.enabled() { // 如果外层的已经为false，这里也认为永远为false
 		truth = false
 	} else if _, defined := in.macros[name]; !defined {
 		truth = !truth
@@ -409,6 +420,7 @@ func (in *Input) else_() {
 		in.Error("unmatched #else")
 	}
 	if len(in.ifdefStack) == 1 || in.ifdefStack[len(in.ifdefStack)-2] {
+		// 倒数第二层为false时，倒数第一层应该永远保持false，不能取反成true
 		in.ifdefStack[len(in.ifdefStack)-1] = !in.ifdefStack[len(in.ifdefStack)-1]
 	}
 }
