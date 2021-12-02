@@ -4,3 +4,4 @@
 
 2021-12-02
 ./internal/goexperiment/*
+./cmd/asm/*

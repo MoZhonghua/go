@@ -891,9 +891,12 @@ func runInstall(pkg string, ch chan struct{}) {
 
 	// go build ./pkg 过程
 	//   - 收集依赖关系，build所有依赖为.a文件，生成importcfg文件，包含每个依赖对应的.a文件路径
-	//   - 如果有.s文件，调用asm -gensymabis 生成 go_asm.h 文件，包含go结构体各个字段偏移量
-	//   - 如果有.s文件，调用asm 编译每个.s文件对对应.o文件
+	//   - 如果有.s文件，调用asm -gensymabis 生成 .s文件中的符号表symabis文件, 内容为比如def "".add ABI0
+	//     - .s里有#include "go_asm.h"，需要临时生成一个空文件
+	//     - cat >$WORK/b001/go_asm.h << 'EOF'
 	//   - 调用compile -pack编译所有.go文件为一个_go_.a文件, 里面只有一个_go_.o
+	//      * 如果有.s文件， 则-asmhdr go_asm.h同时生成go_asm.h文件
+	//   - 如果有.s文件，调用asm 编译每个.s文件对对应.o文件
 	//   - 判断是要生成.a 还是 exec:
 	//      * 把上面生成的.s文件生成的.o文件用追加到_go_.a文件, 复制到GOROOT/pkg/linux_amd64/pkg.a
 	//      * 调用link所有.a和.o链接为可执行文件
@@ -905,6 +908,7 @@ func runInstall(pkg string, ch chan struct{}) {
 		var wg sync.WaitGroup
 		asmabis := append(asmArgs[:len(asmArgs):len(asmArgs)], "-gensymabis", "-o", symabis)
 		asmabis = append(asmabis, sfiles...)
+		// 创建一个空的go_asm.h文件
 		if err := ioutil.WriteFile(goasmh, nil, 0666); err != nil {
 			fatalf("cannot write empty go_asm.h: %s", err)
 		}
