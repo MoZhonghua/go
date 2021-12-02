@@ -330,6 +330,9 @@ func deferprocStack(d *_defer) {
 		// go code on the system stack can't defer
 		throw("defer on system stack")
 	}
+	// 两种方式来判断编译生成的代码是否支持exp
+	//  - build tag: goexperiment.regabidefer
+	//  - 使用"internal/goexperiment"包
 	if goexperiment.RegabiDefer && d.siz != 0 {
 		throw("defer with non-empty frame")
 	}

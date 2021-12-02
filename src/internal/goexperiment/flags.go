@@ -2,6 +2,29 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+// GOEXPERIMENT是在编译过程中起作用，控制的是编译输出的代码是否用到了
+// GOEXPERIMENT中定义的功能，比如输出的汇编是否使用了RegABI.
+
+// toolchain和GOEXPERIMENT关系:
+//  - 编译toolchain使用的GOEXPERIMENT, 我们不关心这个
+//  - 用toolchain编译代码时默认的GOEXPERIMENT
+//     - 在make.bash中指定, 通过环境变量传给dist
+//     - dist会自动生成 src/internal/buildcfg/zbootstrap.go 把GOEXPERIMENT值写入
+//     - dist编译toolchain1(GOEXPERIMENT=none)
+//         - toolchain1本身没使用RegABI
+//         - 由toolchain1编译生成的代码默认使用RegABI
+//     - dist用toolchain1编译toolchain2，此时GOEXPERIMENT还原为设置值
+
+// 如何在代码里和GOEXPERIMENT交互: 编译时会根据GOEXPERIMENT自动生成对应的build tag，代码
+// 里可以根据这些build tag来选择不同的实现
+
+// 同时这个包里对应每个experimenet会生成一个变量来标志, 实际也是通过build tag来实现
+// 相当于汇总起来，使用者不用自己去找有哪些exp
+
+// 假设支持a, b两个，只启用了a
+// GOEXPERIMENT=a
+// build tag: goexperiment.a !goexperiment.b
+
 // Package goexperiment implements support for toolchain experiments.
 //
 // Toolchain experiments are controlled by the GOEXPERIMENT
