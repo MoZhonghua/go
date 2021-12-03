@@ -33,12 +33,12 @@ type Parser struct {
 	pc               int64 // virtual PC; count of Progs; doesn't advance for GLOBL or DATA.
 	input            []lex.Token
 	inputPos         int
-	pendingLabels    []string // Labels to attach to next instruction.
-	labels           map[string]*obj.Prog
+	pendingLabels    []string // Labels to attach to next instruction. 比如 exit: 类似于golang里的goto label
+	labels           map[string]*obj.Prog // Prog is a single machine instruction
 	toPatch          []Patch
 	addr             []obj.Addr
 	arch             *arch.Arch
-	ctxt             *obj.Link
+	ctxt             *obj.Link // ctxt会维护额外信息，比如PosTable, FUNCDATA, PCDATA
 	firstProg        *obj.Prog
 	lastProg         *obj.Prog
 	dataAddr         map[string]int64 // Most recent address for DATA for this symbol.
@@ -159,6 +159,15 @@ func (p *Parser) nextToken() lex.ScanToken {
 	}
 }
 
+// 比如
+// TEXT dummy(SB),$0-0
+//    word = TEXT
+//    arg0 = dummy(SB)
+//    arg1 = $0-0
+// ADD AX, BX
+//    word = ADD
+//    arg0 = AX
+//    arg1 = BX
 // line consumes a single assembly line from p.lex of the form
 //
 //   {label:} WORD[.cond] [ arg {, arg} ] (';' | '\n')
@@ -220,6 +229,8 @@ next:
 				}
 				if tok == ':' {
 					// Labels.
+					// LABEL1: 记录到pendingLabels，然后从头开始。一遇到下一条指令，则把收集到
+					// 的pendingLabels都设置为这条指令的PC，然后清空pendingLabels
 					p.pendingLabels = append(p.pendingLabels, word)
 					goto next
 				}
@@ -269,6 +280,8 @@ func (p *Parser) instruction(op obj.As, word, cond string, operands [][]lex.Toke
 	p.isJump = p.arch.IsJump(word)
 	for _, op := range operands {
 		addr := p.address(op)
+		// FUNCDATA不是instruction，已经单独处理完了，不会在这出现
+		// 只有跳转类指令(call,jxx)可以用pseudo register?
 		if !p.isJump && addr.Reg < 0 { // Jumps refer to PC, a pseudo.
 			p.errorf("illegal use of pseudo-register in %s", word)
 		}
@@ -342,6 +355,8 @@ func (p *Parser) start(operand []lex.Token) {
 	p.inputPos = 0
 }
 
+// obj.Addr可以理解为operand，统一表示所有合法的操作数类型，比如立即数，寄存器和
+// (base + index*scale + offset)等等
 // address parses the operand into a link address structure.
 func (p *Parser) address(operand []lex.Token) obj.Addr {
 	p.start(operand)
@@ -781,7 +796,7 @@ func (p *Parser) symbolReference(a *obj.Addr, name string, prefix rune) {
 		a.Offset = int64(p.expr())
 	}
 	if isStatic {
-		a.Sym = p.ctxt.LookupStatic(name)
+		a.Sym = p.ctxt.LookupStatic(name) // create if not exists
 	} else {
 		a.Sym = p.ctxt.LookupABI(name, abi)
 	}
@@ -828,6 +843,11 @@ func (p *Parser) setPseudoRegister(addr *obj.Addr, reg string, isStatic bool, pr
 	}
 }
 
+// https://9p.io/sys/doc/asm.html
+// File-static variables have syntax
+//    local<>+4(SB)
+// 类似于C语言中static变量和函数，只能在当前文件内引用，因此不需要在symabis中对外暴露
+//
 // symRefAttrs parses an optional function symbol attribute clause for
 // the function symbol 'name', logging an error for a malformed
 // attribute clause if 'issueError' is true. The return value is a

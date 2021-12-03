@@ -25,6 +25,7 @@ var testOut *bytes.Buffer // Gathers output when testing.
 
 // append adds the Prog to the end of the program-thus-far.
 // If doLabel is set, it also defines the labels collect for this Prog.
+// doLabel总是为true. 可以有多个连续label，此时是这所有label指向同一个PC
 func (p *Parser) append(prog *obj.Prog, cond string, doLabel bool) {
 	if cond != "" {
 		switch p.arch.Family {
@@ -54,7 +55,7 @@ func (p *Parser) append(prog *obj.Prog, cond string, doLabel bool) {
 	if p.firstProg == nil {
 		p.firstProg = prog
 	} else {
-		p.lastProg.Link = prog
+		p.lastProg.Link = prog // 形成单向链表
 	}
 	p.lastProg = prog
 	if doLabel {
@@ -487,12 +488,14 @@ func (p *Parser) asmJump(op obj.As, cond string, a []obj.Addr) {
 		prog.To = *target
 	case target.Type == obj.TYPE_MEM && (target.Name == obj.NAME_EXTERN || target.Name == obj.NAME_STATIC):
 		// JMP main·morestack(SB)
+		// call main.morestack(SB)
 		prog.To = *target
 	case target.Type == obj.TYPE_INDIR && (target.Name == obj.NAME_EXTERN || target.Name == obj.NAME_STATIC):
 		// JMP *main·morestack(SB)
 		prog.To = *target
 		prog.To.Type = obj.TYPE_INDIR
 	case target.Type == obj.TYPE_MEM && target.Reg == 0 && target.Offset == 0:
+		// 这里exit是一个label
 		// JMP exit
 		if target.Sym == nil {
 			// Parse error left name unset.
@@ -524,6 +527,10 @@ func (p *Parser) asmJump(op obj.As, cond string, a []obj.Addr) {
 	p.append(prog, cond, true)
 }
 
+// 遇到跳转到label的指令时，label还没有定义，记录{Prog, label}到toPatch中
+// label是在TEXT范围内有效，当函数结束时，所有的label都应该有定义
+
+// 另外一种是call指令，会引用其他函数, 这种直接就是引用Addr, 不是Branch类型
 func (p *Parser) patch() {
 	for _, patch := range p.toPatch {
 		targetProg := p.labels[patch.label]
