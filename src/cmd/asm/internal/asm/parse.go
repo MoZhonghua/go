@@ -33,7 +33,7 @@ type Parser struct {
 	pc               int64 // virtual PC; count of Progs; doesn't advance for GLOBL or DATA.
 	input            []lex.Token
 	inputPos         int
-	pendingLabels    []string // Labels to attach to next instruction. 比如 exit: 类似于golang里的goto label
+	pendingLabels    []string             // Labels to attach to next instruction. 比如 exit: 类似于golang里的goto label
 	labels           map[string]*obj.Prog // Prog is a single machine instruction
 	toPatch          []Patch
 	addr             []obj.Addr
@@ -375,6 +375,24 @@ func (p *Parser) parseScale(s string) int8 {
 	return 0
 }
 
+// sym±offset(symkind)(reg)(index*scale)
+
+// 特别注意:
+//  - abc(SP)
+//  - g_m(SP)
+//
+// 这里是如何区分abc是sym，而g_m是offset，因为g_m是定义在go_asm.h的宏
+// lexer输出的token是已经替换过的，parser实际看到是100(SP)，显示100不是
+// 合法的IDENT，必须是offset
+
+// 这里的sym只是一个提示作用，可以忽略
+
+// $g_m(SP) 返回的是地址，即 SP + g_m
+// g_m(SP)  返回的是内存，即 SP + g_m 指向的内存
+
+// 如果判断第一个token是symbol(tok=IDENT)，则(reg)必须有，且必须是pseudo register
+// 然后正常处理(index*scale)
+
 // operand parses a general operand and stores the result in *a.
 func (p *Parser) operand(a *obj.Addr) {
 	//fmt.Printf("Operand: %v\n", p.input)
@@ -404,7 +422,8 @@ func (p *Parser) operand(a *obj.Addr) {
 	tok := p.next()
 	name := tok.String()
 	if tok.ScanToken == scanner.Ident && !p.atStartOfRegister(name) {
-		// We have a symbol. Parse $sym±offset(symkind)
+		// We have a symbol. Parse $sym±offset(symkind)(reg)
+		// reg必须是pseudo register
 		p.symbolReference(a, name, prefix)
 		// fmt.Printf("SYM %s\n", obj.Dconv(&emptyProg, 0, a))
 		if p.peek() == scanner.EOF {
