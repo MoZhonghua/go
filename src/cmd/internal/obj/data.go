@@ -85,7 +85,7 @@ func (s *LSym) prepwrite(ctxt *Link, off int64, siz int) {
 
 // WriteFloat32 writes f into s at offset off.
 func (s *LSym) WriteFloat32(ctxt *Link, off int64, f float32) {
-	s.prepwrite(ctxt, off, 4)
+	s.prepwrite(ctxt, off, 4) // s.Size已经+4
 	ctxt.Arch.ByteOrder.PutUint32(s.P[off:], math.Float32bits(f))
 }
 
@@ -112,6 +112,8 @@ func (s *LSym) WriteInt(ctxt *Link, off int64, siz int, i int64) {
 	}
 }
 
+// 在s.R中增加一项，使得s.R[x] -> rsym
+// 预留了空间，同时记录预留空间的偏移量， 但是没有写入真正的地址，在执行时由loader来写入
 func (s *LSym) writeAddr(ctxt *Link, off int64, siz int, rsym *LSym, roff int64, rtype objabi.RelocType) {
 	// Allow 4-byte addresses for DWARF.
 	if siz != ctxt.Arch.PtrSize && siz != 4 {
@@ -123,7 +125,7 @@ func (s *LSym) writeAddr(ctxt *Link, off int64, siz int, rsym *LSym, roff int64,
 	if int64(r.Off) != off {
 		ctxt.Diag("WriteAddr: off overflow %d in %s", off, s.Name)
 	}
-	r.Siz = uint8(siz)
+	r.Siz = uint8(siz) // <Off, Siz> 记录下来，loader计算出reloc地址后就知道怎么写入
 	r.Sym = rsym
 	r.Type = rtype
 	r.Add = roff

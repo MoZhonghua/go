@@ -5,3 +5,8 @@
 2021-12-02
 ./internal/goexperiment/*
 ./cmd/asm/*
+
+2021-12-03
+cmd/internal/obj/*
+cmd/internal/objfile/*
+cmd/internal/objfileabi/*

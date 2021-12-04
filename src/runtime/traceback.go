@@ -354,6 +354,8 @@ func gentraceback(pc0, sp0, lr0 uintptr, gp *g, skip int, pcbuf *uintptr, max in
 			}
 		}
 
+		// 栈扫描时不需要处理inlined函数，只有获取或者打印调用栈的时候需要
+
 		if pcbuf != nil {
 			pc := frame.pc
 			// backup to CALL instruction to read inlining info (same logic as below)

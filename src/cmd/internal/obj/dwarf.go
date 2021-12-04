@@ -15,6 +15,11 @@ import (
 	"sync"
 )
 
+// DIE: debugging information entry
+//  - consists of an identifying tag and a series of attributes.
+//  - An entry or group of entries together, provides a description of a corresponding entity in the
+//  source program
+
 // Generate a sequence of opcodes that is as short as possible.
 // See section 6.2.5
 const (
@@ -225,7 +230,7 @@ func (c dwCtxt) AddBytes(s dwarf.Sym, b []byte) {
 func (c dwCtxt) AddString(s dwarf.Sym, v string) {
 	ls := s.(*LSym)
 	ls.WriteString(c.Link, ls.Size, len(v), v)
-	ls.WriteInt(c.Link, ls.Size, 1, 0)
+	ls.WriteInt(c.Link, ls.Size, 1, 0) // null-terminated string
 }
 func (c dwCtxt) AddAddress(s dwarf.Sym, data interface{}, value int64) {
 	ls := s.(*LSym)

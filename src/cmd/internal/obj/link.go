@@ -292,6 +292,7 @@ type Prog struct {
 	Ctxt     *Link     // linker context
 	Link     *Prog     // next Prog in linked list
 	From     Addr      // first source operand
+	// AddPos带方向，后续是统一使用这个，不再使用Reg和RegTo2
 	RestArgs []AddrPos // can pack any operands that not fit into {Prog.From, Prog.To}
 	To       Addr      // destination operand (second is RegTo2 below)
 	Pool     *Prog     // constant pool entry, for arm,arm64 back ends
@@ -428,6 +429,8 @@ const (
 //
 // Subspaces are aligned to a power of two so opcodes can be masked
 // with AMask and used as compact array indices.
+
+// 每个架构分配了2**11=2048个opcode, (opcode + BASE) & AMask = opcode
 const (
 	ABase386 = (1 + iota) << 11
 	ABaseARM
@@ -469,9 +472,9 @@ type FuncInfo struct {
 	Align    int32
 	FuncID   objabi.FuncID
 	FuncFlag objabi.FuncFlag
-	Text     *Prog
-	Autot    map[*LSym]struct{}
-	Pcln     Pcln
+	Text     *Prog // Prog.Link形成链表
+	Autot    map[*LSym]struct{} // AutoType info, for DWARF
+	Pcln     Pcln  // pc line data
 	InlMarks []InlMark
 	spills   []RegSpill
 
@@ -660,6 +663,8 @@ const (
 	AttrOnList
 	AttrStatic
 
+	// typelink在module数据和，runtime会遍历所有module的typelink，保证同一个类型
+	// 总是指向同一个*rtype实例
 	// MakeTypelink means that the type should have an entry in the typelink table.
 	AttrMakeTypelink
 
@@ -705,6 +710,7 @@ const (
 	// assumed to be an ABI value.
 	//
 	// MUST BE LAST since all bits above this comprise the ABI.
+	// 也就是高位bits存储ABI
 	attrABIBase
 )
 
@@ -941,6 +947,11 @@ func (ctxt *Link) Logf(format string, args ...interface{}) {
 	ctxt.Bso.Flush()
 }
 
+// 栈扩容序列
+//   spill args
+//   call morestack_noctxt()
+//   unspill args
+
 // SpillRegisterArgs emits the code to spill register args into whatever
 // locations the spill records specify.
 func (fi *FuncInfo) SpillRegisterArgs(last *Prog, pa ProgAlloc) *Prog {
@@ -977,7 +988,7 @@ func (fi *FuncInfo) UnspillRegisterArgs(last *Prog, pa ProgAlloc) *Prog {
 // the hardware stack pointer and the local variable area.
 func (ctxt *Link) FixedFrameSize() int64 {
 	switch ctxt.Arch.Family {
-	case sys.AMD64, sys.I386, sys.Wasm:
+	case sys.AMD64, sys.I386, sys.Wasm: // what's abort bp register?
 		return 0
 	case sys.PPC64:
 		// PIC code on ppc64le requires 32 bytes of stack, and it's easier to
