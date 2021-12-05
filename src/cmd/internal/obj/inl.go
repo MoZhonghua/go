@@ -41,6 +41,9 @@ import "cmd/internal/src"
 //
 // Eventually, the compiler extracts a per-function inlining tree from
 // the global inlining tree (see pcln.go).
+
+// traceback的时候是PC直接找到IncluedCall节点，然后向上遍历到根节点，这样
+// 就能打印出带included func的调用栈
 type InlTree struct {
 	nodes []InlinedCall
 }

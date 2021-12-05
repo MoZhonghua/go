@@ -187,6 +187,8 @@ func WriteObjFile(ctxt *Link, b *bio.Writer) {
 	for _, list := range lists {
 		for _, s := range list {
 			w.Bytes(s.P)
+			// LSym.P的内容不是在s.P中，而是保存在file指定的文件中，需要从文件中读取
+			// 然后再写入到object file中
 			if file := s.File(); file != nil {
 				w.writeFile(ctxt, file)
 			}
@@ -399,6 +401,8 @@ func (w *writer) Hash(s *LSym) {
 
 func contentHash64(s *LSym) goobj.Hash64Type {
 	var b goobj.Hash64Type
+
+	// LSym.P内容可以当做hash值来使用, 但是这里规定len(s.P)==8
 	copy(b[:], s.P)
 	return b
 }
@@ -650,8 +654,8 @@ func nAuxSym(s *LSym) int {
 
 // generate symbols for FuncInfo.
 func genFuncInfoSyms(ctxt *Link) {
-	infosyms := make([]*LSym, 0, len(ctxt.Text))
-	hashedsyms := make([]*LSym, 0, 4*len(ctxt.Text))
+	infosyms := make([]*LSym, 0, len(ctxt.Text)) // dwarf相关的LSym
+	hashedsyms := make([]*LSym, 0, 4*len(ctxt.Text)) // golang的runtime用的LSym，比如pcln，inltable等等
 	preparePcSym := func(s *LSym) *LSym {
 		if s == nil {
 			return s

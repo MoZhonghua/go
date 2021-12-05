@@ -176,6 +176,7 @@ func (fp FingerprintType) IsZero() bool { return fp == FingerprintType{} }
 
 // Package Index.
 const (
+	// 注意这里都是特别大特殊值，[1...）才是正常的PkgIdx
 	PkgIdxNone     = (1<<31 - 1) - iota // Non-package symbols
 	PkgIdxHashed64                      // Short hashed (content-addressable) symbols
 	PkgIdxHashed                        // Hashed (content-addressable) symbols

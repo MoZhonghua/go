@@ -554,6 +554,7 @@ func (ft *DwarfFixupTable) GetPrecursorFunc(s *LSym) interface{} {
 	return nil
 }
 
+// fn LSyn -> { fn: interface{}, absfunc }
 func (ft *DwarfFixupTable) SetPrecursorFunc(s *LSym, fn interface{}) {
 	if _, found := ft.precursor[s]; found {
 		ft.ctxt.Diag("internal error: DwarfFixupTable.SetPrecursorFunc double call on %v", s)
@@ -580,6 +581,8 @@ func (ft *DwarfFixupTable) SetPrecursorFunc(s *LSym, fn interface{}) {
 
 // Make a note of a child DIE reference: relocation 'ridx' within symbol 's'
 // is targeting child 'c' of DIE with symbol 'tgt'.
+// ridx: relocation索引
+// dclidx: 指变量在inlined函数中索引，也就是VAR DIE做为AbsFunc DIE children的索引
 func (ft *DwarfFixupTable) ReferenceChildDIE(s *LSym, ridx int, tgt *LSym, dclidx int, inlIndex int) {
 	// Protect against concurrent access if multiple backend workers
 	ft.mu.Lock()
@@ -597,10 +600,12 @@ func (ft *DwarfFixupTable) ReferenceChildDIE(s *LSym, ridx int, tgt *LSym, dclid
 	// otherwise create a fixup record.
 	sf := &ft.svec[idx]
 	if len(sf.doffsets) > 0 {
+		// sf.doffsets总是一次性把所有的offset都写入，不为空=>absfunc已经全部写入完成
 		found := false
 		for _, do := range sf.doffsets {
 			if do.dclIdx == int32(dclidx) {
 				off := do.offset
+				// 设置的是对象内的偏移量，也就是VAR DIE在AbsFunc DIE内的偏移量
 				s.R[ridx].Add += int64(off)
 				found = true
 				break

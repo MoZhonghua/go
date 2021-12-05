@@ -55,6 +55,8 @@ func checkaddr(ctxt *Link, p *Prog, a *Addr) {
 	case TYPE_NONE, TYPE_REGREG2, TYPE_REGLIST:
 		return
 
+		// TYPE_TEXTSIZE 指TEXT指令的最后一个参数$a-$b，$framesize-$argsize
+		// 注意没有$argsize不是当做0，而是ArgsSizeUnknown
 	case TYPE_BRANCH, TYPE_TEXTSIZE:
 		if a.Reg != 0 || a.Index != 0 || a.Scale != 0 || a.Name != 0 {
 			break
@@ -90,7 +92,7 @@ func checkaddr(ctxt *Link, p *Prog, a *Addr) {
 		}
 		return
 
-	case TYPE_ADDR:
+	case TYPE_ADDR: // $100=>TYPE_CONST, $100(SP)=>TYPE_ADDR
 		if a.Val != nil {
 			break
 		}
@@ -138,6 +140,11 @@ func linkpatch(ctxt *Link, sym *LSym, newprog ProgAlloc) {
 		if p.To.Sym != nil {
 			continue
 		}
+
+		// 如果p是跳转指令，且只记录了offset，还没有设置指向的*Prog，这里遍历
+		// 指令列表找到offset对应的指令
+		// 第0条指令的跳表间隔最大，如果offset超出范围，会每次跳转5**6=3125条指令
+		// 很快就会搜索完成，结果为nil
 		q := sym.Func().Text
 		for q != nil && p.To.Offset != q.Pc {
 			if q.Forwd != nil && p.To.Offset >= q.Forwd.Pc {
@@ -155,7 +162,6 @@ func linkpatch(ctxt *Link, sym *LSym, newprog ProgAlloc) {
 			ctxt.Diag("branch out of range (%#x)\n%v [%s]", uint32(p.To.Offset), p, name)
 			p.To.Type = TYPE_NONE
 		}
-
 		p.To.SetTarget(q)
 	}
 

@@ -93,6 +93,9 @@ func (p Pos) RelLine() uint {
 		// base line is unknown => relative line is unknown
 		return 0
 	}
+	// b.Line(): 通过//line filename:line 设置的值
+	// b.Pos().Line(): 在//line这条命令在文件中行数
+	// p.Line(): 在文件中行数
 	return b.Line() + (p.Line() - b.Pos().Line())
 }
 

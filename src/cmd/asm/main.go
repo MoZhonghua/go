@@ -43,7 +43,7 @@ func main() {
 	ctxt.Flag_dynlink = *flags.Dynlink
 	ctxt.Flag_linkshared = *flags.Linkshared
 	ctxt.Flag_shared = *flags.Shared || *flags.Dynlink
-	ctxt.IsAsm = true
+	ctxt.IsAsm = true // 标记是从.s文件编译来的，不是从golang代码编译来的
 	ctxt.Pkgpath = *flags.Importpath
 	switch *flags.Spectre {
 	default:

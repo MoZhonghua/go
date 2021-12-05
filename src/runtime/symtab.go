@@ -10,6 +10,10 @@ import (
 	"unsafe"
 )
 
+// pcvalue的本质每个函数中每一条指令(PC值)对应一个int值，只是通过delta编码
+// pc value table, function data table都是每个函数独立的。所有函数的数据打包
+// 连续存放，每个函数的funcinfo记录了自己各个表的起始偏移量
+
 // Frames may be used to get function/file/line information for a
 // slice of PC values returned by Callers.
 type Frames struct {

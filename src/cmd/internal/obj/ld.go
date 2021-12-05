@@ -43,6 +43,9 @@ const (
 	LOG = 5
 )
 
+// 在链表中通过Forwd生成间隔为5，25, 125, 625, 3125的链表
+// 类似于跳表的结构
+
 func mkfwd(sym *LSym) {
 	var dwn [LOG]int32
 	var cnt [LOG]int32
@@ -65,6 +68,10 @@ func mkfwd(sym *LSym) {
 			i = LOG - 1
 		}
 		p.Forwd = nil
+
+		// 每LOG的Prog会导致dwn[i%LOG]-1, dwn[i]=LOG**i
+		// 也就是对于dwn[i]来说, 每遍历(LOG**i)*LOG个Prog会出现一次0
+		// 这样形成了一个间距为(LOG**i)*LOG个元素的链表
 		dwn[i]--
 		if dwn[i] <= 0 {
 			dwn[i] = cnt[i]
