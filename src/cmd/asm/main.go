@@ -104,6 +104,7 @@ func main() {
 		ctxt.NumberSyms()
 		obj.WriteObjFile(ctxt, buf)
 	}
+
 	if !ok || diag {
 		if failedFile != "" {
 			log.Printf("assembly of %s failed", failedFile)

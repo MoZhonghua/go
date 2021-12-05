@@ -320,47 +320,50 @@ const (
 )
 
 // Index into the abbrevs table below.
+// 在.debug_abbrev固定有且只有这39个(第0个为null，不使用)abbrev，表示DIE的<tag, attrlist>
+// 然后在.debug_info里直接存<abbrev_id+数据>
+// abbreviation类似于type ABBREV_X struct { tag, at ... }类型定义的概念
 const (
-	DW_ABRV_NULL = iota
-	DW_ABRV_COMPUNIT
-	DW_ABRV_COMPUNIT_TEXTLESS
-	DW_ABRV_FUNCTION
-	DW_ABRV_FUNCTION_ABSTRACT
-	DW_ABRV_FUNCTION_CONCRETE
-	DW_ABRV_INLINED_SUBROUTINE
-	DW_ABRV_INLINED_SUBROUTINE_RANGES
-	DW_ABRV_VARIABLE
-	DW_ABRV_INT_CONSTANT
-	DW_ABRV_AUTO
-	DW_ABRV_AUTO_LOCLIST
-	DW_ABRV_AUTO_ABSTRACT
-	DW_ABRV_AUTO_CONCRETE
-	DW_ABRV_AUTO_CONCRETE_LOCLIST
-	DW_ABRV_PARAM
-	DW_ABRV_PARAM_LOCLIST
-	DW_ABRV_PARAM_ABSTRACT
-	DW_ABRV_PARAM_CONCRETE
-	DW_ABRV_PARAM_CONCRETE_LOCLIST
-	DW_ABRV_LEXICAL_BLOCK_RANGES
-	DW_ABRV_LEXICAL_BLOCK_SIMPLE
-	DW_ABRV_STRUCTFIELD
-	DW_ABRV_FUNCTYPEPARAM
-	DW_ABRV_DOTDOTDOT
-	DW_ABRV_ARRAYRANGE
-	DW_ABRV_NULLTYPE
-	DW_ABRV_BASETYPE
-	DW_ABRV_ARRAYTYPE
-	DW_ABRV_CHANTYPE
-	DW_ABRV_FUNCTYPE
-	DW_ABRV_IFACETYPE
-	DW_ABRV_MAPTYPE
-	DW_ABRV_PTRTYPE
-	DW_ABRV_BARE_PTRTYPE // only for void*, no DW_AT_type attr to please gdb 6.
-	DW_ABRV_SLICETYPE
-	DW_ABRV_STRINGTYPE
-	DW_ABRV_STRUCTTYPE
-	DW_ABRV_TYPEDECL
-	DW_NABRV
+	DW_ABRV_NULL                      = iota
+	DW_ABRV_COMPUNIT                  = 1
+	DW_ABRV_COMPUNIT_TEXTLESS         = 2
+	DW_ABRV_FUNCTION                  = 3
+	DW_ABRV_FUNCTION_ABSTRACT         = 4
+	DW_ABRV_FUNCTION_CONCRETE         = 5
+	DW_ABRV_INLINED_SUBROUTINE        = 6
+	DW_ABRV_INLINED_SUBROUTINE_RANGES = 7
+	DW_ABRV_VARIABLE                  = 8
+	DW_ABRV_INT_CONSTANT              = 9
+	DW_ABRV_AUTO                      = 10
+	DW_ABRV_AUTO_LOCLIST              = 11
+	DW_ABRV_AUTO_ABSTRACT             = 12
+	DW_ABRV_AUTO_CONCRETE             = 13
+	DW_ABRV_AUTO_CONCRETE_LOCLIST     = 14
+	DW_ABRV_PARAM                     = 15
+	DW_ABRV_PARAM_LOCLIST             = 16
+	DW_ABRV_PARAM_ABSTRACT            = 17
+	DW_ABRV_PARAM_CONCRETE            = 18
+	DW_ABRV_PARAM_CONCRETE_LOCLIST    = 19
+	DW_ABRV_LEXICAL_BLOCK_RANGES      = 20
+	DW_ABRV_LEXICAL_BLOCK_SIMPLE      = 21
+	DW_ABRV_STRUCTFIELD               = 22
+	DW_ABRV_FUNCTYPEPARAM             = 23
+	DW_ABRV_DOTDOTDOT                 = 24
+	DW_ABRV_ARRAYRANGE                = 25
+	DW_ABRV_NULLTYPE                  = 26
+	DW_ABRV_BASETYPE                  = 27
+	DW_ABRV_ARRAYTYPE                 = 28
+	DW_ABRV_CHANTYPE                  = 29
+	DW_ABRV_FUNCTYPE                  = 30
+	DW_ABRV_IFACETYPE                 = 31
+	DW_ABRV_MAPTYPE                   = 32
+	DW_ABRV_PTRTYPE                   = 33
+	DW_ABRV_BARE_PTRTYPE              = 34 // only for void*, no DW_AT_type attr to please gdb 6.
+	DW_ABRV_SLICETYPE                 = 35
+	DW_ABRV_STRINGTYPE                = 36
+	DW_ABRV_STRUCTTYPE                = 37
+	DW_ABRV_TYPEDECL                  = 38
+	DW_NABRV                          = 39
 )
 
 type dwAbbrev struct {

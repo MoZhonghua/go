@@ -41,12 +41,15 @@ func (ctxt *Link) generateDebugLinesSymbol(s, lines *LSym) {
 	dctxt := dwCtxt{ctxt}
 
 	// Emit a LNE_set_address extended opcode, so as to establish the
-	// starting text address of this function.
+	// opcode=0表示接下来是一个extended opcode，长度为1+PtrSize
+	// DW_LNE_set_address(1 byte) + AddrOfFunc (PtrSize)
 	dctxt.AddUint8(lines, 0)
 	dwarf.Uleb128put(dctxt, lines, 1+int64(ctxt.Arch.PtrSize))
-	dctxt.AddUint8(lines, dwarf.DW_LNE_set_address)
-	dctxt.AddAddress(lines, s, 0)
 
+	dctxt.AddUint8(lines, dwarf.DW_LNE_set_address)
+	// 在lines的P[]数组中写入s的relocatable地址，linking过程中会替换为真正的地址值
+	// 0指在s对象中的offset为0
+	dctxt.AddAddress(lines, s, 0)
 	// Set up the debug_lines state machine to the default values
 	// we expect at the start of a new sequence.
 	stmt := true
@@ -108,6 +111,7 @@ func (ctxt *Link) generateDebugLinesSymbol(s, lines *LSym) {
 	// text address before the end sequence op. If this isn't done,
 	// GDB will assign a line number of zero the last row in the line
 	// table, which we don't want.
+	// 把最后一条指令的长度加上，现在PC指向函数代码+1的位置
 	lastlen := uint64(s.Size - (lastpc - s.Func().Text.Pc))
 	dctxt.AddUint8(lines, dwarf.DW_LNS_advance_pc)
 	dwarf.Uleb128put(dctxt, lines, int64(lastlen))
@@ -313,17 +317,25 @@ func (ctxt *Link) dwarfSym(s *LSym) (dwarfInfoSym, dwarfLocSym, dwarfRangesSym, 
 			Type: objabi.SDWARFFCN,
 		}
 		if ctxt.Flag_locationlists {
+			// .debug_loc, 存放location description list
+			// 比如描述一个string参数两个字段各自在哪个寄存器里
+			// (DW_OP_reg0 (rax); DW_OP_piece: 8; DW_OP_reg3 (rbx); DW_OP_piece: 8)
 			fn.dwarfLocSym = &LSym{
 				Type: objabi.SDWARFLOC,
 			}
 		}
 		fn.dwarfRangesSym = &LSym{
+			// .debug_ranges
+			// 存放rangelist，比如一个函数代码拆分为多个段，每个段对应一个range，
+			// 那么描述函数的TEXT起始结束位置时需要用rangelist，指向这个section的offset
 			Type: objabi.SDWARFRANGE,
 		}
 		fn.dwarfDebugLinesSym = &LSym{
+			// PC->File:Line关系，通过Line number program定义
 			Type: objabi.SDWARFLINES,
 		}
 		if s.WasInlined() {
+			// inlineed函数，需要abstract_subprogram
 			fn.dwarfAbsFnSym = ctxt.DwFixups.AbsFuncDwarfSym(s)
 		}
 	}
