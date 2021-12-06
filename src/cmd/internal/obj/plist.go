@@ -139,6 +139,8 @@ func Flushplist(ctxt *Link, plist *Plist, newprog ProgAlloc, myimportpath string
 
 		// ./x86/代码实现
 		ctxt.Arch.Preprocess(ctxt, s, newprog)
+
+		// 把函数的指令写入到s.P中，objdump显示TEXT size=N就是len(s.P)
 		ctxt.Arch.Assemble(ctxt, s, newprog)
 		if ctxt.Errors > 0 {
 			continue
