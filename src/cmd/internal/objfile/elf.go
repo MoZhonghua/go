@@ -14,6 +14,8 @@ import (
 	"io"
 )
 
+var _ rawFile = (*elfFile)(nil)
+
 type elfFile struct {
 	elf *elf.File
 }
@@ -33,6 +35,7 @@ func (f *elfFile) symbols() ([]Sym, error) {
 	}
 
 	var syms []Sym
+	// man nm /symbol type
 	for _, s := range elfSyms {
 		sym := Sym{Addr: s.Value, Name: s.Name, Size: int64(s.Size), Code: '?'}
 		switch s.Section {
