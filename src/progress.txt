@@ -11,6 +11,5 @@ cmd/internal/obj/*.go
 
 2021-12-06
 cmd/internal/obj/x86/*.go
-
-cmd/internal/objfile/*
+cmd/internal/objfile/* ?
 cmd/internal/objfileabi/*
