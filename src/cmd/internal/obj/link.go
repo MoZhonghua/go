@@ -1000,14 +1000,24 @@ func (ctxt *Link) FixedFrameSize() int64 {
 	}
 }
 
+// Flushplist():
+//   loop func symbol s
+//     ErrorCheck(s)
+//     linkpatch(s) -> for p in s.Text: Progedit(p)
+//     Preprocess(s)
+//     Assemble(s)
+
 // LinkArch is the definition of a single architecture.
 type LinkArch struct {
 	*sys.Arch
 	Init           func(*Link)
 	ErrorCheck     func(*Link, *LSym)
+	//  重写TLS指令, rewriteToUseGot
+	Progedit       func(*Link, *Prog, ProgAlloc)
+	// 生成prolog和epilog, 包括stacksplit,adjust sp, save/restore bp
+	// 调整N(SP)中的N，多分配了8字节存储BP
 	Preprocess     func(*Link, *LSym, ProgAlloc)
 	Assemble       func(*Link, *LSym, ProgAlloc)
-	Progedit       func(*Link, *Prog, ProgAlloc)
 	UnaryDst       map[As]bool // Instruction takes one operand, a destination.
 	DWARFRegisters map[int16]int16
 }

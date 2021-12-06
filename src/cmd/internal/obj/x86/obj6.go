@@ -70,6 +70,13 @@ func CanUse1InsnTLS(ctxt *obj.Link) bool {
 }
 
 func progedit(ctxt *obj.Link, p *obj.Prog, newprog obj.ProgAlloc) {
+	// .s文件中用法: get_tls()和g()都是带参数的宏
+	//   get_tls(BX)
+	//   MOVQ	$0x123, g(BX)
+	// 转换为
+	//   MOVQ TLS, BX
+	//   MOVQ $0x123, 0(BX)(TLS*1)
+	//
 	// Thread-local storage references use the TLS pseudo-register.
 	// As a register, TLS refers to the thread-local storage base, and it
 	// can only be loaded into another register:
@@ -296,6 +303,8 @@ func progedit(ctxt *obj.Link, p *obj.Prog, newprog obj.ProgAlloc) {
 	}
 }
 
+// GOT: global offset table，用来访问全局数据
+// it maps symbols in programming code to their corresponding absolute memory addresses
 // Rewrite p, if necessary, to access global data via the global offset table.
 func rewriteToUseGot(ctxt *obj.Link, p *obj.Prog, newprog obj.ProgAlloc) {
 	var lea, mov obj.As
@@ -318,6 +327,7 @@ func rewriteToUseGot(ctxt *obj.Link, p *obj.Prog, newprog obj.ProgAlloc) {
 	}
 
 	if p.As == obj.ADUFFCOPY || p.As == obj.ADUFFZERO {
+		// duffcopy通过从代码的不同offset地址开始执行来处理头尾数据
 		//     ADUFFxxx $offset
 		// becomes
 		//     $MOV runtime.duffxxx@GOT, $reg
@@ -619,6 +629,7 @@ func preprocess(ctxt *obj.Link, cursym *obj.LSym, newprog obj.ProgAlloc) {
 	}
 
 	// TODO(rsc): Remove 'ctxt.Arch.Family == sys.AMD64 &&'.
+	// leaf小函数额外增加nosplit标记
 	if ctxt.Arch.Family == sys.AMD64 && autoffset < objabi.StackSmall && !p.From.Sym.NoSplit() {
 		leaf := true
 	LeafSearch:

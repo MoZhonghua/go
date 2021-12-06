@@ -134,6 +134,7 @@ func Flushplist(ctxt *Link, plist *Plist, newprog ProgAlloc, myimportpath string
 		if ctxt.Arch.ErrorCheck != nil {
 			ctxt.Arch.ErrorCheck(ctxt, s)
 		}
+
 		// 检查各条指令的operands是否合法，设置jmp N(PC)指令的Target Prog
 		linkpatch(ctxt, s, newprog)
 
