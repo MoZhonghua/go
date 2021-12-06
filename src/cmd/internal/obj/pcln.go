@@ -26,6 +26,7 @@ func funcpctab(ctxt *Link, func_ *LSym, desc string, valfunc func(*Link, *LSym, 
 	dst := []byte{}
 	sym := &LSym{
 		Type:      objabi.SRODATA,
+		// 只要是相同的内容都可以通用，不必管是哪个函数生成的
 		Attribute: AttrContentAddressable,
 	}
 
@@ -133,10 +134,12 @@ func funcpctab(ctxt *Link, func_ *LSym, desc string, valfunc func(*Link, *LSym, 
 	return sym
 }
 
-// pctofileline computes either the file number (arg == 0)
-// or the line number (arg == 1) to use at p.
+// pctofileline computes either the file number (arg == nil)
+// or the line number (arg != nil) to use at p.
 // Because p.Pos applies to p, phase == 0 (before p)
 // takes care of the update.
+// 返回文件idx或者line number。phase=1就是返回原来值，没有phase=1的逻辑
+// pc value table: PC => file index; PC => line number，不需要单独的funcdata table
 func pctofileline(ctxt *Link, sym *LSym, oldval int32, p *Prog, phase int32, arg interface{}) int32 {
 	if p.As == ATEXT || p.As == ANOP || p.Pos.Line() == 0 || phase == 1 {
 		return oldval
@@ -152,6 +155,8 @@ func pctofileline(ctxt *Link, sym *LSym, oldval int32, p *Prog, phase int32, arg
 
 // pcinlineState holds the state used to create a function's inlining
 // tree and the PC-value table that maps PCs to nodes in that tree.
+// funcdata table: 是InlineTree，存储为数组，通过Parent字段构成树(只需从子节点向上到Root)
+// pc value table: 是PC => Node Index
 type pcinlineState struct {
 	globalToLocal map[int]int
 	localTree     InlTree
@@ -174,6 +179,9 @@ func (s *pcinlineState) addBranch(ctxt *Link, globalIndex int) int {
 	// same line (e.g., f(x) + f(y)). For now, we use one node for
 	// each inlined call.
 	call := ctxt.InlTree.nodes[globalIndex]
+
+	// Parent之前是globalIndex，这里替换为localIndex
+	// 注意这里不是指针，因此全局表ctxt.InlTree不变
 	call.Parent = s.addBranch(ctxt, call.Parent)
 	localIndex = len(s.localTree.nodes)
 	s.localTree.nodes = append(s.localTree.nodes, call)
@@ -197,6 +205,7 @@ func (s *pcinlineState) setParentPC(ctxt *Link, globalIndex int, pc int32) {
 // pctoinline computes the index into the local inlining tree to use at p.
 // If p is not the result of inlining, pctoinline returns -1. Because p.Pos
 // applies to p, phase == 0 (before p) takes care of the update.
+// inline数据存放在Prog.Pos中，index为全局ctxt.InlTree中索引
 func (s *pcinlineState) pctoinline(ctxt *Link, sym *LSym, oldval int32, p *Prog, phase int32, arg interface{}) int32 {
 	if phase == 1 {
 		return oldval
@@ -223,6 +232,8 @@ func (s *pcinlineState) pctoinline(ctxt *Link, sym *LSym, oldval int32, p *Prog,
 // It is oldval plus any adjustment made by p itself.
 // The adjustment by p takes effect only after p, so we
 // apply the change during phase == 1.
+// Spadj指的是如何用当前SP计算出FramePointer(也就是call指令前调用者的SP)，所以是
+// 1G的正数
 func pctospadj(ctxt *Link, sym *LSym, oldval int32, p *Prog, phase int32, arg interface{}) int32 {
 	if oldval == -1 { // starting
 		oldval = 0
@@ -244,7 +255,13 @@ func pctospadj(ctxt *Link, sym *LSym, oldval int32, p *Prog, phase int32, arg in
 // non-PCDATA instructions.
 // Since PCDATA instructions have no width in the final code,
 // it does not matter which phase we use for the update.
+
+// PCDATA是用来构建pcvalue table的，上面的fileln, inltree等是在其他结构里存储pc->int的映射
+// 而这里是在代码流里通过PCDATA Prog来存储pc->int映射
+// 最终结果都是输出一个pc value table
 func pctopcdata(ctxt *Link, sym *LSym, oldval int32, p *Prog, phase int32, arg interface{}) int32 {
+	// p.From.Offset => PCDATA指令的第一个参数，PCDATA类型
+	// p.To.Offset => PCDATA指令的第二个参数的值, PCDATA值
 	if phase == 0 || p.As != APCDATA || p.From.Offset != int64(arg.(uint32)) {
 		return oldval
 	}
@@ -264,6 +281,7 @@ func linkpcln(ctxt *Link, cursym *LSym) {
 	npcdata := 0
 	nfuncdata := 0
 	for p := cursym.Func().Text; p != nil; p = p.Link {
+		// PCDATA $TABLE_ID, $VAL
 		// Find the highest ID of any used PCDATA table. This ignores PCDATA table
 		// that consist entirely of "-1", since that's the assumed default value.
 		//   From.Offset is table ID
@@ -273,6 +291,9 @@ func linkpcln(ctxt *Link, cursym *LSym) {
 		}
 		// Find the highest ID of any FUNCDATA table.
 		//   From.Offset is table ID
+		//
+		// FUNCDATA $TABLE_ID, $TABLE_VAL
+		// TABLE_VAL => 指向一个LSym，这个LSym.P为对应的数据
 		if p.As == AFUNCDATA && p.From.Offset >= int64(nfuncdata) {
 			nfuncdata = int(p.From.Offset + 1)
 		}
@@ -316,7 +337,7 @@ func linkpcln(ctxt *Link, cursym *LSym) {
 	}
 
 	// tabulate which pc and func data we have.
-	havepc := make([]uint32, (npcdata+31)/32)
+	havepc := make([]uint32, (npcdata+31)/32) // 每一个bit对应一个table id
 	havefunc := make([]uint32, (nfuncdata+31)/32)
 	for p := fn.Text; p != nil; p = p.Link {
 		if p.As == AFUNCDATA {

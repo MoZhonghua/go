@@ -699,6 +699,7 @@ const (
 	AttrUsedInIface
 
 	// ContentAddressable indicates this is a content-addressable symbol.
+	// 比如pc value table，只要是相同的内容都可以通用，不必管是哪个函数生成的
 	AttrContentAddressable
 
 	// ABI wrapper is set for compiler-generated text symbols that

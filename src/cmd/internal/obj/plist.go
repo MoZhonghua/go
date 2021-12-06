@@ -25,6 +25,7 @@ func Flushplist(ctxt *Link, plist *Plist, newprog ProgAlloc, myimportpath string
 	var etext *Prog
 	var text []*LSym
 
+	// 把Prog列表按照函数拆分成多个小列表，列表头为text[i].Func().Text, 实际就是原来的ATEXT Prog
 	var plink *Prog
 	for p := plist.Firstpc; p != nil; p = plink {
 		if ctxt.Debugasm > 0 && ctxt.Debugvlog {
@@ -58,6 +59,7 @@ func Flushplist(ctxt *Link, plist *Plist, newprog ProgAlloc, myimportpath string
 				if p.From.Type != TYPE_CONST || p.From.Offset != objabi.FUNCDATA_ArgsPointerMaps {
 					ctxt.Diag("FUNCDATA use of go_args_stackmap(SB) without FUNCDATA_ArgsPointerMaps")
 				}
+				// FUNCDATA $0, go_args_stackmap => FUNCDATA $0, <funcname>.args_stackmap
 				p.To.Sym = ctxt.LookupDerived(curtext, curtext.Name+".args_stackmap")
 			}
 
@@ -123,25 +125,36 @@ func Flushplist(ctxt *Link, plist *Plist, newprog ProgAlloc, myimportpath string
 		}
 	}
 
+	// 这里生成的各种数据都是存放在LSym.P中，还没有真正写入文件
 	// Turn functions into machine code images.
 	for _, s := range text {
+		// s 为一个函数
+		// 通过Prog.Forwd字段形成跳表，方便快速查找
 		mkfwd(s)
 		if ctxt.Arch.ErrorCheck != nil {
 			ctxt.Arch.ErrorCheck(ctxt, s)
 		}
+		// 检查各条指令的operands是否合法，设置jmp N(PC)指令的Target Prog
 		linkpatch(ctxt, s, newprog)
+
+		// ./x86/代码实现
 		ctxt.Arch.Preprocess(ctxt, s, newprog)
 		ctxt.Arch.Assemble(ctxt, s, newprog)
 		if ctxt.Errors > 0 {
 			continue
 		}
+
+		// 生成Funcdata和pcdata对应的LSym，LSym.P是已经生成好的二进制数据
 		linkpcln(ctxt, s)
+
+		// IsAsm: myimportpath=""，不会走这段代码
 		if myimportpath != "" {
 			ctxt.populateDWARF(plist.Curfn, s, myimportpath)
 		}
 	}
 }
 
+// .s中遇到TEXT指令时调用，用来设置Prog.From.Sym
 func (ctxt *Link) InitTextSym(s *LSym, flag int) {
 	if s == nil {
 		// func _() { }
@@ -180,6 +193,7 @@ func toFuncFlag(flag int) objabi.FuncFlag {
 	return out
 }
 
+// .s中遇到GLOBAL指令时调用, 添加到ctxt.Data数组中
 func (ctxt *Link) Globl(s *LSym, size int64, flag int) {
 	if s.OnList() {
 		ctxt.Diag("symbol %s listed multiple times", s.Name)
@@ -213,7 +227,10 @@ func (ctxt *Link) Globl(s *LSym, size int64, flag int) {
 // liveness map active at the entry of function s. It returns the last
 // Prog generated.
 func (ctxt *Link) EmitEntryLiveness(s *LSym, p *Prog, newprog ProgAlloc) *Prog {
+	// 生成一条PCDATA $PCDATA_StackMapIndex, -1指令
 	pcdata := ctxt.EmitEntryStackMap(s, p, newprog)
+
+	// 生成一条PCDATA $PCDATA_UnsafePoint, -1指令
 	pcdata = ctxt.EmitEntryUnsafePoint(s, pcdata, newprog)
 	return pcdata
 }
@@ -273,6 +290,9 @@ func (ctxt *Link) EndUnsafePoint(p *Prog, newprog ProgAlloc, oldval int64) *Prog
 
 	return pcdata
 }
+
+// unsafepoint和restartable两个属性数互斥的: 如果是unsafepoint，那么不能抢占，也就
+// 没有restartable的概念，因此可以用同一个pcvalue table来编码这两个信息
 
 // MarkUnsafePoints inserts PCDATAs to mark nonpreemptible and restartable
 // instruction sequences, based on isUnsafePoint and isRestartable predicate.

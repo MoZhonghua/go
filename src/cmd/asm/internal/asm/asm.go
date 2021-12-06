@@ -108,6 +108,9 @@ func (p *Parser) validImmediate(pseudo string, addr *obj.Addr) bool {
 
 // asmText assembles a TEXT pseudo-op.
 // TEXT runtime·sigtramp(SB),4,$0-0
+
+// 对应一条ATEXT类型的Prog, Prog.LSym = STEXT LSym, LSym.Val = FuncInfo
+// FuncInfo.Text = Prog
 func (p *Parser) asmText(operands [][]lex.Token) {
 	if len(operands) != 2 && len(operands) != 3 {
 		p.errorf("expect two or three operands for TEXT")

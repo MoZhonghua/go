@@ -184,6 +184,12 @@ const (
 	PkgIdxSelf                          // Symbols defined in the current package
 	PkgIdxInvalid  = 0
 	// The index of other referenced packages starts from 1.
+
+	// 比如 s LSym：
+	// s.PkgIdx = goobj.PkgIdxHashed64
+	// s.SymIdx = 1000
+	// 则ctxt.hashed64defs[1000] == s
+	// 不用指针是因为写入到文件时不能写入指针值
 )
 
 // Blocks

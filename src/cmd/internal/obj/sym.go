@@ -60,6 +60,7 @@ func Linknew(arch *LinkArch) *Link {
 
 // LookupDerived looks up or creates the symbol with name derived from symbol s.
 // The resulting symbol will be static iff s is.
+// name一般是在已有的name加上前缀或者后缀
 func (ctxt *Link) LookupDerived(s *LSym, name string) *LSym {
 	if s.Static() {
 		return ctxt.LookupStatic(name)
@@ -176,6 +177,7 @@ func (ctxt *Link) Int64Sym(i int64) *LSym {
 // Assign index to symbols.
 // asm is set to true if this is called by the assembler (i.e. not the compiler),
 // in which case all the symbols are non-package (for now).
+// non-package指没办法通过一个index来索引的符号，只能通过名字来查找
 func (ctxt *Link) NumberSyms() {
 	if ctxt.Headtype == objabi.Haix {
 		// Data must be sorted to keep a constant order in TOC symbols.
@@ -267,6 +269,7 @@ func (ctxt *Link) NumberSyms() {
 			// for now, only support content-addressable symbols that are always locally defined.
 			panic("hashed refs unsupported for now")
 		}
+		// 因为上面已经遍历过了所有symbol def，到这里应该rs.Indexed()应该为true?
 		if pkg == "" || pkg == "\"\"" || pkg == "_" || !rs.Indexed() {
 			rs.PkgIdx = goobj.PkgIdxNone
 			rs.SymIdx = nonpkgidx
@@ -282,6 +285,9 @@ func (ctxt *Link) NumberSyms() {
 			rs.PkgIdx = k
 			return
 		}
+
+		// package自己定义的LSym.PkgIdx = PkgIdxSelf, 只有引用的其他package的对象需要
+		// 为pkg分配PkgIdx
 		rs.PkgIdx = ipkg
 		ctxt.pkgIdx[pkg] = ipkg
 		ipkg++
