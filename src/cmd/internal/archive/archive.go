@@ -399,6 +399,8 @@ func (r *objReader) parseArchive(verbose bool) error {
 func (r *objReader) parseObject(o *GoObj, size int64) error {
 	h := make([]byte, 0, 256)
 	var c1, c2, c3 byte
+
+	// 文件头: go object linux amd64 go1.17.2 X:regabiwrappers,regabig\n!\n
 	for {
 		c1, c2, c3 = c2, c3, r.readByte()
 		h = append(h, c3)
@@ -414,7 +416,7 @@ func (r *objReader) parseObject(o *GoObj, size int64) error {
 	o.TextHeader = h
 	hs := strings.Fields(string(h))
 	if len(hs) >= 4 {
-		o.Arch = hs[3]
+		o.Arch = hs[3] // amd64
 	}
 	o.Offset = r.offset
 	o.Size = size - int64(len(h))
@@ -423,6 +425,8 @@ func (r *objReader) parseObject(o *GoObj, size int64) error {
 	if err != nil {
 		return err
 	}
+
+	// const Magic = "\x00go117ld"
 	if !bytes.Equal(p, []byte(goobj.Magic)) {
 		if bytes.HasPrefix(p, []byte("\x00go1")) && bytes.HasSuffix(p, []byte("ld")) {
 			return r.error(ErrGoObjOtherVersion{p[1:]}) // strip the \x00 byte
@@ -434,6 +438,7 @@ func (r *objReader) parseObject(o *GoObj, size int64) error {
 }
 
 // AddEntry adds an entry to the end of a, with the content from r.
+// 写入逻辑
 func (a *Archive) AddEntry(typ EntryType, name string, mtime int64, uid, gid int, mode os.FileMode, size int64, r io.Reader) {
 	off, err := a.f.Seek(0, os.SEEK_END)
 	if err != nil {
