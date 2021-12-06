@@ -30,7 +30,7 @@ func main() {
 	buildcfg.Check()
 	GOARCH := buildcfg.GOARCH
 
-	architecture := arch.Set(GOARCH)
+	architecture := arch.Set(GOARCH) // architecture *arch.Arch
 	if architecture == nil {
 		log.Fatalf("unrecognized architecture %s", GOARCH)
 	}
