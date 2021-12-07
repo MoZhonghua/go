@@ -71,6 +71,7 @@ func main() {
 	defer buf.Close()
 
 	if !*flags.SymABIs {
+		// 注意这里的版本号为make.bashrc+dist生成internal/buildcfg/zbootstrap.go文件中的版本号
 		buf.WriteString(objabi.HeaderString())
 		fmt.Fprintf(buf, "!\n")
 	}
