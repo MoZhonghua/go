@@ -40,6 +40,9 @@ const DefaultGOEXPERIMENT = defaultGOEXPERIMENT
 // Note: must agree with runtime.framepointer_enabled.
 var FramePointerEnabled = GOARCH == "amd64" || GOARCH == "arm64"
 
+// 只有Baseline就是默认值，和zbootstrap.go中的配置无关, 根据GOARCH和GOOS配置
+// 实际使用值通过默认的defaultGOEXPERIMENT(一般是空值) 和 用户的 GOEXPERIMENT 环境变量来配置
+
 // ParseGOEXPERIMENT parses a (GOOS, GOARCH, GOEXPERIMENT)
 // configuration tuple and returns the enabled and baseline experiment
 // flag sets.

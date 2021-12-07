@@ -16,6 +16,7 @@ const (
 	MachoRelocOffset = 2048 // reserve enough space for ELF relocations
 )
 
+// 注意仅输出开启的EXP
 // HeaderString returns the toolchain configuration string written in
 // Go object headers. This string ensures we don't attempt to import
 // or link object files that are incompatible with each other. This

@@ -36,6 +36,8 @@ func Flagparse(usage func()) {
 	flag.Parse()
 }
 
+
+// 比如@file.txt，表示读取file.txt的所有内容，拆分为行，每行当做一个单独参数
 // expandArgs expands "response files" arguments in the provided slice.
 //
 // A "response file" argument starts with '@' and the rest of that
@@ -86,6 +88,12 @@ type versionFlag struct{}
 func (versionFlag) IsBoolFlag() bool { return true }
 func (versionFlag) Get() interface{} { return nil }
 func (versionFlag) String() string   { return "" }
+
+// 有三种explist输出
+//   - go tool asm -V=goexperiment: 输出全部exp列表，值为当前配置
+//   - go tool asm -V: 输出当前配置和baseline配置不一样的exp列表，值为当前配置
+//   - goobj文件的header里: 输出当前配置中开启的exp列表
+
 func (versionFlag) Set(s string) error {
 	name := os.Args[0]
 	name = name[strings.LastIndex(name, `/`)+1:]
@@ -95,10 +103,12 @@ func (versionFlag) Set(s string) error {
 	p := ""
 
 	if s == "goexperiment" {
+		// 输出全部exp配置
 		// test/run.go uses this to discover the full set of
 		// experiment tags. Report everything.
 		p = " X:" + strings.Join(buildcfg.AllExperiments(), ",")
 	} else {
+		// 仅输出和baseline不同的配置, baseline配置由GOARCH+GOOS决定，和GOEXPERIMENT无关
 		// If the enabled experiments differ from the defaults,
 		// include that difference.
 		if goexperiment := buildcfg.GOEXPERIMENT(); goexperiment != "" {
