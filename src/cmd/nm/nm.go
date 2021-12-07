@@ -99,6 +99,8 @@ func errorf(format string, args ...interface{}) {
 }
 
 func nm(file string) {
+	// 支持的类型: archive, go object, elf
+	// .a文件格式就是正常ar命令创建的格式，但是要求打包的每个文件为__.PKGDEF或者go object, 正常ELF .o文件不支持
 	f, err := objfile.Open(file)
 	if err != nil {
 		errorf("%v", err)

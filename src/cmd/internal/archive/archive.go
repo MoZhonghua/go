@@ -22,6 +22,8 @@ import (
 	"unicode/utf8"
 )
 
+// 和linux ar兼容
+
 /*
 The archive format is:
 
