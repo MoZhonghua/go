@@ -36,6 +36,10 @@ import (
 // packages a second chance to modify the linker's configuration
 // via the ld.Arch.Archinit function.
 
+// relocation处理: 最重要的是加载程序时一个exe/dso有一个唯一的base addr
+// 在base addr基础上，所有的LOAD类型program header定义的加载到内存中，
+// 也就是说同一个exe/dso中的不同段加载后的相对偏移量保持不变!!!
+
 func main() {
 	var arch *sys.Arch
 	var theArch ld.Arch
