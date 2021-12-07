@@ -47,10 +47,13 @@ const (
 	// R_ADDRMIPS (only used on mips/mips64) resolves to the low 16 bits of an external
 	// address, by encoding it into the instruction.
 	R_ADDRMIPS
-	//TODO(mzh): what's this?
+
+	// s引用r
+	// 实际代码中link/internal/ld/data.go:435, 设置的值为 Addr(r) - Sect(r)
 	// R_ADDROFF resolves to a 32-bit offset from the beginning of the section
 	// holding the data being relocated to the referenced symbol.
 	R_ADDROFF
+
 	R_SIZE
 	R_CALL
 	R_CALLARM
