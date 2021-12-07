@@ -13,7 +13,9 @@ cmd/internal/obj/*.go
 cmd/internal/obj/x86/*.go
 cmd/objdump/*.go
 cmd/internal/archive/archive.go
-cmd/internal/objfile/* ?
-cmd/internal/goobj/* ?
-cmd/internal/objabi/*
+cmd/internal/objfile/*
+
+2021-12-07
+cmd/internal/goobj/*
+cmd/internal/objabi/* ?
 debug/*

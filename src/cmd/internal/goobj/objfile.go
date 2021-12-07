@@ -194,7 +194,7 @@ const (
 
 // Blocks
 const (
-	BlkAutolib = iota
+	BlkAutolib = iota // Imported packages
 	BlkPkgIdx
 	BlkFile
 	BlkSymdef
@@ -286,6 +286,7 @@ func (p *ImportedPkg) Write(w *Writer) {
 // }
 type Sym [SymSize]byte
 
+// 不能直接用Unsafe.Sizeof()，因为会自动对齐
 const SymSize = stringRefSize + 2 + 1 + 1 + 1 + 4 + 4
 
 const SymABIstatic = ^uint16(0)

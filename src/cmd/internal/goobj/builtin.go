@@ -4,6 +4,8 @@
 
 package goobj
 
+// SymRef: PkgIdx = PkgIdxBuiltin; SymIdx = BuiltinIdx(name)
+
 // Builtin (compiler-generated) function references appear
 // frequently. We assign special indices for them, so they
 // don't need to be referenced by name.
