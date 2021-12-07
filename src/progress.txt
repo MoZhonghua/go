@@ -17,5 +17,5 @@ cmd/internal/objfile/*
 
 2021-12-07
 cmd/internal/goobj/*
-cmd/internal/objabi/* ?
-debug/*
+cmd/internal/objabi/*
+cmd/link/*.go
