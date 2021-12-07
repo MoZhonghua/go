@@ -204,6 +204,8 @@ func (ar *Archive) addFiles() {
 			log.Fatal(err)
 		}
 		aro, err := archive.Parse(f, false)
+			// 注意entry.Name必须是_go_.o，其他名称都不算，特别是go tool asm生成的都不是
+			// 这个名字，也不算。直接追加 Name=filename, Type=EntryNativeObj
 		if err != nil || !isGoCompilerObjFile(aro) {
 			f.Seek(0, io.SeekStart)
 			ar.addFile(f)
@@ -214,8 +216,12 @@ func (ar *Archive) addFiles() {
 			if e.Type != archive.EntryGoObj || e.Name != "_go_.o" {
 				continue
 			}
+			// 注意entry的名称为文件名，不是_go_.o
+			// Name=filename, Type=EntryGoObj
 			ar.a.AddEntry(archive.EntryGoObj, filepath.Base(file), 0, 0, 0, 0644, e.Size, io.NewSectionReader(f, e.Offset, e.Size))
 		}
+		// Type只在内存中有效，没有写入到archive中，下次打开需要重新判断, 此时
+		// EntryGoObj和EntryNativeObj不是通过名字判断，而是读取内容，可能和这里的不一样
 	close:
 		f.Close()
 	}
