@@ -67,17 +67,20 @@ const (
 	R_CALLRISCV
 	R_CONST
 	R_PCREL
+
 	// R_TLS_LE, used on 386, amd64, and ARM, resolves to the offset of the
 	// thread-local symbol from the thread local base and is used to implement the
 	// "local exec" model for tls access (r.Sym is not set on intel platforms but is
 	// set to a TLS symbol -- runtime.tlsg -- in the linker when externally linking).
 	R_TLS_LE
+
 	// R_TLS_IE, used 386, amd64, and ARM resolves to the PC-relative offset to a GOT
 	// slot containing the offset from the thread-local symbol from the thread local
 	// base and is used to implemented the "initial exec" model for tls access (r.Sym
 	// is not set on intel platforms but is set to a TLS symbol -- runtime.tlsg -- in
 	// the linker when externally linking).
 	R_TLS_IE
+
 	R_GOTOFF
 	R_PLT0
 	R_PLT1

@@ -45,6 +45,12 @@ func PADDR(x uint32) uint32 {
 }
 
 func gentext(ctxt *ld.Link, ldr *loader.Loader) {
+	/*
+	// Called from linker-generated .initarray; declared for go vet; do NOT call from Go.
+	func addmoduledata()
+	*/
+
+	// addmoduledata是指向函数runtime.addmoduledata()
 	initfunc, addmoduledata := ld.PrepareAddmoduledata(ctxt)
 	if initfunc == nil {
 		return

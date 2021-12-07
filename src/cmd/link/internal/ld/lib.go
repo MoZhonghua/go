@@ -264,6 +264,19 @@ type Arch struct {
 	// code generation.
 	GenSymsLate func(*Link, *loader.Loader)
 
+	// https://docs.oracle.com/cd/E18752_01/html/817-1984/chapter8-20.html
+	// 访问TLS有多种方式:
+	//   - General Dynamic (GD) - dynamic TLS
+	//   - Local Dynamic (LD) - dynamic TLS of local symbols
+	//   - Initial Executable (IE) - static TLS with assigned offsets
+	//   - Local Executable (LE) - static TLS
+
+	// module分为三类: executable, dso, dso(dlopen)
+	// 可以使用的访问方式由以下因素决定:
+	//   - TLS变量本身是定义在哪个module
+	//   - 代码定义在哪个module, 特别的，代码和TLS变量是否在同一个module
+	// 注意编译为DSO时不知道使用时是dso还是dso(dlopen)，必须生成通用数据和代码
+
 	// TLSIEtoLE converts a TLS Initial Executable relocation to
 	// a TLS Local Executable relocation.
 	//

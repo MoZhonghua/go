@@ -44,7 +44,9 @@ func Init() (*sys.Arch, ld.Arch) {
 		Maxalign:   maxAlign,
 		Minalign:   minAlign,
 		Dwarfregsp: dwarfRegSP,
-		Dwarfreglr: dwarfRegLR,
+		// .debug_frame通过CIE和FDE生成每个register的计算方式
+		// 16这个虚拟表示返回值，计算方式为*(CFA-8)
+		Dwarfreglr: dwarfRegLR, // dwarf规范中规定16
 		// 0xCC is INT $3 - breakpoint instruction
 		CodePad: []byte{0xCC},
 
@@ -109,6 +111,7 @@ func archinit(ctxt *ld.Link) {
 
 		ld.HEADR = ld.ELFRESERVE
 		if *ld.FlagTextAddr == -1 {
+			// 4M + 4K
 			*ld.FlagTextAddr = (1 << 22) + int64(ld.HEADR)
 		}
 		if *ld.FlagRound == -1 {
