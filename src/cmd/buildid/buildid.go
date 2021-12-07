@@ -4,6 +4,19 @@
 
 package main
 
+// 在objdump -hw /tmp/main .note.go.buildid 100字节
+/*
+struct NoteSection {
+	namesize uint32
+	descsize uint32
+	notetype uint32
+	name [(namesize + 3)&4]byte  // 4字节 Go\0\0
+	desc [(descsize + 3)&4]byte  // 83字节 62字节id/20字节哈希，一共83字节，填充0到84字节, 最后的0不属于buildid
+}
+
+sha256 = 32 byte, 实际只用前15字节, 然后转换为base64 => 20字节
+*/
+
 import (
 	"flag"
 	"fmt"
