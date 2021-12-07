@@ -29,6 +29,7 @@ const (
 	ArgsSizeUnknown = -0x80000000
 )
 
+// Unsafepoint和Restart在同一个pc value table中，因为两者一定不重叠
 // Special PCDATA values.
 const (
 	// PCDATA_UnsafePoint values.

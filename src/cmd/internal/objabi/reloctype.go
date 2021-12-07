@@ -47,6 +47,7 @@ const (
 	// R_ADDRMIPS (only used on mips/mips64) resolves to the low 16 bits of an external
 	// address, by encoding it into the instruction.
 	R_ADDRMIPS
+	//TODO(mzh): what's this?
 	// R_ADDROFF resolves to a 32-bit offset from the beginning of the section
 	// holding the data being relocated to the referenced symbol.
 	R_ADDROFF

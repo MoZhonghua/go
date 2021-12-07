@@ -16,6 +16,7 @@ func PathToPrefix(s string) string {
 	// check for chars that need escaping
 	n := 0
 	for r := 0; r < len(s); r++ {
+		// 最后最后一段中的.需要替换为%2e，前面部分不用
 		if c := s[r]; c <= ' ' || (c == '.' && r > slash) || c == '%' || c == '"' || c >= 0x7F {
 			n++
 		}

@@ -23,6 +23,8 @@ func WorkingDir() string {
 	return filepath.ToSlash(path)
 }
 
+// rewrites一般就是-trimpath参数值
+
 // AbsFile returns the absolute filename for file in the given directory,
 // as rewritten by the rewrites argument.
 // For unrewritten paths, AbsFile rewrites a leading $GOROOT prefix to the literal "$GOROOT".
