@@ -392,6 +392,7 @@ type pcHeader struct {
 // moduledata is stored in statically allocated non-pointer memory;
 // none of the pointers here are visible to the garbage collector.
 type moduledata struct {
+	// 一下到ftab都是在 ../cmd/link/internal/ld/pcln.go 生成
 	pcHeader     *pcHeader
 	funcnametab  []byte
 	cutab        []uint32
@@ -1024,6 +1025,7 @@ func funcdata(f funcInfo, i uint8) unsafe.Pointer {
 		}
 		p = add(p, 4)
 	}
+
 	return *(*unsafe.Pointer)(add(p, uintptr(i)*sys.PtrSize))
 }
 

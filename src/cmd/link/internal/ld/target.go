@@ -71,6 +71,8 @@ func (t *Target) IsDynlinkingGo() bool {
 
 // UseRelro reports whether to make use of "read only relocations" aka
 // relro.
+// gnu dynamic linker 对于特殊名字(.data.rel.ro.XX)，会先做relocation，然后mprotect标记为RO
+// internal/sym/symkind.go:65
 func (t *Target) UseRelro() bool {
 	switch t.BuildMode {
 	case BuildModeCArchive, BuildModeCShared, BuildModeShared, BuildModePIE, BuildModePlugin:

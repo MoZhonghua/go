@@ -25,6 +25,9 @@ func (s byTypeStr) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
 // typelink generates the typelink table which is used by reflect.typelinks().
 // Types that should be added to the typelinks table are marked with the
 // MakeTypelink attribute by the compiler.
+// runtime.typelink存放在.typelink, 指向runtime.types中偏移量 R_ADDROFF
+// runtime.itablink存放在.itablink, 指向runtime.types中的地址 R_ADDR
+// runtime.types存放在.rodata
 func (ctxt *Link) typelink() {
 	ldr := ctxt.loader
 	typelinks := byTypeStr{}
@@ -34,8 +37,10 @@ func (ctxt *Link) typelink() {
 			continue
 		}
 		if ldr.IsTypelink(s) {
+			// s.Type = SRODATA
 			typelinks = append(typelinks, typelinkSortKey{decodetypeStr(ldr, ctxt.Arch, s), s})
 		} else if ldr.IsItab(s) {
+			// s.Type = SRODATA
 			itabs = append(itabs, s)
 		}
 	}
@@ -44,7 +49,7 @@ func (ctxt *Link) typelink() {
 	tl := ldr.CreateSymForUpdate("runtime.typelink", 0)
 	tl.SetType(sym.STYPELINK)
 	ldr.SetAttrLocal(tl.Sym(), true)
-	tl.SetSize(int64(4 * len(typelinks)))
+	tl.SetSize(int64(4 * len(typelinks))) // 每一项是uint32偏移量, 4字节
 	tl.Grow(tl.Size())
 	relocs := tl.AddRelocs(len(typelinks))
 	for i, s := range typelinks {
@@ -52,14 +57,15 @@ func (ctxt *Link) typelink() {
 		r.SetSym(s.Type)
 		r.SetOff(int32(i * 4))
 		r.SetSiz(4)
-		r.SetType(objabi.R_ADDROFF)
+		r.SetType(objabi.R_ADDROFF) // 偏移量
 	}
 
+	// 存放在.itablink
 	ptrsize := ctxt.Arch.PtrSize
 	il := ldr.CreateSymForUpdate("runtime.itablink", 0)
 	il.SetType(sym.SITABLINK)
 	ldr.SetAttrLocal(il.Sym(), true)
-	il.SetSize(int64(ptrsize * len(itabs)))
+	il.SetSize(int64(ptrsize * len(itabs))) // 每个8字节，指针
 	il.Grow(il.Size())
 	relocs = il.AddRelocs(len(itabs))
 	for i, s := range itabs {
@@ -67,6 +73,6 @@ func (ctxt *Link) typelink() {
 		r.SetSym(s)
 		r.SetOff(int32(i * ptrsize))
 		r.SetSiz(uint8(ptrsize))
-		r.SetType(objabi.R_ADDR)
+		r.SetType(objabi.R_ADDR) //指针
 	}
 }

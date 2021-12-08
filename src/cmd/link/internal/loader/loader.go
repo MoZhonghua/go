@@ -74,7 +74,7 @@ func (a Aux) Sym() Sym { return a.l.resolve(a.r, a.Aux.Sym()) }
 // extra information.
 type oReader struct {
 	*goobj.Reader
-	unit         *sym.CompilationUnit
+	unit         *sym.CompilationUnit // 每个.o文件对应一个CU
 	version      int    // version of static symbol
 	flags        uint32 // read from object file
 	pkgprefix    string
@@ -215,7 +215,7 @@ type Loader struct {
 	extStaticSyms map[nameVer]Sym   // externally defined static symbols, keyed by name
 
 	extReader    *oReader // a dummy oReader, for external symbols
-	payloadBatch []extSymPayload
+	payloadBatch []extSymPayload // 用于优化分配extSymPayload对象，批量分配1000个
 	payloads     []*extSymPayload // contents of linker-materialized external syms
 	values       []int64          // symbol values, indexed by global sym index
 
@@ -1923,8 +1923,9 @@ func (l *Loader) relocs(r *oReader, li uint32) Relocs {
 type FuncInfo struct {
 	l       *Loader
 	r       *oReader
-	data    []byte
+	data    []byte //对应一个goobj.FuncInfo对象
 	auxs    []goobj.Aux
+	// TODO(mzh) don't init this many times
 	lengths goobj.FuncInfoLengths
 }
 

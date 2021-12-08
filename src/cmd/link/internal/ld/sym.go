@@ -89,6 +89,8 @@ func (ctxt *Link) computeTLSOffset() {
 		 * Translate 0(FS) and 8(FS) into -16(FS) and -8(FS).
 		 * Known to low-level assembly in package runtime and runtime/cgo.
 		 */
+		 // 创建M(os线程)时，通过syscall(arch_prctl, ARCH_SET_FS, &m.tls[0] + 8)
+		 // fs:-8就对应m.tls[0]
 		ctxt.Tlsoffset = -1 * ctxt.Arch.PtrSize
 
 	case objabi.Hdarwin:

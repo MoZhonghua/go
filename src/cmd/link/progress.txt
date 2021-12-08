@@ -7,9 +7,10 @@ internal/sym/*.go
 ../internal/dwarf/dwarf.go
 
 2021-12-09
-internal/ld/pcln.go ?
-internal/ld/sym.go ?
-internal/ld/target.go ?
+internal/ld/pcln.go
+internal/ld/sym.go
+internal/ld/target.go
+internal/ld/symtab.go ?
 internal/ld/typelink.go ?
 internal/ld/util.go ?
 internal/loader/loader.go ?

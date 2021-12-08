@@ -86,7 +86,8 @@ func (a *FuncInfo) Write(w *bytes.Buffer) {
 type FuncInfoLengths struct {
 	NumPcdata      uint32
 	PcdataOff      uint32
-	NumFuncdataoff uint32
+	// TODO(mzh): rename to NumFuncdata
+	NumFuncdataoff uint32  // 指funcdata offset个数, Funcdataoff => offset of one funcdata
 	FuncdataoffOff uint32
 	NumFile        uint32
 	FileOff        uint32

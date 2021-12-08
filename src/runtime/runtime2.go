@@ -908,10 +908,9 @@ type _func struct {
 	_         [1]byte // pad
 	nfuncdata uint8   // must be last, must end on a uint32-aligned boundary
 	// 其余数据
-	// [npcdata]uint32  max(npcdata) = _PCDATA_InlTreeIndex + 1
-
-	// pad to sys.PtrSize
-	// [_FUNCDATA_ArgInfo+1]unsafe.Pointer
+	// [npcdata]uint32
+	// align 8
+	// [nfuncdata]unsafe.Pointer  重定向后的地址，funcdata数据在.rodata中
 }
 
 // Pseudo-Func that is returned for PCs that occur in inlined code.
