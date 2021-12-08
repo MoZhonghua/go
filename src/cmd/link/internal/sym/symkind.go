@@ -31,6 +31,7 @@
 package sym
 
 // A SymKind describes the kind of memory represented by a symbol.
+// 这里更主要是用来决定放到哪个ELF section里
 type SymKind uint8
 
 // Defined SymKind values.

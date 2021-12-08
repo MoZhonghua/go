@@ -85,13 +85,42 @@ const (
 
 // Not from the spec, but logically belongs here
 const (
+	// DW_FORM_addr: PtrSize大小的整数
 	DW_CLS_ADDRESS = 0x01 + iota
+	
+	// DW_FORM_block{1,2,4,8}: length{1,2,4,8} + data
 	DW_CLS_BLOCK
+
+	// DW_FORM_data{1,2,4,8}, DW_FORM_udata, DW_FORM_sdata
+	// 前者只说明了字节数，具体怎么解释这n个字节没说明，比如是否有符号, 是否为浮点数等等。可以解释为
+	// 任何意思。因此DWARF标准建议如果是要写入整数值时使用后面两种。
 	DW_CLS_CONSTANT
+
+	// 1字节标记位
 	DW_CLS_FLAG
+
+	// 这四种class统一处理, 全部都是DW_FORM_sec_offset，指向对应的.debug_xxx中的偏移量
+	// lineptr -> .debug_line; DW_AT_stmt_list
+	// loclistptr -> .debug_log; DW_AT_location
+	// macptr -> .debug_macinfo; ?
+	// rangelistptr -> .debug_ranges; DW_AT_ranges
+	// DW_FORM_sec_offset是在dwarf4增加，用来替代DW_FORM_data{4,8}
 	DW_CLS_PTR // lineptr, loclistptr, macptr, rangelistptr
+
+	// 包括三种引用
+	//  1. 同一个CU中的其他DIE，值为被引用DIE在CU中偏移量, DW_FORM_ref{1,2,4,8}
+	//      - 同一个CU的DIE连续存放在.debug_info里, 不需要重定位，CU总是做为整体复制移动
+	//  2. 同一个.debug_info的DIE, DW_FORM_ref_addr，为在.debug_info的偏移量
+	//      - 链接时需要重定位，因为会把把多个obj文件里的.debug_info合并
+	//  3. 在单独的type CU里的DIE，通过哈希值引用, DW_FORM_ref_sig8, 为8字节signature
 	DW_CLS_REFERENCE
+
+	// DW_FORM_exprloc: dwarf expression，在简单的stack machine中运行，最终计算结果做为属性值
+	// dwarf标准中成为exprloc
 	DW_CLS_ADDRLOC
+
+	// DW_FORM_string: null结尾的字符串
+	// DW_FORM_strp: 指向.debug_str中的偏移量
 	DW_CLS_STRING
 
 	// Go-specific internal hackery.

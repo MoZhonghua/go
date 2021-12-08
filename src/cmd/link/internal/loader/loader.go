@@ -86,6 +86,26 @@ type oReader struct {
 	objidx       uint32   // index of this reader in the objs slice
 }
 
+
+// go object file
+//    SymbolDefs [...]struct {
+//       Name  string
+//       ABI   uint16
+//       Type  uint8
+//       Flag  uint8
+//       Flag2 uint8
+//       Size  uint32
+//    }
+//    Hashed64Defs [...]struct { // short hashed (content-addressable) symbol definitions
+//       ... // same as SymbolDefs
+//    }
+//    HashedDefs [...]struct { // hashed (content-addressable) symbol definitions
+//       ... // same as SymbolDefs
+//    }
+//    NonPkgDefs [...]struct { // non-pkg symbol definitions
+//       ... // same as SymbolDefs
+//    }
+//
 // Total number of defined symbols (package symbols, hashed symbols, and
 // non-package symbols).
 func (r *oReader) NAlldef() int { return r.ndef + r.nhashed64def + r.nhasheddef + r.NNonpkgdef() }
@@ -173,6 +193,7 @@ type symAndSize struct {
 //
 // - In loader.LoadNonpkgSyms, add non-package defined symbols and
 //   references in all object files to the global index space.
+//   指只能通过名字来查找的符号
 //
 // - Host object file loading happens; the host object loader does a
 //   name/version lookup for each symbol it finds; this can wind up

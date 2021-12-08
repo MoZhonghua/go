@@ -1,2 +1,15 @@
 2021-12-07
 internal/ld/outbuf.go
+internal/loader/loader.go ?
+
+2021-12-08
+internal/sym/*.go
+../internal/dwarf/dwarf.go
+
+2021-12-09
+internal/ld/pcln.go ?
+internal/ld/sym.go ?
+internal/ld/target.go ?
+internal/ld/typelink.go ?
+internal/ld/util.go ?
+internal/loader/loader.go ?

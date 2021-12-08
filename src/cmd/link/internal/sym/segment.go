@@ -35,6 +35,7 @@ package sym
 // A section further describes the pieces of that block for
 // use in debuggers and such.
 
+// 对应ELF文件中的program header
 type Segment struct {
 	Rwx      uint8  // permission as usual unix bits (5 = r-x etc)
 	Vaddr    uint64 // virtual address
@@ -44,6 +45,7 @@ type Segment struct {
 	Sections []*Section
 }
 
+// 对应ELF文件中的section
 type Section struct {
 	Rwx     uint8
 	Extnum  int16

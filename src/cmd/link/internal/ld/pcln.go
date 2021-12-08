@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 )
 
+// 所有函数的pc value table打包在一起
 // pclntab holds the state needed for pclntab generation.
 type pclntab struct {
 	// The size of the func object in the runtime.

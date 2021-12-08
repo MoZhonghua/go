@@ -20,6 +20,7 @@ import (
 	"cmd/internal/objabi"
 )
 
+// DWARF info entry = DIE
 // InfoPrefix is the prefix for all the symbols containing DWARF info entries.
 const InfoPrefix = "go.info."
 
@@ -129,6 +130,7 @@ func MergeRanges(in1, in2 []Range) []Range {
 		}
 
 		if n := len(out); n > 0 && cur.Start <= out[n-1].End {
+			// 合并重叠的range
 			out[n-1].End = cur.End
 		} else {
 			out = append(out, cur)
@@ -157,6 +159,18 @@ func (s *Scope) AppendRange(r Range) {
 	s.Ranges = append(s.Ranges, r)
 }
 
+// 每个函数对应一个InlCalls, 指这个函数中所有inlined call，可以递归展开
+// 因此形成多棵树, Root有inlined1和inlined2，inlined2有一个子节点inlined3
+/*
+func top() {
+	inlined1()
+	inlined2()
+}
+
+func inlined2() {
+	inlined3()
+}
+*/
 type InlCalls struct {
 	Calls []InlCall
 }
@@ -188,6 +202,9 @@ type InlCall struct {
 	Root bool
 }
 
+// 两个实现
+//  - internal/obj/objfile.go, 生成go object时使用，compile和asm, 实际就是在LSym.P里写入数据
+//  - ../../link/internal/ld/dwarf.go, 生成最终的ELF文件使用，link
 // A Context specifies how to add data to a Sym.
 type Context interface {
 	PtrSize() int
@@ -304,6 +321,9 @@ type dwAttrForm struct {
 	form uint8
 }
 
+// dwarf保留了一部分DW_AT_xxx值给厂商做扩展
+// DW_AT_lo_user = 0x2000
+// DW_AT_hi_user = 0x3fff
 // Go-specific type attributes.
 const (
 	DW_AT_go_kind = 0x2900
@@ -337,12 +357,12 @@ const (
 	DW_ABRV_AUTO                      = 10
 	DW_ABRV_AUTO_LOCLIST              = 11
 	DW_ABRV_AUTO_ABSTRACT             = 12
-	DW_ABRV_AUTO_CONCRETE             = 13
+	DW_ABRV_AUTO_CONCRETE             = 13 // 包含 ref to DW_ABRV_AUTO_ABSTRACT
 	DW_ABRV_AUTO_CONCRETE_LOCLIST     = 14
 	DW_ABRV_PARAM                     = 15
 	DW_ABRV_PARAM_LOCLIST             = 16
 	DW_ABRV_PARAM_ABSTRACT            = 17
-	DW_ABRV_PARAM_CONCRETE            = 18
+	DW_ABRV_PARAM_CONCRETE            = 18 // 包含 ref to DW_ABRV_PARAM_ABSTRACT
 	DW_ABRV_PARAM_CONCRETE_LOCLIST    = 19
 	DW_ABRV_LEXICAL_BLOCK_RANGES      = 20
 	DW_ABRV_LEXICAL_BLOCK_SIMPLE      = 21
@@ -916,6 +936,8 @@ func putattr(ctxt Context, s Sym, abbrev int, form int, cls int, value int64, da
 			ctxt.AddSectionOffset(s, ctxt.PtrSize(), data, value)
 			break
 		}
+		// 如果value是nil，则直接写入data值。否则需要再增加一个Reloc(LSym.R[])，value
+		// 为被引用的LSym
 		ctxt.AddAddress(s, data, value)
 
 	case DW_FORM_block1: // block
@@ -1055,18 +1077,34 @@ func PutGlobal(ctxt Context, info, typ, gvar Sym, name string) {
 	putattr(ctxt, info, DW_ABRV_VARIABLE, DW_FORM_flag, DW_CLS_FLAG, 1, nil)
 }
 
+// 在单独的.debug_ranges里, DW_AT_ranges为指向.debug_ranges的偏移量
+// range list可以如下三种entry:
+//  - base address selection entry, 包含:
+//    * value of the largest representable address offset, 0xffffffff（PtrSize=4）
+//    * a base address for use
+//  - range list entry
+//  - end of list entry
+
+/*
+objdump --dwarf=Ranges /usr/bin/go
+    00000020 ffffffffffffffff 0000000000472880 (base address)
+    00000020 00000000004728a2 00000000004728c5
+    00000020 00000000004728cf 0000000000472965
+    00000020 <End of list>
+*/
+
 // PutBasedRanges writes a range table to sym. All addresses in ranges are
 // relative to some base address, which must be arranged by the caller
 // (e.g., with a DW_AT_low_pc attribute, or in a BASE-prefixed range).
 func PutBasedRanges(ctxt Context, sym Sym, ranges []Range) {
 	ps := ctxt.PtrSize()
 	// Write ranges.
-	for _, r := range ranges {
+	for _, r := range ranges {  // range list entry
 		ctxt.AddInt(sym, ps, r.Start)
 		ctxt.AddInt(sym, ps, r.End)
 	}
 	// Write trailer.
-	ctxt.AddInt(sym, ps, 0)
+	ctxt.AddInt(sym, ps, 0)  // end of list entry
 	ctxt.AddInt(sym, ps, 0)
 }
 
@@ -1076,10 +1114,11 @@ func (s *FnState) PutRanges(ctxt Context, ranges []Range) {
 	ps := ctxt.PtrSize()
 	sym, base := s.Ranges, s.StartPC
 
+	// BAS: base address selection
 	if s.UseBASEntries {
 		// Using a Base Address Selection Entry reduces the number of relocations, but
 		// this is not done on macOS because it is not supported by dsymutil/dwarfdump/lldb
-		ctxt.AddInt(sym, ps, -1)
+		ctxt.AddInt(sym, ps, -1) // -1是最大值, 用来区分出是一个BAS项
 		ctxt.AddAddress(sym, base, 0)
 		PutBasedRanges(ctxt, sym, ranges)
 		return
@@ -1098,6 +1137,7 @@ func (s *FnState) PutRanges(ctxt Context, ranges []Range) {
 // Return TRUE if the inlined call in the specified slot is empty,
 // meaning it has a zero-length range (no instructions), and all
 // of its children are empty.
+// InlCalls包含一个InlCall数组，通过Children []int构成多棵树
 func isEmptyInlinedCall(slot int, calls *InlCalls) bool {
 	ic := &calls.Calls[slot]
 	if ic.InlIndex == -2 {
@@ -1113,6 +1153,7 @@ func isEmptyInlinedCall(slot int, calls *InlCalls) bool {
 		live = true
 	}
 	if !live {
+		// 缓存结果
 		ic.InlIndex = -2
 	}
 	return !live
@@ -1159,12 +1200,13 @@ func putPrunedScopes(ctxt Context, s *FnState, fnabbrev int) error {
 		return nil
 	}
 	scopes := make([]Scope, len(s.Scopes), len(s.Scopes))
-	pvars := inlinedVarTable(&s.InlCalls)
+	pvars := inlinedVarTable(&s.InlCalls) // 所有inlined函数的变量,就是出入参
 	for k, s := range s.Scopes {
 		var pruned Scope = Scope{Parent: s.Parent, Ranges: s.Ranges}
 		for i := 0; i < len(s.Vars); i++ {
 			_, found := pvars[s.Vars[i]]
 			if !found {
+				// 过滤掉inlined函数引入的变量
 				pruned.Vars = append(pruned.Vars, s.Vars[i])
 			}
 		}
@@ -1172,6 +1214,7 @@ func putPrunedScopes(ctxt Context, s *FnState, fnabbrev int) error {
 		scopes[k] = pruned
 	}
 	var encbuf [20]byte
+	// 没有写入scopes[0]的range，因为就是函数的range，没必要?
 	if putscope(ctxt, s, scopes, 0, fnabbrev, encbuf[:0]) < int32(len(scopes)) {
 		return errors.New("multiple toplevel scopes")
 	}
@@ -1185,8 +1228,10 @@ func putPrunedScopes(ctxt Context, s *FnState, fnabbrev int) error {
 // 'concrete' instance) will contain a pointer back to this abstract
 // DIE (as a space-saving measure, so that name/type etc doesn't have
 // to be repeated for each inlined copy).
-func PutAbstractFunc(ctxt Context, s *FnState) error {
 
+// 每个inlined函数对应一个abstract func，不能是调用者
+// DW_TAG_subprogram，区别是没有DW_AT_low_pc/hi_pc, 但是有DW_AT_inline属性
+func PutAbstractFunc(ctxt Context, s *FnState) error {
 	if logDwarf {
 		ctxt.Logf("PutAbstractFunc(%v)\n", s.Absfn)
 	}
@@ -1214,6 +1259,7 @@ func PutAbstractFunc(ctxt Context, s *FnState) error {
 	if s.External {
 		ev = 1
 	}
+	// DW_AT_external value
 	putattr(ctxt, s.Absfn, abbrev, DW_FORM_flag, DW_CLS_FLAG, ev, 0)
 
 	// Child variables (may be empty)
@@ -1232,6 +1278,9 @@ func PutAbstractFunc(ctxt Context, s *FnState) error {
 		for _, scope := range s.Scopes {
 			for i := 0; i < len(scope.Vars); i++ {
 				_, found := pvars[scope.Vars[i]]
+
+				// 不记录在inlined函数定义的变量
+				// 也不记录IsInAbstract=false的变量
 				if found || !scope.Vars[i].IsInAbstract {
 					continue
 				}
@@ -1271,7 +1320,7 @@ func PutAbstractFunc(ctxt Context, s *FnState) error {
 // have other inlined subroutine DIEs as children.
 func putInlinedFunc(ctxt Context, s *FnState, callersym Sym, callIdx int) error {
 	ic := s.InlCalls.Calls[callIdx]
-	callee := ic.AbsFunSym
+	callee := ic.AbsFunSym // 每个inlined函数有一个AbsFunc
 
 	abbrev := DW_ABRV_INLINED_SUBROUTINE_RANGES
 	if len(ic.Ranges) == 1 {
@@ -1284,6 +1333,7 @@ func putInlinedFunc(ctxt Context, s *FnState, callersym Sym, callIdx int) error 
 	}
 
 	// Abstract origin.
+	// DW_AT_abstract_origin
 	putattr(ctxt, s.Info, abbrev, DW_FORM_ref_addr, DW_CLS_REFERENCE, 0, callee)
 
 	if abbrev == DW_ABRV_INLINED_SUBROUTINE_RANGES {
@@ -1348,6 +1398,10 @@ func PutConcreteFunc(ctxt Context, s *FnState) error {
 	putattr(ctxt, s.Info, abbrev, DW_FORM_addr, DW_CLS_ADDRESS, s.Size, s.StartPC)
 
 	// cfa / frame base
+	// DW_AT_frame_base
+	// 如何计算DW_OP_call_frame_cfa在call frame information中, .debug_frame
+	// 通过CIE和FDE定义了所有寄存器的计算方式, 特别是CFA, RSP(7), RetAddr(16)
+	// objdump --dwarf=frames /usr/bin/go 然后通过s.StartPC即可查找
 	putattr(ctxt, s.Info, abbrev, DW_FORM_block1, DW_CLS_BLOCK, 1, []byte{DW_OP_call_frame_cfa})
 
 	// Scopes
@@ -1416,8 +1470,8 @@ func PutDefaultFunc(ctxt Context, s *FnState) error {
 	return nil
 }
 
+// scope对应一个DW_TAG_lexical_block + N个DW_TAG_variable, 然后递归写入子scope数据
 func putscope(ctxt Context, s *FnState, scopes []Scope, curscope int32, fnabbrev int, encbuf []byte) int32 {
-
 	if logDwarf {
 		ctxt.Logf("putscope(%v,%d): vars:", s.Info, curscope)
 		for i, v := range scopes[curscope].Vars {
@@ -1444,12 +1498,16 @@ func putscope(ctxt Context, s *FnState, scopes []Scope, curscope int32, fnabbrev
 
 		if len(scope.Ranges) == 1 {
 			Uleb128put(ctxt, s.Info, DW_ABRV_LEXICAL_BLOCK_SIMPLE)
+			// 相对于s.StartPC这个符号的偏移量，也是需要重定位
 			putattr(ctxt, s.Info, DW_ABRV_LEXICAL_BLOCK_SIMPLE, DW_FORM_addr, DW_CLS_ADDRESS, scope.Ranges[0].Start, s.StartPC)
 			putattr(ctxt, s.Info, DW_ABRV_LEXICAL_BLOCK_SIMPLE, DW_FORM_addr, DW_CLS_ADDRESS, scope.Ranges[0].End, s.StartPC)
 		} else {
 			Uleb128put(ctxt, s.Info, DW_ABRV_LEXICAL_BLOCK_RANGES)
+
+			// offset指向的是当前函数的s.Ranges的偏移量，需要重定位
 			putattr(ctxt, s.Info, DW_ABRV_LEXICAL_BLOCK_RANGES, DW_FORM_sec_offset, DW_CLS_PTR, s.Ranges.Length(ctxt), s.Ranges)
 
+			// 写入到s.Ranges这个Symbol里
 			s.PutRanges(ctxt, scope.Ranges)
 		}
 
@@ -1460,6 +1518,7 @@ func putscope(ctxt Context, s *FnState, scopes []Scope, curscope int32, fnabbrev
 	return curscope
 }
 
+// 转换为带ref to abstract auto/param的版本
 // Given a default var abbrev code, select corresponding concrete code.
 func concreteVarAbbrev(varAbbrev int) int {
 	switch varAbbrev {
@@ -1563,6 +1622,7 @@ func putAbstractVar(ctxt Context, info Sym, v *Var) {
 	// Var has no children => no terminator
 }
 
+// 生成DW_TAG_variable DIE，根据情况用不同的Abbrev，即带不同的DW_AT_xxx
 func putvar(ctxt Context, s *FnState, v *Var, absfn Sym, fnabbrev, inlIndex int, encbuf []byte) {
 	// Remap abbrev according to parent DIE abbrev
 	abbrev, missing, concrete := determineVarAbbrev(v, fnabbrev)

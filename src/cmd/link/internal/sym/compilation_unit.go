@@ -10,6 +10,10 @@ import "cmd/internal/dwarf"
 // type from the sym package since loader imports sym.
 type LoaderSym int
 
+// CU = .o文件
+//   * 一个package下所有.go文件
+//   * 每个.s文件
+
 // A CompilationUnit represents a set of source files that are compiled
 // together. Since all Go sources in a Go package are compiled together,
 // there's one CompilationUnit per package that represents all Go sources in

@@ -30,6 +30,9 @@
 
 package objabi
 
+// 划分为多个空间，下面定义的是Go内部使用的RelocType,
+// ELF定义的RelocType映射为r + ElfRelocOffset(=256)
+
 type RelocType int16
 
 //go:generate stringer -type=RelocType

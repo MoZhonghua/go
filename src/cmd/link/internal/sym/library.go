@@ -6,6 +6,7 @@ package sym
 
 import "cmd/internal/goobj"
 
+// 一个package对应一个.a文件，所有.go编译为一个_go_.o, 每个.s文件编译为一个.o，打包到.a
 type Library struct {
 	Objref      string
 	Srcref      string
