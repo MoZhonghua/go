@@ -64,7 +64,7 @@ func (d *deadcodePass) init() {
 				*flagEntrySymbol = "main"
 			}
 		}
-		names = append(names, *flagEntrySymbol)
+		names = append(names, *flagEntrySymbol) // _rt0_amd64_linux
 	}
 	// runtime.unreachableMethod is a function that will throw if called.
 	// We redirect unreachable methods to it.
@@ -93,6 +93,9 @@ func (d *deadcodePass) init() {
 		d.ctxt.Logf("deadcode start names: %v\n", names)
 	}
 
+	// "_rt0_amd64_linux", "runtime.unreachableMethod", "runtime.buildVersion", "runtime.modinfo"
+	// 所有的init函数都在pkg...inittask中引用 pkg=runtime,main,..
+	// 所有的全局变量都必须是在函数中引用
 	for _, name := range names {
 		// Mark symbol as a data/ABI0 symbol.
 		d.mark(d.ldr.Lookup(name, 0), 0)
@@ -116,7 +119,7 @@ func (d *deadcodePass) flood() {
 
 		d.reflectSeen = d.reflectSeen || d.ldr.IsReflectMethod(symIdx)
 
-		isgotype := d.ldr.IsGoType(symIdx)
+		isgotype := d.ldr.IsGoType(symIdx) // 就是指这是一个runtime._type sym
 		relocs := d.ldr.Relocs(symIdx)
 		var usedInIface bool
 
@@ -138,9 +141,12 @@ func (d *deadcodePass) flood() {
 			t := r.Type()
 			switch t {
 			case objabi.R_METHODOFF:
+				// 有uncommon且uncommon.mtype > 0, 每个method对应一个method struct method struct对应4个
+				// reloc，后三个为func _type, ifn text, tfn text都是R_METHODOFF类型
 				if i+2 >= relocs.Count() {
 					panic("expect three consecutive R_METHODOFF relocs")
 				}
+				// TODO(mzh): should always mark methods?
 				if usedInIface {
 					methods = append(methods, methodref{src: symIdx, r: i})
 					// The method descriptor is itself a type descriptor, and
@@ -148,7 +154,7 @@ func (d *deadcodePass) flood() {
 					// reflect.Type.Method(i).Type.In(j). We need to traverse
 					// its child types with UsedInIface set. (See also the
 					// comment below.)
-					rs := r.Sym()
+					rs := r.Sym() // rs对应method mtyp字段
 					if !d.ldr.AttrUsedInIface(rs) {
 						d.ldr.SetAttrUsedInIface(rs, true)
 						if d.ldr.AttrReachable(rs) {
@@ -172,7 +178,7 @@ func (d *deadcodePass) flood() {
 				if !d.ldr.AttrUsedInIface(rs) {
 					d.ldr.SetAttrUsedInIface(rs, true)
 					if d.ldr.AttrReachable(rs) {
-						d.ldr.SetAttrReachable(rs, false)
+						d.ldr.SetAttrReachable(rs, false) // 重新扫描, 因为AttrUsedInIface(rs)会被改变
 						d.mark(rs, symIdx)
 					}
 				}
@@ -187,13 +193,16 @@ func (d *deadcodePass) flood() {
 					// been resolved at this point.
 					continue
 				}
-				m := d.decodeIfaceMethod(d.ldr, d.ctxt.Arch, rs, r.Add())
+				m := d.decodeIfaceMethod(d.ldr, d.ctxt.Arch, rs, r.Add()) // r.Add()是第几个method, 从0开始
 				if d.ctxt.Debugvlog > 1 {
 					d.ctxt.Logf("reached iface method: %v\n", m)
 				}
+				//只需要保留iface中真正用过的method
 				d.ifaceMethod[m] = true
 				continue
 			}
+
+			// 不是上面的情况
 			rs := r.Sym()
 			if isgotype && usedInIface && d.ldr.IsGoType(rs) && !d.ldr.AttrUsedInIface(rs) {
 				// If a type is converted to an interface, it is possible to obtain an
@@ -233,8 +242,8 @@ func (d *deadcodePass) flood() {
 			d.mark(d.ldr.SubSym(symIdx), symIdx)
 		}
 
-		if len(methods) != 0 {
-			if !isgotype {
+		if len(methods) != 0 { // 是_type且有method定义在这个类型上
+			if !isgotype || !usedInIface {
 				panic("method found on non-type symbol")
 			}
 			// Decode runtime type information for type methods
@@ -281,6 +290,16 @@ func (d *deadcodePass) mark(symIdx, parent loader.Sym) {
 	}
 }
 
+/*
+type method struct {
+	name nameOff
+	// 以下这三个是R_METHODOFF?
+	mtyp typeOff  // 函数类型，不带reciever的
+	ifn  textOff  // 代码, 接收pointer reciever
+	tfn  textOff  // 代码, 接收pointer/object reciever
+}
+*/
+// type method struct: ../../../../runtime/type.go:346
 func (d *deadcodePass) markMethod(m methodref) {
 	relocs := d.ldr.Relocs(m.src)
 	d.mark(relocs.At(m.r).Sym(), m.src)
@@ -312,6 +331,7 @@ func (d *deadcodePass) markMethod(m methodref) {
 // types into method signatures. Each encountered method is compared
 // against the interface method signatures, if it matches it is marked
 // as reachable. This is extremely conservative, but easy and correct.
+// 和所有iface中的方法比较，只要匹配就保留
 //
 // The third case is handled by looking to see if any of:
 //	- reflect.Value.Method or MethodByName is reachable
@@ -319,6 +339,7 @@ func (d *deadcodePass) markMethod(m methodref) {
 // 	  REFLECTMETHOD attribute marked by the compiler).
 // If any of these happen, all bets are off and all exported methods
 // of reachable types are marked reachable.
+// 所有exported方法都保留
 //
 // Any unreached text symbols are removed from ctxt.Textp.
 func deadcode(ctxt *Link) {
@@ -347,7 +368,11 @@ func deadcode(ctxt *Link) {
 		// as new types (with new methods) may have been discovered
 		// in the last pass.
 		rem := d.markableMethods[:0]
+		// 通过struct type sym可以找到所有的method，但是不是所有这些method需要标记
+		// 只有下面这些情况需要
 		for _, m := range d.markableMethods {
+			// 如果reflect.Method.Call()则需要保留所有exported方法
+			// 如果方法签名和任意一个iface中任意方法相同，保留
 			if (d.reflectSeen && m.isExported()) || d.ifaceMethod[m.m] {
 				d.markMethod(m)
 			} else {
@@ -364,6 +389,8 @@ func deadcode(ctxt *Link) {
 	}
 }
 
+// 注意函数类型都是不带reciever的，而且经过去重，即相同的in/out参数一定
+// 是指向同一个type sym
 // methodsig is a typed method signature (name + type).
 type methodsig struct {
 	name string
@@ -397,10 +424,18 @@ func (d *deadcodePass) decodeMethodSig(ldr *loader.Loader, arch *sys.Arch, symId
 		d.methodsigstmp = append(d.methodsigstmp[:0], make([]methodsig, count)...)
 	}
 	var methods = d.methodsigstmp[:count]
+
+	/*
+		type method struct {
+			name nameOff
+			mtyp typeOff
+			...
+		}
+	*/
 	for i := 0; i < count; i++ {
 		methods[i].name = decodetypeName(ldr, symIdx, relocs, off)
 		methods[i].typ = decodeRelocSym(ldr, symIdx, relocs, int32(off+4))
-		off += size
+		off += size // size is sizeof(type method struct)
 	}
 	return methods
 }
@@ -413,11 +448,19 @@ func (d *deadcodePass) decodeIfaceMethod(ldr *loader.Loader, arch *sys.Arch, sym
 	}
 	relocs := ldr.Relocs(symIdx)
 	var m methodsig
+
+	/*
+		type imethod struct {
+			name nameOff
+			ityp typeOff
+		}
+	*/
 	m.name = decodetypeName(ldr, symIdx, &relocs, int(off))
 	m.typ = decodeRelocSym(ldr, symIdx, &relocs, int32(off+4))
 	return m
 }
 
+// 所有类型都可以有method，在uncommon中定义, 比如type T *int, 此时kind=ptr
 func (d *deadcodePass) decodetypeMethods(ldr *loader.Loader, arch *sys.Arch, symIdx loader.Sym, relocs *loader.Relocs) []methodsig {
 	p := ldr.Data(symIdx)
 	if !decodetypeHasUncommon(arch, p) {
@@ -426,6 +469,7 @@ func (d *deadcodePass) decodetypeMethods(ldr *loader.Loader, arch *sys.Arch, sym
 	off := commonsize(arch) // reflect.rtype
 	switch decodetypeKind(arch, p) & kindMask {
 	case kindStruct: // reflect.structType
+		// ../../../../runtime/type.go:442
 		off += 4 * arch.PtrSize
 	case kindPtr: // reflect.ptrType
 		off += arch.PtrSize
@@ -445,9 +489,12 @@ func (d *deadcodePass) decodetypeMethods(ldr *loader.Loader, arch *sys.Arch, sym
 		// just Sizeof(rtype)
 	}
 
+	// ../../../../runtime/type.go:353
 	mcount := int(decodeInuxi(arch, p[off+4:], 2))
 	moff := int(decodeInuxi(arch, p[off+4+2+2:], 4))
-	off += moff                // offset to array of reflect.method values
+	off += moff // offset to array of reflect.method values
+
+	// ../../../../runtime/type.go:456
 	const sizeofMethod = 4 * 4 // sizeof reflect.method in program
 	return d.decodeMethodSig(ldr, arch, symIdx, relocs, off, sizeofMethod, mcount)
 }

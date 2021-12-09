@@ -103,7 +103,7 @@ const (
 	SMACHOINDIRECTPLT
 	SMACHOINDIRECTGOT
 	SFILEPATH
-	SDYNIMPORT
+	SDYNIMPORT // 这三个=>elf.SHN_UNDEF
 	SHOSTOBJ
 	SUNDEFEXT // Undefined symbol for resolution by external linker
 

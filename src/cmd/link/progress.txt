@@ -5,12 +5,24 @@ internal/loader/loader.go ?
 2021-12-08
 internal/sym/*.go
 ../internal/dwarf/dwarf.go
-
-2021-12-09
 internal/ld/pcln.go
 internal/ld/sym.go
 internal/ld/target.go
-internal/ld/symtab.go ?
-internal/ld/typelink.go ?
-internal/ld/util.go ?
+internal/ld/typelink.go
+
+2021-12-09
+internal/ld/symtab.go
+internal/ld/util.go
+internal/ld/ar.go
+internal/ld/asmb.go
+internal/ld/config.go
+internal/ld/heap.go
+internal/ld/decodesym.go
+
+internal/ld/deadcode.go ?
+internal/loadelf/ldelf.go ?
+
+internal/ld/data.go ?
+
+
 internal/loader/loader.go ?

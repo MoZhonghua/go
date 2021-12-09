@@ -44,6 +44,8 @@ import (
 
 // Symbol table.
 
+// sh = section header
+
 func putelfstr(s string) int {
 	if len(Elfstrdat) == 0 && s != "" {
 		// first entry must be empty string
@@ -57,6 +59,17 @@ func putelfstr(s string) int {
 }
 
 func putelfsyment(out *OutBuf, off int, addr int64, size int64, info uint8, shndx elf.SectionIndex, other int) {
+	/*
+	Half=16, Word=32, Xword=64, Addr=64
+	typedef struct {
+	        Elf64_Word      st_name;
+	        unsigned char   st_info;  // (bind<<4) + (type&0xf)
+	        unsigned char   st_other; // visibility
+	        Elf64_Half      st_shndx; // section header table index
+	        Elf64_Addr      st_value;
+	        Elf64_Xword     st_size;
+	} Elf64_Sym;
+	*/
 	if elf64 {
 		out.Write32(uint32(off))
 		out.Write8(info)
@@ -78,7 +91,7 @@ func putelfsyment(out *OutBuf, off int, addr int64, size int64, info uint8, shnd
 
 func putelfsym(ctxt *Link, x loader.Sym, typ elf.SymType, curbind elf.SymBind) {
 	ldr := ctxt.loader
-	addr := ldr.SymValue(x)
+	addr := ldr.SymValue(x) // Value通常是地址或者Offset
 	size := ldr.SymSize(x)
 
 	xo := x
@@ -105,6 +118,8 @@ func putelfsym(ctxt *Link, x loader.Sym, typ elf.SymType, curbind elf.SymBind) {
 	}
 
 	sname := ldr.SymExtname(x)
+	// 普通情况:  funcname<ABI0> => funcname.abi0
+	// shared额外: funcname<ABInternal> => funcname.abiinternal
 	sname = mangleABIName(ctxt, ldr, x, sname)
 
 	// One pass for each binding: elf.STB_LOCAL, elf.STB_GLOBAL,
@@ -186,10 +201,12 @@ func putelfsectionsym(ctxt *Link, out *OutBuf, s loader.Sym, shndx elf.SectionIn
 func genelfsym(ctxt *Link, elfbind elf.SymBind) {
 	ldr := ctxt.loader
 
+	// objdump -t /usr/bin/go
+	//   0000000000401000 l     F .text  0000000000000000 runtime.text
 	// runtime.text marker symbol(s).
 	s := ldr.Lookup("runtime.text", 0)
 	putelfsym(ctxt, s, elf.STT_FUNC, elfbind)
-	for k, sect := range Segtext.Sections[1:] {
+	for k, sect := range Segtext.Sections[1:] { // 正常情况下code segment只有.text一个section
 		n := k + 1
 		if sect.Name != ".text" || (ctxt.IsAIX() && ctxt.IsExternal()) {
 			// On AIX, runtime.text.X are symbols already in the symtab.
@@ -211,7 +228,7 @@ func genelfsym(ctxt *Link, elfbind elf.SymBind) {
 	}
 
 	// runtime.etext marker symbol.
-	s = ldr.Lookup("runtime.etext", 0)
+	s = ldr.Lookup("runtime.etext", 0) // end of text, size=0, value=end addr of text
 	if ldr.SymType(s) == sym.STEXT {
 		putelfsym(ctxt, s, elf.STT_FUNC, elfbind)
 	}
@@ -275,6 +292,7 @@ func asmElfSym(ctxt *Link) {
 	putelfsyment(ctxt.Out, putelfstr("go.go"), 0, 0, elf.ST_INFO(elf.STB_LOCAL, elf.STT_FILE), elf.SHN_ABS, 0)
 	ctxt.numelfsym++
 
+	// 用不同的bind生成两遍?
 	bindings := []elf.SymBind{elf.STB_LOCAL, elf.STB_GLOBAL}
 	for _, elfbind := range bindings {
 		if elfbind == elf.STB_GLOBAL {
@@ -364,7 +382,7 @@ func (libs byPkg) Len() int {
 }
 
 func (libs byPkg) Less(a, b int) bool {
-	return libs[a].Pkg < libs[b].Pkg
+	return libs[a].Pkg < libs[b].Pkg // Library对应一个package => 一个.a => 一个_go_.o + N个asm.o
 }
 
 func (libs byPkg) Swap(a, b int) {
@@ -380,7 +398,7 @@ func textsectionmap(ctxt *Link) (loader.Sym, uint32) {
 	nsections := int64(0)
 
 	for _, sect := range Segtext.Sections {
-		if sect.Name == ".text" {
+		if sect.Name == ".text" { // 代码被拆分为多个section?
 			nsections++
 		} else {
 			break
@@ -399,6 +417,9 @@ func textsectionmap(ctxt *Link) (loader.Sym, uint32) {
 	// Additional text sections are named runtime.text.n where n is the
 	// order of creation starting with 1. These symbols provide the section's
 	// address after relocation by the linker.
+
+	// 要知道重定向后的地址，唯一的办法是构造一个Sym，然后在Sym中写入一个指向X地址的
+	// relocation数据。当linker完成relocation之后，就可以根据Sym中的数据得到X的真正地址
 
 	textbase := Segtext.Sections[0].Vaddr
 	for _, sect := range Segtext.Sections {
@@ -441,6 +462,7 @@ func (ctxt *Link) symtab(pcln *pclntab) []sym.SymKind {
 
 	// Define these so that they'll get put into the symbol table.
 	// data.c:/^address will provide the actual values.
+	//  都定义为local symbol, size=0, value=0，后面需要更新value为对应对象地址
 	ctxt.xdefine("runtime.rodata", sym.SRODATA, 0)
 	ctxt.xdefine("runtime.erodata", sym.SRODATA, 0)
 	ctxt.xdefine("runtime.types", sym.SRODATA, 0)
@@ -488,6 +510,7 @@ func (ctxt *Link) symtab(pcln *pclntab) []sym.SymKind {
 			symtype = s.Sym()
 			symtyperel = s.Sym()
 		}
+		// 注意名字为type.*，做为一个carrier sym, 每个sym.STYPE只能有一个Carrier Symbol
 		setCarrierSym(sym.STYPE, symtype)
 		setCarrierSym(sym.STYPERELRO, symtyperel)
 	}
@@ -538,6 +561,7 @@ func (ctxt *Link) symtab(pcln *pclntab) []sym.SymKind {
 		switch {
 		case strings.HasPrefix(name, "type."):
 			if !ctxt.DynlinkingGo() {
+				// 普通exe中的symtab不包含type.XX，只有一个type.*
 				ldr.SetAttrNotInSymbolTable(s, true)
 			}
 			if ctxt.UseRelro() {
@@ -547,7 +571,8 @@ func (ctxt *Link) symtab(pcln *pclntab) []sym.SymKind {
 				}
 			} else {
 				symGroupType[s] = sym.STYPE
-				if symtyperel != 0 {
+				// TODO(mzh): check with wrong variable
+				if symtype != 0 {
 					ldr.SetCarrierSym(s, symtype)
 				}
 			}
@@ -597,6 +622,7 @@ func (ctxt *Link) symtab(pcln *pclntab) []sym.SymKind {
 			} else {
 				align = a
 			}
+			// 指用来GC的数据的大小
 			liveness += (ldr.SymSize(s) + int64(align) - 1) &^ (int64(align) - 1)
 		}
 	}
@@ -608,6 +634,7 @@ func (ctxt *Link) symtab(pcln *pclntab) []sym.SymKind {
 		abihashgostr.AddAddr(ctxt.Arch, hashsym)
 		abihashgostr.AddUint(ctxt.Arch, uint64(ldr.SymSize(hashsym)))
 	}
+	// 创建pkg fingerprint
 	if ctxt.BuildMode == BuildModePlugin || ctxt.CanUsePlugins() {
 		for _, l := range ctxt.Library {
 			s := ldr.CreateSymForUpdate("go.link.pkghashbytes."+l.Pkg, 0)
@@ -627,10 +654,12 @@ func (ctxt *Link) symtab(pcln *pclntab) []sym.SymKind {
 	// runtime to use. Any changes here must be matched by changes to
 	// the definition of moduledata in runtime/symtab.go.
 	// This code uses several global variables that are set by pcln.go:pclntab.
+	// 普通的exe中 ctxt.Moduledata 指向 runtime.firstmoduledata 变量
+	// 这里实际就是在设置变量值，只是绝大多数都是relocation
 	moduledata := ldr.MakeSymbolUpdater(ctxt.Moduledata)
 	// The pcHeader
 	moduledata.AddAddr(ctxt.Arch, pcln.pcheader)
-	// The function name slice
+	// The function name slice // slice是<data, size, cap>三个字段组成
 	moduledata.AddAddr(ctxt.Arch, pcln.funcnametab)
 	moduledata.AddUint(ctxt.Arch, uint64(ldr.SymSize(pcln.funcnametab)))
 	moduledata.AddUint(ctxt.Arch, uint64(ldr.SymSize(pcln.funcnametab)))
@@ -677,6 +706,7 @@ func (ctxt *Link) symtab(pcln *pclntab) []sym.SymKind {
 	moduledata.AddAddr(ctxt.Arch, ldr.Lookup("runtime.etypes", 0))
 
 	if ctxt.IsAIX() && ctxt.IsExternal() {
+		// 只是增加了relocation，没有写入。 reloc的off=0, size=0，也不需要更新
 		// Add R_XCOFFREF relocation to prevent ld's garbage collection of
 		// runtime.rodata, runtime.erodata and runtime.epclntab.
 		addRef := func(name string) {
@@ -832,6 +862,7 @@ func setCarrierSize(typ sym.SymKind, sz int64) {
 }
 
 func isStaticTmp(name string) bool {
+	// xx..stmp_
 	return strings.Contains(name, "."+obj.StaticNamePref)
 }
 

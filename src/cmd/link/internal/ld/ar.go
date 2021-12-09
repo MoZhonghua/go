@@ -50,13 +50,14 @@ const (
 )
 
 type ArHdr struct {
-	name string
-	date string
-	uid  string
-	gid  string
-	mode string
-	size string
-	fmag string
+	name string  // 16
+	date string  // 12
+	uid  string  // 6
+	gid  string  // 6
+	mode string  // 8
+	size string  // 10
+	fmag string  // 2
+	// total = 60 bytes
 }
 
 // hostArchive reads an archive file holding host objects and links in
@@ -88,12 +89,16 @@ func hostArchive(ctxt *Link, name string) {
 	}
 
 	var arhdr ArHdr
+	// l = hdr size + object file size
+	// f.offset points after hdr
 	l := nextar(f, f.Offset(), &arhdr)
 	if l <= 0 {
 		Exitf("%s missing armap", name)
 	}
 
+	// sym name -> offset of data of the sym in .a file
 	var armap archiveMap
+	// ar t 不会显示"/"，需要vim里查看; 一定在第一个
 	if arhdr.name == "/" || arhdr.name == "/SYM64/" {
 		armap = readArmap(name, f, arhdr)
 	} else {
@@ -105,6 +110,7 @@ func hostArchive(ctxt *Link, name string) {
 	for any {
 		var load []uint64
 		returnAllUndefs := -1
+		// 返回所有relocation中被引用Sym的类型为sym.SXREF的符号
 		undefs := ctxt.loader.UndefinedRelocTargets(returnAllUndefs)
 		for _, symIdx := range undefs {
 			name := ctxt.loader.SymName(symIdx)
@@ -119,9 +125,8 @@ func hostArchive(ctxt *Link, name string) {
 			if l <= 0 {
 				Exitf("%s missing archive entry at offset %d", name, off)
 			}
-			pname := fmt.Sprintf("%s(%s)", name, arhdr.name)
+			pname := fmt.Sprintf("%s(%s)", name, arhdr.name)  // libgcc.a(math.o)
 			l = atolwhex(arhdr.size)
-
 			libgcc := sym.Library{Pkg: "libgcc"}
 			h := ldobj(ctxt, f, &libgcc, l, pname, name)
 			if h.ld == nil {

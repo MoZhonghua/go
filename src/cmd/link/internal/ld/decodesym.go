@@ -30,6 +30,7 @@ const (
 	tflagExtraStar = 1 << 1
 )
 
+// 解码整数
 func decodeInuxi(arch *sys.Arch, p []byte, sz int) uint64 {
 	switch sz {
 	case 2:
@@ -44,9 +45,47 @@ func decodeInuxi(arch *sys.Arch, p []byte, sz int) uint64 {
 	}
 }
 
-func commonsize(arch *sys.Arch) int      { return 4*arch.PtrSize + 8 + 8 } // runtime._type
-func structfieldSize(arch *sys.Arch) int { return 3 * arch.PtrSize }       // runtime.structfield
-func uncommonSize() int                  { return 4 + 2 + 2 + 4 + 4 }      // runtime.uncommontype
+/*
+type _type struct {
+	size       uintptr
+	ptrdata    uintptr // size of memory prefix holding all pointers
+	hash       uint32
+	tflag      tflag
+	align      uint8
+	fieldAlign uint8
+	kind       uint8
+	// function for comparing objects of this type
+	// (ptr to object A, ptr to object B) -> ==?
+	equal func(unsafe.Pointer, unsafe.Pointer) bool
+	// gcdata stores the GC type data for the garbage collector.
+	// If the KindGCProg bit is set in kind, gcdata is a GC program.
+	// Otherwise it is a ptrmask bitmap. See mbitmap.go for details.
+	gcdata    *byte
+	str       nameOff
+	ptrToThis typeOff
+}
+*/
+func commonsize(arch *sys.Arch) int { return 4*arch.PtrSize + 8 + 8 } // runtime._type
+
+/*
+type structfield struct {
+	name       name
+	typ        *_type
+	offsetAnon uintptr
+}
+*/
+func structfieldSize(arch *sys.Arch) int { return 3 * arch.PtrSize } // runtime.structfield
+
+/*
+type uncommontype struct {
+	pkgpath nameOff
+	mcount  uint16 // number of methods
+	xcount  uint16 // number of exported methods
+	moff    uint32 // offset from this uncommontype to [mcount]method
+	_       uint32 // unused
+}
+*/
+func uncommonSize() int { return 4 + 2 + 2 + 4 + 4 } // runtime.uncommontype
 
 // Type.commonType.kind
 func decodetypeKind(arch *sys.Arch, p []byte) uint8 {
@@ -78,6 +117,14 @@ func decodetypeFuncDotdotdot(arch *sys.Arch, p []byte) bool {
 	return uint16(decodeInuxi(arch, p[commonsize(arch)+2:], 2))&(1<<15) != 0
 }
 
+/*
+type functype struct {
+	typ      _type
+	inCount  uint16
+	outCount uint16
+}
+*/
+
 // Type.FuncType.inCount
 func decodetypeFuncInCount(arch *sys.Arch, p []byte) int {
 	return int(decodeInuxi(arch, p[commonsize(arch):], 2))
@@ -87,6 +134,13 @@ func decodetypeFuncOutCount(arch *sys.Arch, p []byte) int {
 	return int(uint16(decodeInuxi(arch, p[commonsize(arch)+2:], 2)) & (1<<15 - 1))
 }
 
+/*
+type interfacetype struct {
+	typ     _type
+	pkgpath name // *byte, 不是string!
+	mhdr    []imethod
+}
+*/
 // InterfaceType.methods.length
 func decodetypeIfaceMethodCount(arch *sys.Arch, p []byte) int64 {
 	return int64(decodeInuxi(arch, p[commonsize(arch)+2*arch.PtrSize:], arch.PtrSize))
@@ -105,6 +159,7 @@ const (
 	kindMask      = (1 << 5) - 1
 )
 
+// 找到off对应的reloc: off指引用者需要写入重定位后地址的数据的偏移量, 就是某个指针在对象中的偏移量
 func decodeReloc(ldr *loader.Loader, symIdx loader.Sym, relocs *loader.Relocs, off int32) loader.Reloc {
 	for j := 0; j < relocs.Count(); j++ {
 		rel := relocs.At(j)
@@ -115,6 +170,7 @@ func decodeReloc(ldr *loader.Loader, symIdx loader.Sym, relocs *loader.Relocs, o
 	return loader.Reloc{}
 }
 
+// 找到off对应的reloc指向的sym
 func decodeRelocSym(ldr *loader.Loader, symIdx loader.Sym, relocs *loader.Relocs, off int32) loader.Sym {
 	return decodeReloc(ldr, symIdx, relocs, off).Sym()
 }
@@ -126,26 +182,47 @@ func decodetypeName(ldr *loader.Loader, symIdx loader.Sym, relocs *loader.Relocs
 		return ""
 	}
 
+	// 字段类型可以是name(*byte), nameOff(uint32), 都是指向一个name对象
+	//  - R_ADDR: *byte
+	//  - R_ADDROFF: uint32
 	data := ldr.Data(r)
+
+	// 第一个字节为标志位，然后是多个<len, bindata>
 	nameLen, nameLenLen := binary.Uvarint(data[1:])
 	return string(data[1+nameLenLen : 1+nameLenLen+int(nameLen)])
 }
 
-func decodetypeFuncInType(ldr *loader.Loader, arch *sys.Arch, symIdx loader.Sym, relocs *loader.Relocs, i int) loader.Sym {
-	uadd := commonsize(arch) + 4
-	if arch.PtrSize == 8 {
-		uadd += 4
+/*
+	type u struct {
+		functype
+		u uncommontype
+		in0 *_type
+		in1 *_type
+		...
+		out0 *_type
+		out1 *_type
 	}
+*/
+// 返回func第i个入参的类型对应的sym
+func decodetypeFuncInType(ldr *loader.Loader, arch *sys.Arch, symIdx loader.Sym, relocs *loader.Relocs, i int) loader.Sym {
+	// fmt.Printf("decodetypeFuncInType: kind=%v\n", decodetypeKind(arch, ldr.Data(symIdx)))
+	uadd := commonsize(arch) + 4 // inCount, outCount uint16
+	if arch.PtrSize == 8 {
+		uadd += 4 // 对齐8字节
+	}
+
 	if decodetypeHasUncommon(arch, ldr.Data(symIdx)) {
 		uadd += uncommonSize()
 	}
 	return decodeRelocSym(ldr, symIdx, relocs, int32(uadd+i*arch.PtrSize))
 }
 
+// 返回func第i个出参的类型对应的sym
 func decodetypeFuncOutType(ldr *loader.Loader, arch *sys.Arch, symIdx loader.Sym, relocs *loader.Relocs, i int) loader.Sym {
 	return decodetypeFuncInType(ldr, arch, symIdx, relocs, i+decodetypeFuncInCount(arch, ldr.Data(symIdx)))
 }
 
+// arraytype.elem *_type
 func decodetypeArrayElem(ldr *loader.Loader, arch *sys.Arch, symIdx loader.Sym) loader.Sym {
 	relocs := ldr.Relocs(symIdx)
 	return decodeRelocSym(ldr, symIdx, &relocs, int32(commonsize(arch))) // 0x1c / 0x30
@@ -176,6 +253,17 @@ func decodetypePtrElem(ldr *loader.Loader, arch *sys.Arch, symIdx loader.Sym) lo
 	return decodeRelocSym(ldr, symIdx, &relocs, int32(commonsize(arch))) // 0x1c / 0x30
 }
 
+/*
+type structtype struct {
+	typ     _type
+	pkgPath name
+	fields  []structfield
+
+	field0 structfield
+	field1 structfield
+	....
+}
+*/
 func decodetypeStructFieldCount(ldr *loader.Loader, arch *sys.Arch, symIdx loader.Sym) int {
 	data := ldr.Data(symIdx)
 	return int(decodeInuxi(arch, data[commonsize(arch)+2*arch.PtrSize:], arch.PtrSize))
@@ -191,18 +279,21 @@ func decodetypeStructFieldArrayOff(ldr *loader.Loader, arch *sys.Arch, symIdx lo
 	return off
 }
 
+// 返回structtype.fields[i].name
 func decodetypeStructFieldName(ldr *loader.Loader, arch *sys.Arch, symIdx loader.Sym, i int) string {
 	off := decodetypeStructFieldArrayOff(ldr, arch, symIdx, i)
 	relocs := ldr.Relocs(symIdx)
 	return decodetypeName(ldr, symIdx, &relocs, off)
 }
 
+// 返回structtype.fields[i].type
 func decodetypeStructFieldType(ldr *loader.Loader, arch *sys.Arch, symIdx loader.Sym, i int) loader.Sym {
 	off := decodetypeStructFieldArrayOff(ldr, arch, symIdx, i)
 	relocs := ldr.Relocs(symIdx)
 	return decodeRelocSym(ldr, symIdx, &relocs, int32(off+arch.PtrSize))
 }
 
+// 返回structtype.fields[i].offsetAnon
 func decodetypeStructFieldOffsAnon(ldr *loader.Loader, arch *sys.Arch, symIdx loader.Sym, i int) int64 {
 	off := decodetypeStructFieldArrayOff(ldr, arch, symIdx, i)
 	data := ldr.Data(symIdx)
@@ -212,19 +303,21 @@ func decodetypeStructFieldOffsAnon(ldr *loader.Loader, arch *sys.Arch, symIdx lo
 // decodetypeStr returns the contents of an rtype's str field (a nameOff).
 func decodetypeStr(ldr *loader.Loader, arch *sys.Arch, symIdx loader.Sym) string {
 	relocs := ldr.Relocs(symIdx)
-	str := decodetypeName(ldr, symIdx, &relocs, 4*arch.PtrSize+8)
+	str := decodetypeName(ldr, symIdx, &relocs, 4*arch.PtrSize+8) // nameOff类型字段
 	data := ldr.Data(symIdx)
-	if data[2*arch.PtrSize+4]&tflagExtraStar != 0 {
+	if data[2*arch.PtrSize+4]&tflagExtraStar != 0 { // _type.tflag & tflagExtraStar
 		return str[1:]
 	}
 	return str
 }
 
+// 返回_type.gcdata数据
 func decodetypeGcmask(ctxt *Link, s loader.Sym) []byte {
 	if ctxt.loader.SymType(s) == sym.SDYNIMPORT {
 		symData := ctxt.loader.Data(s)
+		// shlib中_type.gcdata已经重定向为vaddr, 已经没有relocs表，只能通过这个地址取数据
 		addr := decodetypeGcprogShlib(ctxt, symData)
-		ptrdata := decodetypePtrdata(ctxt.Arch, symData)
+		ptrdata := decodetypePtrdata(ctxt.Arch, symData) // size of memory prefix holding ptr
 		sect := findShlibSection(ctxt, ctxt.loader.SymPkg(s), addr)
 		if sect != nil {
 			bits := ptrdata / int64(ctxt.Arch.PtrSize)
@@ -241,6 +334,7 @@ func decodetypeGcmask(ctxt *Link, s loader.Sym) []byte {
 		Exitf("cannot find gcmask for %s", ctxt.loader.SymName(s))
 		return nil
 	}
+
 	relocs := ctxt.loader.Relocs(s)
 	mask := decodeRelocSym(ctxt.loader, s, &relocs, 2*int32(ctxt.Arch.PtrSize)+8+1*int32(ctxt.Arch.PtrSize))
 	return ctxt.loader.Data(mask)

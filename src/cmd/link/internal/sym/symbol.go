@@ -11,6 +11,7 @@ import (
 const (
 	SymVerABI0        = 0
 	SymVerABIInternal = 1
+	// 只要大于等于这个值都认为是Static symbol
 	SymVerStatic      = 10 // Minimum version used by static (file-local) syms
 )
 

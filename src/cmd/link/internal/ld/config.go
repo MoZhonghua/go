@@ -10,6 +10,9 @@ import (
 	"internal/buildcfg"
 )
 
+// buildmode: exe, pie, c-archive, c-shared, shared, plugin
+// linkmode : auto, internal, external
+
 // A BuildMode indicates the sort of object we are building.
 //
 // Possible build modes are the same as those for the -buildmode flag
@@ -17,7 +20,7 @@ import (
 type BuildMode uint8
 
 const (
-	BuildModeUnset BuildMode = iota
+	BuildModeUnset BuildMode = iota  // 互斥的
 	BuildModeExe
 	BuildModePIE
 	BuildModeCArchive

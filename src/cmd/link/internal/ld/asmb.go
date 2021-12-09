@@ -19,10 +19,13 @@ import (
 // This function handles the first part.
 func asmb(ctxt *Link) {
 	// TODO(jfaller): delete me.
-	if thearch.Asmb != nil {
+	if thearch.Asmb != nil { // AMD64 = nil
 		thearch.Asmb(ctxt, ctxt.loader)
 		return
 	}
+
+	fmt.Printf("ctxt.IsELF=%v\n", ctxt.IsELF)
+	fmt.Printf("thearch.CodePad=%v\n", thearch.CodePad)
 
 	if ctxt.IsELF {
 		Asmbelfsetup()
@@ -30,7 +33,7 @@ func asmb(ctxt *Link) {
 
 	var wg sync.WaitGroup
 	f := func(ctxt *Link, out *OutBuf, start, length int64) {
-		pad := thearch.CodePad
+		pad := thearch.CodePad // [0xcc] = int3
 		if pad == nil {
 			pad = zeros[:]
 		}
@@ -38,9 +41,11 @@ func asmb(ctxt *Link) {
 	}
 
 	for _, sect := range Segtext.Sections {
+		// segtext.Vaddr是所有.text section的base地址
 		offset := sect.Vaddr - Segtext.Vaddr + Segtext.Fileoff
 		// Handle text sections with Codeblk
 		if sect.Name == ".text" {
+			// 给的是vaddr + len, 应该是遍历所有Sym，在这个范围内的就写入?
 			writeParallel(&wg, f, ctxt, offset, sect.Vaddr, sect.Length)
 		} else {
 			writeParallel(&wg, datblk, ctxt, offset, sect.Vaddr, sect.Length)
@@ -57,6 +62,7 @@ func asmb(ctxt *Link) {
 
 	writeParallel(&wg, datblk, ctxt, Segdata.Fileoff, Segdata.Vaddr, Segdata.Filelen)
 
+	// 不是按照section写入，而是按照segment写入。因为同一个segment中所有section本来就是连续存放
 	writeParallel(&wg, dwarfblk, ctxt, Segdwarf.Fileoff, Segdwarf.Vaddr, Segdwarf.Filelen)
 
 	wg.Wait()
@@ -67,7 +73,7 @@ func asmb(ctxt *Link) {
 //  - writing out the architecture specific pieces.
 // This function handles the second part.
 func asmb2(ctxt *Link) {
-	if thearch.Asmb2 != nil {
+	if thearch.Asmb2 != nil { // AMD64 = nil
 		thearch.Asmb2(ctxt, ctxt.loader)
 		return
 	}
@@ -159,6 +165,8 @@ func sizeExtRelocs(ctxt *Link, relsize uint32) {
 		panic("sizeExtRelocs: relocation size not set")
 	}
 	var sz int64
+
+	// 所有relocation写到一起，普通exe不需要，-buildmode=pie需要
 	for _, seg := range Segments {
 		for _, sect := range seg.Sections {
 			sect.Reloff = uint64(ctxt.Out.Offset() + sz)

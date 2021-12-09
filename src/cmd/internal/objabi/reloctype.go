@@ -52,7 +52,7 @@ const (
 	R_ADDRMIPS
 
 	// s引用r
-	// 实际代码中link/internal/ld/data.go:435, 设置的值为 Addr(r) - Sect(r)
+	// 实际代码中 ../link/internal/ld/data.go:435, 设置的值为 Addr(r) - Sect(r)
 	// R_ADDROFF resolves to a 32-bit offset from the beginning of the section
 	// holding the data being relocated to the referenced symbol.
 	R_ADDROFF
