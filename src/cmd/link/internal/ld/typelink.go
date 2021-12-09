@@ -37,10 +37,10 @@ func (ctxt *Link) typelink() {
 			continue
 		}
 		if ldr.IsTypelink(s) {
-			// s.Type = SRODATA
+			// s.Type = SRODATA, s.Value = 0
 			typelinks = append(typelinks, typelinkSortKey{decodetypeStr(ldr, ctxt.Arch, s), s})
 		} else if ldr.IsItab(s) {
-			// s.Type = SRODATA
+			// s.Type = SRODATA, s.Value = 0
 			itabs = append(itabs, s)
 		}
 	}

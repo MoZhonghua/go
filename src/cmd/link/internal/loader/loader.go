@@ -75,8 +75,8 @@ func (a Aux) Sym() Sym { return a.l.resolve(a.r, a.Aux.Sym()) }
 type oReader struct {
 	*goobj.Reader
 	unit         *sym.CompilationUnit // 每个.o文件对应一个CU
-	version      int    // version of static symbol
-	flags        uint32 // read from object file
+	version      int                  // version of static symbol
+	flags        uint32               // read from object file
 	pkgprefix    string
 	syms         []Sym    // Sym's global index, indexed by local index
 	pkg          []uint32 // indices of referenced package by PkgIdx (index into loader.objs array)
@@ -214,8 +214,8 @@ type Loader struct {
 	symsByName    [2]map[string]Sym // map symbol name to index, two maps are for ABI0 and ABIInternal
 	extStaticSyms map[nameVer]Sym   // externally defined static symbols, keyed by name
 
-	extReader    *oReader // a dummy oReader, for external symbols
-	payloadBatch []extSymPayload // 用于优化分配extSymPayload对象，批量分配1000个
+	extReader    *oReader         // a dummy oReader, for external symbols
+	payloadBatch []extSymPayload  // 用于优化分配extSymPayload对象，批量分配1000个
 	payloads     []*extSymPayload // contents of linker-materialized external syms
 	values       []int64          // symbol values, indexed by global sym index
 
@@ -1921,10 +1921,10 @@ func (l *Loader) relocs(r *oReader, li uint32) Relocs {
 
 // FuncInfo provides hooks to access goobj.FuncInfo in the objects.
 type FuncInfo struct {
-	l       *Loader
-	r       *oReader
-	data    []byte //对应一个goobj.FuncInfo对象
-	auxs    []goobj.Aux
+	l    *Loader
+	r    *oReader
+	data []byte //对应一个goobj.FuncInfo对象
+	auxs []goobj.Aux
 	// TODO(mzh) don't init this many times
 	lengths goobj.FuncInfoLengths
 }

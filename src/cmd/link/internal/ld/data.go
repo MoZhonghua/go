@@ -97,7 +97,7 @@ func maxSizeTrampolines(ctxt *Link, ldr *loader.Loader, s loader.Sym, isTramp bo
 // On PPC64 & PPC64LE the text sections might be split but will still insert trampolines
 // where necessary.
 func trampoline(ctxt *Link, s loader.Sym) {
-	if thearch.Trampoline == nil {
+	if thearch.Trampoline == nil { // AMD64不支持
 		return // no need or no support of trampolines on this arch
 	}
 
@@ -126,12 +126,14 @@ func trampoline(ctxt *Link, s loader.Sym) {
 			}
 		}
 
+		// s -> trampline -> rs
 		thearch.Trampoline(ctxt, ldr, ri, rs, s)
 	}
 }
 
 // whether rt is a (host object) relocation that will be turned into
 // a call to PLT.
+// PLT: procedure linkage table
 func isPLTCall(rt objabi.RelocType) bool {
 	const pcrel = 1
 	switch rt {
@@ -158,6 +160,7 @@ func FoldSubSymbolOffset(ldr *loader.Loader, s loader.Sym) (loader.Sym, int64) {
 	outer := ldr.OuterSym(s)
 	off := int64(0)
 	if outer != 0 {
+		// outer正常都应该在s前面?
 		off += ldr.SymValue(s) - ldr.SymValue(outer)
 		s = outer
 	}
@@ -232,6 +235,7 @@ func (st *relocSymState) relocsym(s loader.Sym, P []byte) {
 			}
 		}
 
+		// 只处理go自己定义的RelocType, ELF reloctype有外部ld处理
 		if rt >= objabi.ElfRelocOffset {
 			continue
 		}
@@ -248,7 +252,7 @@ func (st *relocSymState) relocsym(s loader.Sym, P []byte) {
 		}
 
 		var rv sym.RelocVariant
-		if target.IsPPC64() || target.IsS390X() {
+		if target.IsPPC64() || target.IsS390X() { // AMD64都是None
 			rv = ldr.RelocVariant(s, ri)
 		}
 
@@ -278,6 +282,7 @@ func (st *relocSymState) relocsym(s loader.Sym, P []byte) {
 			case 8:
 				o = int64(target.Arch.ByteOrder.Uint64(P[off:]))
 			}
+			// ../x86/asm.go:415
 			out, n, ok := thearch.Archreloc(target, ldr, syms, r, s, o)
 			if target.IsExternal() {
 				nExtReloc += n
@@ -331,6 +336,7 @@ func (st *relocSymState) relocsym(s loader.Sym, P []byte) {
 				if thearch.TLSIEtoLE == nil {
 					log.Fatalf("internal linking of TLS IE not supported on %v", target.Arch.Family)
 				}
+				// ../x86/asm.go
 				thearch.TLSIEtoLE(P, int(off), int(siz))
 				o = int64(syms.Tlsoffset)
 			} else {
@@ -389,6 +395,7 @@ func (st *relocSymState) relocsym(s loader.Sym, P []byte) {
 				}
 			}
 
+			// Value就是地址
 			o = ldr.SymValue(rs) + r.Add()
 
 			// On amd64, 4-byte offsets will be sign-extended, so it is impossible to
@@ -516,6 +523,7 @@ func (st *relocSymState) relocsym(s loader.Sym, P []byte) {
 				o = ldr.SymValue(rs)
 			}
 
+			// rs相对于这条call指令结束地址的偏移量
 			o += r.Add() - (ldr.SymValue(s) + int64(off) + int64(siz))
 		case objabi.R_SIZE:
 			o = ldr.SymSize(rs) + r.Add()
@@ -538,6 +546,7 @@ func (st *relocSymState) relocsym(s loader.Sym, P []byte) {
 			o = r.Add()
 
 		case objabi.R_GOTOFF:
+			// rs应该是对应GOT中一项
 			o = ldr.SymValue(rs) + r.Add() - ldr.SymValue(syms.GOT)
 		}
 
