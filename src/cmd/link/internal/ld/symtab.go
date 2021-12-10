@@ -688,20 +688,35 @@ func (ctxt *Link) symtab(pcln *pclntab) []sym.SymKind {
 	// minpc, maxpc
 	moduledata.AddAddr(ctxt.Arch, pcln.firstFunc)
 	moduledata.AddAddrPlus(ctxt.Arch, pcln.lastFunc, ldr.SymSize(pcln.lastFunc))
+
 	// pointers to specific parts of the module
-	moduledata.AddAddr(ctxt.Arch, ldr.Lookup("runtime.text", 0))
+	// 基本模式为:
+	//   1. 在runtime中定义变量，firstmoduledata
+	//   2. ld中通过查找firstmoduledata，并生成一个updater，然后重写内容
+	//   3. 对于所有需要通过link后才能确定的字段，通过relocation设置, 填入指向这个Sym的R_ADDR或者R_ADDROFF
+	//      - Sym本身有数据，此时Value就是Sym最终的地址, 比如pcln里的各个数据
+	//      - Sym本身没数据(size=0)，此时Value实际就是一个Int值，比如runtime.text
+	moduledata.AddAddr(ctxt.Arch, ldr.Lookup("runtime.text", 0))  // .text
 	moduledata.AddAddr(ctxt.Arch, ldr.Lookup("runtime.etext", 0))
-	moduledata.AddAddr(ctxt.Arch, ldr.Lookup("runtime.noptrdata", 0))
+	moduledata.AddAddr(ctxt.Arch, ldr.Lookup("runtime.noptrdata", 0))  // .noptrdata
 	moduledata.AddAddr(ctxt.Arch, ldr.Lookup("runtime.enoptrdata", 0))
-	moduledata.AddAddr(ctxt.Arch, ldr.Lookup("runtime.data", 0))
+	moduledata.AddAddr(ctxt.Arch, ldr.Lookup("runtime.data", 0)) // .data
 	moduledata.AddAddr(ctxt.Arch, ldr.Lookup("runtime.edata", 0))
-	moduledata.AddAddr(ctxt.Arch, ldr.Lookup("runtime.bss", 0))
+	moduledata.AddAddr(ctxt.Arch, ldr.Lookup("runtime.bss", 0)) // .bss
 	moduledata.AddAddr(ctxt.Arch, ldr.Lookup("runtime.ebss", 0))
-	moduledata.AddAddr(ctxt.Arch, ldr.Lookup("runtime.noptrbss", 0))
+	moduledata.AddAddr(ctxt.Arch, ldr.Lookup("runtime.noptrbss", 0))  // .noptrbss
 	moduledata.AddAddr(ctxt.Arch, ldr.Lookup("runtime.enoptrbss", 0))
 	moduledata.AddAddr(ctxt.Arch, ldr.Lookup("runtime.end", 0))
+
+	// gcprog for .data and .bss
+	// 这两个不是区域的起始结束地址，就是指向正常Sym
 	moduledata.AddAddr(ctxt.Arch, ldr.Lookup("runtime.gcdata", 0))
 	moduledata.AddAddr(ctxt.Arch, ldr.Lookup("runtime.gcbss", 0))
+
+	// Value(runtime.types) = Sect(runtime.types).vaddr
+	// type.xxx数据不用放到所属section的最前面。因为runtime.types也不是指
+	// 全部types数据的起始位置，而是type.xxx所在section的起始位置，因此
+	// firstmoduledata.types + R_ADDROFF能正确指向type.xxx
 	moduledata.AddAddr(ctxt.Arch, ldr.Lookup("runtime.types", 0))
 	moduledata.AddAddr(ctxt.Arch, ldr.Lookup("runtime.etypes", 0))
 

@@ -19,7 +19,6 @@ internal/ld/config.go
 internal/ld/heap.go
 internal/ld/decodesym.go
 internal/ld/deadcode.go
-internal/ld/data.go ?
 
 2021-12-10
 internal/ld/data.go ?

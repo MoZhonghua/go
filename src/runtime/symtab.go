@@ -408,7 +408,13 @@ type moduledata struct {
 	data, edata           uintptr
 	bss, ebss             uintptr
 	noptrbss, enoptrbss   uintptr
+	// end => end of data segment!
+	// gcdata => gcprog for .data
+	// gcbss  => gcprog for .bss
 	end, gcdata, gcbss    uintptr
+	// 注意!!: 所有的type.xxx数据不是连续存放的，但是一定在同一个section
+	// types和etypes是这个section的起始结束地址。这里面会有其他数据, 比如
+	// 编译为普通exe，type..xxx实际都是放在.rodata中，其他数据也是放在这里
 	types, etypes         uintptr
 
 	textsectmap []textsect
