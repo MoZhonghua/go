@@ -75,6 +75,7 @@ func gentext(ctxt *ld.Link, ldr *loader.Loader) {
 	o(0xc3)
 }
 
+// rIdx: reloction index
 func adddynrel(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loader.Sym, r loader.Reloc, rIdx int) bool {
 	targ := r.Sym()
 	var targType sym.SymKind
@@ -653,10 +654,15 @@ func tlsIEtoLE(P []byte, off, size int) {
 	//
 	// To determine the instruction and register, we study the op codes.
 	// Consult an AMD64 instruction encoding guide to decipher this.
+
+	// 修改的是操作符，真正的relocation地址没有改
+	// 4c8b3500000000          MOVQ $0(IP), R14  // 原始值，IE模式
+	// 49c7c600000000          MOVQ $0, R14      // 转换为LE模式
+	// 49c7c6f8ffffff          MOVQ $-0x8, R14   // 经过relocation
 	if off < 3 {
 		log.Fatal("R_X86_64_GOTTPOFF reloc not preceded by MOVQ or ADDQ instruction")
 	}
-	op := P[off-3 : off]
+	op := P[off-3 : off] // op=[49, c7, c6]
 	reg := op[2] >> 3
 
 	if op[1] == 0x8b || reg == 4 {

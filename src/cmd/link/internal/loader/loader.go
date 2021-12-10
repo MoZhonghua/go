@@ -86,7 +86,6 @@ type oReader struct {
 	objidx       uint32   // index of this reader in the objs slice
 }
 
-
 // go object file
 //    SymbolDefs [...]struct {
 //       Name  string
@@ -537,6 +536,7 @@ func (l *Loader) LookupOrCreateSym(name string, ver int) Sym {
 	if i != 0 {
 		return i
 	}
+
 	i = l.newExtSym(name, ver)
 	static := ver >= sym.SymVerStatic || ver < 0
 	if static {

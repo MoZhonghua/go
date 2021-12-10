@@ -294,6 +294,9 @@ func (out *OutBuf) WriteStringPad(s string, n int, pad []byte) {
 // buffer.
 func (out *OutBuf) WriteSym(ldr *loader.Loader, s loader.Sym) []byte {
 	if !ldr.IsGeneratedSym(s) {
+		// 两种情况:
+		//  1. loader直接从.o文件读取的数据
+		//  2. 动态创建的extSym, 而且通过MakeSymbolUpdater()写入了数据
 		P := ldr.Data(s)
 		n := int64(len(P))
 		pos, buf := out.writeLoc(n)
@@ -302,6 +305,8 @@ func (out *OutBuf) WriteSym(ldr *loader.Loader, s loader.Sym) []byte {
 		ldr.FreeData(s)
 		return buf[pos : pos+n]
 	} else {
+		// 动态创建的extSym, 但是还没有写入数据，注册了一个generater fn延迟写入数据
+		// 优势是此时Data指向最终输出文件的mmap，不用分配内存、写入、再复制到文件
 		n := ldr.SymSize(s)
 		pos, buf := out.writeLoc(n)
 		out.off += n

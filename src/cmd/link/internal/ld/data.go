@@ -127,6 +127,7 @@ func trampoline(ctxt *Link, s loader.Sym) {
 		}
 
 		// s -> trampline -> rs
+		// arm, arm64, ppc64需要
 		thearch.Trampoline(ctxt, ldr, ri, rs, s)
 	}
 }
@@ -183,6 +184,16 @@ func FoldSubSymbolOffset(ldr *loader.Loader, s loader.Sym) (loader.Sym, int64) {
 //
 // This is a performance-critical function for the linker; be careful
 // to avoid introducing unnecessary allocations in the main loop.
+
+// relocation处理分为两类: link-time relocation, load-time relocation
+// relocation本身又分为两类:
+//  - go reloc: 对应golang自己定义的RelocType
+//  - ELF reloc: 对应ELF定义的RelocType(>=256)
+// internal linking时: link直接计算go relocation值并写入(ELF reloc不应该出现?)
+// external linking时: link把go reloc转换为对应的ELF reloc, 然后交给extld处理
+// load-time relocation是由dynamic loader处理，都是ELF reloc
+
+// 这里处理的是internal linking + go reloc，其他的不处理仅计数
 func (st *relocSymState) relocsym(s loader.Sym, P []byte) {
 	ldr := st.ldr
 	relocs := ldr.Relocs(s)
@@ -293,6 +304,15 @@ func (st *relocSymState) relocsym(s loader.Sym, P []byte) {
 				st.err.Errorf(s, "unknown reloc to %v: %d (%s)", ldr.SymName(rs), rt, sym.RelocName(target.Arch, rt))
 			}
 		case objabi.R_TLS_LE:
+			// 在call func_xxx.abi0指令之后会自动生成两条语句来恢复R14 => g, X15=0
+			// XORPS X15, X15
+			// MOVQ FS:0xfffffff8, R14
+			// 以及反过来，在调用abiinternal函数前这是R14和X15
+			// LE local-exec: dso中访问自己内部定义的thread-local variable
+			// 通过直接fs:offset来访问
+
+			// 最终结果是: MOVQ FS:0xfffffff8, R14
+			//  0xfffffff8是reloc最终写入的固定值
 			if target.IsExternal() && target.IsElf() {
 				nExtReloc++
 				o = 0
@@ -312,6 +332,7 @@ func (st *relocSymState) relocsym(s loader.Sym, P []byte) {
 				// to take up 8 bytes.
 				o = 8 + ldr.SymValue(rs)
 			} else if target.IsElf() || target.IsPlan9() || target.IsDarwin() {
+				// syms.Tlsoffset = -8
 				o = int64(syms.Tlsoffset) + r.Add()
 			} else if target.IsWindows() {
 				o = r.Add()
@@ -319,6 +340,18 @@ func (st *relocSymState) relocsym(s loader.Sym, P []byte) {
 				log.Fatalf("unexpected R_TLS_LE relocation for %v", target.HeadType)
 			}
 		case objabi.R_TLS_IE:
+			// 基本原则是生成.text是只读，只能是固定值，动态relocation只能修改GOT
+
+			// -buildmode=pie时会生成, 调用thearch.TLSIEtoLE()
+			// 没有使用GOT??
+
+			// 4c8b3500000000          MOVQ $0(IP), R14  // 原始值，IE模式
+			// 49c7c600000000          MOVQ $0, R14      // 转换为LE模式
+			// 49c7c6f8ffffff          MOVQ $-0x8, R14   // 经过relocation
+
+			// 后面会紧跟一条语句:
+			//             MOVQ FS:0(R14), R14                 // mov %fs:(%r14),%r14
+
 			if target.IsExternal() && target.IsElf() {
 				nExtReloc++
 				o = 0
@@ -336,7 +369,7 @@ func (st *relocSymState) relocsym(s loader.Sym, P []byte) {
 				if thearch.TLSIEtoLE == nil {
 					log.Fatalf("internal linking of TLS IE not supported on %v", target.Arch.Family)
 				}
-				// ../x86/asm.go
+				// ./internal/amd64/asm.go:648
 				thearch.TLSIEtoLE(P, int(off), int(siz))
 				o = int64(syms.Tlsoffset)
 			} else {
@@ -614,7 +647,7 @@ func extreloc(ctxt *Link, ldr *loader.Loader, s loader.Sym, r loader.Reloc) (loa
 
 	switch rt {
 	default:
-		return thearch.Extreloc(target, ldr, r, s)
+		return thearch.Extreloc(target, ldr, r, s) // AMD64=nil
 
 	case objabi.R_TLS_LE, objabi.R_TLS_IE:
 		if target.IsElf() {
@@ -624,7 +657,7 @@ func extreloc(ctxt *Link, ldr *loader.Loader, s loader.Sym, r loader.Reloc) (loa
 				rr.Xsym = ctxt.Tlsg
 			}
 			rr.Xadd = r.Add()
-			break
+			break // return rr, true
 		}
 		return rr, false
 
@@ -748,12 +781,13 @@ func (ctxt *Link) makeRelocSymState() *relocSymState {
 	}
 }
 
+// win dyn reloc sym
 func windynrelocsym(ctxt *Link, rel *loader.SymbolBuilder, s loader.Sym) {
 	var su *loader.SymbolBuilder
 	relocs := ctxt.loader.Relocs(s)
 	for ri := 0; ri < relocs.Count(); ri++ {
 		r := relocs.At(ri)
-		if r.IsMarker() {
+		if r.IsMarker() { // siz=0
 			continue // skip marker relocations
 		}
 		targ := r.Sym()
@@ -768,15 +802,17 @@ func windynrelocsym(ctxt *Link, rel *loader.SymbolBuilder, s loader.Sym) {
 				ctxt.loader.SymName(targ))
 		}
 
-		tplt := ctxt.loader.SymPlt(targ)
-		tgot := ctxt.loader.SymGot(targ)
+		tplt := ctxt.loader.SymPlt(targ) // targ's offset in plt
+		tgot := ctxt.loader.SymGot(targ) // targ's offset in got
 		if tplt == -2 && tgot != -2 { // make dynimport JMP table for PE object files.
 			tplt := int32(rel.Size())
 			ctxt.loader.SetPlt(targ, tplt)
 
 			if su == nil {
+				// 会分配新的sym和payload, 因为出现在sym表中，有副作用操作
 				su = ctxt.loader.MakeSymbolUpdater(s)
 			}
+			// r是*gobj.Reloc，因此会更新s的重定位数据
 			r.SetSym(rel.Sym())
 			r.SetAdd(int64(tplt))
 
@@ -792,11 +828,12 @@ func windynrelocsym(ctxt *Link, rel *loader.SymbolBuilder, s loader.Sym) {
 				rel.AddUint8(0x90)
 				rel.AddUint8(0x90)
 			case sys.AMD64:
+				// jmp *ds:0x0
 				rel.AddUint8(0xff)
 				rel.AddUint8(0x24)
 				rel.AddUint8(0x25)
 				rel.AddAddrPlus4(ctxt.Arch, targ, 0)
-				rel.AddUint8(0x90)
+				rel.AddUint8(0x90) // nop, 8字节对齐
 			}
 		} else if tplt >= 0 {
 			if su == nil {
@@ -808,6 +845,7 @@ func windynrelocsym(ctxt *Link, rel *loader.SymbolBuilder, s loader.Sym) {
 	}
 }
 
+// 为每一个函数生成一个PLT项
 // windynrelocsyms generates jump table to C library functions that will be
 // added later. windynrelocsyms writes the table into .rel symbol.
 func (ctxt *Link) windynrelocsyms() {
@@ -815,6 +853,7 @@ func (ctxt *Link) windynrelocsyms() {
 		return
 	}
 
+	// STEXT，最后应该是在.plt中
 	rel := ctxt.loader.CreateSymForUpdate(".rel", 0)
 	rel.SetType(sym.STEXT)
 
@@ -843,6 +882,20 @@ func dynrelocsym(ctxt *Link, s loader.Sym) {
 			// It's expected that some relocations will be done
 			// later by relocsym (R_TLS_LE, R_ADDROFF), so
 			// don't worry if Adddynrel returns false.
+
+			// 注意会把ELF reloc 转换为go reloc!!
+			// 同时会把对外部变量的引用reloc转换为对PLT/GOT的reloc(会在PTL/GOT增加对应的项)
+			//   - r.Sym() = GOT/PLT
+			//   - r.Type() = R_PCREL
+			//   - r.Add() = 原来的r.Sym()在GOT/PLT对应项的偏移量
+			// 最终结果
+			//   - link-relocation: $offset(IP) -> GOT/PLT对应项
+			//   - load-relocation: 更新GOT/PLT指向原来的r.Sym()的真正地址
+
+			// dso访问自己内部定义func/data, 相对于IP的偏移量在link时可以计算出来，不需要
+			// load-relocation
+
+			// ./internal/amd64/asm.go:78
 			thearch.Adddynrel(target, ldr, syms, s, r, ri)
 			continue
 		}
@@ -871,7 +924,7 @@ func (state *dodataState) dynreloc(ctxt *Link) {
 	for _, s := range ctxt.Textp {
 		dynrelocsym(ctxt, s)
 	}
-	for _, syms := range state.data {
+	for _, syms := range state.data { // type < sym.SXREF 的所有sym
 		for _, s := range syms {
 			dynrelocsym(ctxt, s)
 		}
@@ -906,6 +959,8 @@ func writeBlocks(ctxt *Link, out *OutBuf, sem chan int, ldr *loader.Loader, syms
 		// Find the last symbol we'd write.
 		idx := -1
 		for i, s := range syms {
+			// 从ELF加载符号时，会用一个outer包含一组sym，这样写入时可以直接写outer
+			// 在组里的sym不用单独处理
 			if ldr.AttrSubSymbol(s) {
 				continue
 			}
@@ -949,6 +1004,7 @@ func writeBlocks(ctxt *Link, out *OutBuf, sem chan int, ldr *loader.Loader, syms
 			length = ldr.SymValue(next) - addr
 		}
 		if length == 0 || length > lastAddr-addr {
+			// 不拆分到多个block, 但是如果超过lastAddr要停止
 			length = lastAddr - addr
 		}
 
@@ -1000,8 +1056,12 @@ func writeBlock(ctxt *Link, out *OutBuf, ldr *loader.Loader, syms []loader.Sym, 
 			out.WriteStringPad("", int(val-addr), pad)
 			addr = val
 		}
+
+		// P对应s在文件中数据(mmap)
 		P := out.WriteSym(ldr, s)
 		st.relocsym(s, P)
+		// 注意generator fn是在reloc之后调用的，也就是只能写入固定值，比如SetUint32()
+		// 不能有reloc, 比如SetAddr()
 		if f, ok := ctxt.generatorSyms[s]; ok {
 			f(ctxt, s)
 		}
@@ -1082,6 +1142,7 @@ var (
 	strnames []string
 )
 
+// -X pkg.variable=value
 func addstrdata1(ctxt *Link, arg string) {
 	eq := strings.Index(arg, "=")
 	dot := strings.LastIndex(arg[:eq+1], ".")
@@ -1116,8 +1177,10 @@ func addstrdata(arch *sys.Arch, l *loader.Loader, name, value string) {
 	if !l.AttrReachable(s) {
 		return // don't bother setting unreachable variable
 	}
+	// 会创建一个ext sym来覆盖原来的sym, 再查询都是只看到这个新的sym
 	bld := l.MakeSymbolUpdater(s)
 	if bld.Type() == sym.SBSS {
+		// 有初始值，因此不应该在BSS中
 		bld.SetType(sym.SDATA)
 	}
 
@@ -1142,6 +1205,7 @@ func (ctxt *Link) dostrdata() {
 
 // addgostring adds str, as a Go string value, to s. symname is the name of the
 // symbol used to define the string data and must be unique per linked object.
+// str=abc, symname=go.string."abc"
 func addgostring(ctxt *Link, ldr *loader.Loader, s *loader.SymbolBuilder, symname, str string) {
 	sdata := ldr.CreateSymForUpdate(symname, 0)
 	if sdata.Type() != sym.Sxxx {
@@ -1281,6 +1345,7 @@ func (state *dodataState) checkdatsize(symn sym.SymKind) {
 
 // fixZeroSizedSymbols gives a few special symbols with zero size some space.
 func fixZeroSizedSymbols(ctxt *Link) {
+	// 准确来说不是address，而是value。因为size=0，不会出现在exe中，addr没意义
 	// The values in moduledata are filled out by relocations
 	// pointing to the addresses of these special symbols.
 	// Typically these symbols have no size and are not laid
@@ -1350,6 +1415,10 @@ func fixZeroSizedSymbols(ctxt *Link) {
 
 // makeRelroForSharedLib creates a section of readonly data if necessary.
 func (state *dodataState) makeRelroForSharedLib(target *Link) {
+	// 普通exe和lib不用，其他的都用(pie,plugin,shared,c-archive,c-shared),
+	// 因为这些情况下加载后的地址不定，因此DATA中数据需要load-relocation
+	// 比如type.a 引用了 type.b, 非PIE代码，type.b加载到内存中地址确定的，
+	// type.a 中值只需要link-relocation
 	if !target.UseRelro() {
 		return
 	}
@@ -1422,7 +1491,7 @@ type dodataState struct {
 	// Max alignment for each flavor of data symbol.
 	dataMaxAlign [sym.SXREF]int32
 	// Overridden sym type
-	symGroupType []sym.SymKind
+	symGroupType []sym.SymKind // index是SymIdx
 	// Current data size so far.
 	datsize int64
 }
@@ -1454,8 +1523,10 @@ func (state *dodataState) setSymType(s loader.Sym, kind sym.SymKind) {
 		panic("bad")
 	}
 	if int(s) < len(state.symGroupType) {
+		// 应该是优化，只需要改kind，其他都不用改。创建一个extSym浪费
 		state.symGroupType[s] = kind
 	} else {
+		// 用相同的SymIdx覆盖原来的, 之后看到的是新的
 		su := state.ctxt.loader.MakeSymbolUpdater(s)
 		su.SetType(kind)
 	}
@@ -1477,7 +1548,7 @@ func (ctxt *Link) dodata(symGroupType []sym.SymKind) {
 
 		st := state.symType(s)
 
-		if st <= sym.STEXT || st >= sym.SXREF {
+		if st <= sym.STEXT || st >= sym.SXREF { // 注意不包含SXREF
 			continue
 		}
 		state.data[st] = append(state.data[st], s)
@@ -1491,13 +1562,15 @@ func (ctxt *Link) dodata(symGroupType []sym.SymKind) {
 
 	// Now that we have the data symbols, but before we start
 	// to assign addresses, record all the necessary
-	// dynamic relocations. These will grow the relocation
+	// bdynamic relocations. These will grow the relocation
 	// symbol, which is itself data.
 	//
 	// On darwin, we need the symbol table numbers for dynreloc.
 	if ctxt.HeadType == objabi.Hdarwin {
 		machosymorder(ctxt)
 	}
+
+	// reloc 转换为 got/plt reloc, 普通exe/lib不用, *FlagD==true
 	state.dynreloc(ctxt)
 
 	// Move any RO data with relocations to a separate section.
@@ -1513,7 +1586,7 @@ func (ctxt *Link) dodata(symGroupType []sym.SymKind) {
 	// Sort symbols.
 	var wg sync.WaitGroup
 	for symn := range state.data {
-		symn := sym.SymKind(symn)
+		symn := sym.SymKind(symn) // 这里symn变量可以同名覆盖!
 		wg.Add(1)
 		go func() {
 			state.data[symn], state.dataMaxAlign[symn] = state.dodataSect(ctxt, symn, state.data[symn])
@@ -1535,6 +1608,8 @@ func (ctxt *Link) dodata(symGroupType []sym.SymKind) {
 				reli = i
 			}
 		}
+
+		// 如果两个符号都有且不相邻(address()会按照顺序分配地址，相邻的符号在exe中也会相邻)
 		if reli >= 0 && plti >= 0 && plti != reli+1 {
 			var first, second int
 			if plti > reli {
@@ -1596,6 +1671,13 @@ func (ctxt *Link) dodata(symGroupType []sym.SymKind) {
 		n++
 	}
 }
+
+// 下面几个函数命名规则:
+//  - allocate.. 分配section, section.Vaddr为当前地址
+//  - assign.. 把sym划分到指定section，分配地址
+// data section的起始位置从0开始，而section中所有sym的value为在section中的偏移量，后面会处理
+
+// TODO(mzh): objdump -S not work when -buildmode=pie
 
 // allocateDataSectionForSym creates a new sym.Section into which a a
 // single symbol will be placed. Here "seg" is the segment into which
@@ -1666,6 +1748,7 @@ func (state *dodataState) assignToSection(sect *sym.Section, symn sym.SymKind, f
 // symbol name. "Seg" is the segment into which to place the new
 // section, "forceType" is the new sym.SymKind to assign to the symbol
 // within the section, and "rwx" holds section permissions.
+// 比如.go.buildinfo
 func (state *dodataState) allocateSingleSymSections(seg *sym.Segment, symn sym.SymKind, forceType sym.SymKind, rwx int) {
 	ldr := state.ctxt.loader
 	for _, s := range state.data[symn] {
@@ -1695,6 +1778,7 @@ func (state *dodataState) allocateNamedSectionAndAssignSyms(seg *sym.Segment, se
 
 // allocateDataSections allocates sym.Section objects for data/rodata
 // (and related) symbols, and then assigns symbols to those sections.
+// 到这里应该不再允许创建新的data sym，因为不会加到state.data中，也就不会在section为其分配空间
 func (state *dodataState) allocateDataSections(ctxt *Link) {
 	// Allocate sections.
 	// Data is processed before segtext, because we need
@@ -1710,6 +1794,7 @@ func (state *dodataState) allocateDataSections(ctxt *Link) {
 		sym.SWINDOWS,
 	}
 	for _, symn := range writable {
+		// 每个kind中的每个sym分配一个单独的section, 实际上这几个kind下要么只有一个sym，要么没有sym
 		state.allocateSingleSymSections(&Segdata, symn, sym.SDATA, 06)
 	}
 	ldr := ctxt.loader
@@ -1773,6 +1858,7 @@ func (state *dodataState) allocateDataSections(ctxt *Link) {
 	bssGcEnd := state.datsize - int64(sect.Vaddr)
 
 	// Emit gcdata for bss symbols now that symbol values have been assigned.
+	// 已经创建了且type=SRODATA internal/ld/symtab.go:484
 	gcsToEmit := []struct {
 		symName string
 		symKind sym.SymKind
@@ -1783,6 +1869,7 @@ func (state *dodataState) allocateDataSections(ctxt *Link) {
 	}
 	for _, g := range gcsToEmit {
 		var gc GCProg
+		// type=SRODATA, 最后也写入到.rodata中
 		gc.Init(ctxt, g.symName)
 		for _, s := range state.data[g.symKind] {
 			gc.AddSym(s)
@@ -1801,6 +1888,7 @@ func (state *dodataState) allocateDataSections(ctxt *Link) {
 		state.allocateNamedSectionAndAssignSyms(&Segdata, "__libfuzzer_extra_counters", sym.SLIBFUZZER_EXTRA_COUNTER, sym.Sxxx, 06)
 	}
 
+	// 创建thread-local不是loader的工作，而是c runtime的工作?
 	if len(state.data[sym.STLSBSS]) > 0 {
 		var sect *sym.Section
 		// FIXME: not clear why it is sometimes necessary to suppress .tbss section creation.
@@ -1852,7 +1940,7 @@ func (state *dodataState) allocateDataSections(ctxt *Link) {
 		culprit := ldr.SymName(state.data[sym.STEXT][0])
 		Errorf(nil, "dodata found an sym.STEXT symbol: %s", culprit)
 	}
-	state.allocateSingleSymSections(&Segtext, sym.SELFRXSECT, sym.SRODATA, 05)
+	state.allocateSingleSymSections(&Segtext, sym.SELFRXSECT, sym.SRODATA, 05) // 05=rx
 	state.allocateSingleSymSections(&Segtext, sym.SMACHOPLT, sym.SRODATA, 05)
 
 	/* read-only data */
@@ -1863,9 +1951,11 @@ func (state *dodataState) allocateDataSections(ctxt *Link) {
 		ldr.SetSymSect(ldr.LookupOrCreateSym("runtime.types", 0), sect)
 		ldr.SetSymSect(ldr.LookupOrCreateSym("runtime.etypes", 0), sect)
 	}
+
 	for _, symn := range sym.ReadOnly {
 		symnStartValue := state.datsize
 		state.assignToSection(sect, symn, sym.SRODATA)
+		// 注意是每个kind一个值，不是每个sym一个值
 		setCarrierSize(symn, state.datsize-symnStartValue)
 		if ctxt.HeadType == objabi.Haix {
 			// Read-only symbols might be wrapped inside their outer
@@ -1889,7 +1979,7 @@ func (state *dodataState) allocateDataSections(ctxt *Link) {
 	// situation.
 	// TODO(mwhudson): It would make sense to do this more widely, but it makes
 	// the system linker segfault on darwin.
-	const relroPerm = 06
+	const relroPerm = 06  // 06=rw
 	const fallbackPerm = 04
 	relroSecPerm := fallbackPerm
 	genrelrosecname := func(suffix string) string {
@@ -1909,7 +1999,7 @@ func (state *dodataState) allocateDataSections(ctxt *Link) {
 			// corrupts the moduledata. So we use the
 			// rodata segment and let the external linker
 			// sort out a rel.ro segment.
-			segrelro = segro
+			segrelro = segro // segro -> Segtext or Segrodata
 		} else {
 			// Reset datsize for new segment.
 			state.datsize = 0
@@ -2064,6 +2154,7 @@ type symNameSize struct {
 	sym  loader.Sym
 }
 
+// 返回排序后的列表
 func (state *dodataState) dodataSect(ctxt *Link, symn sym.SymKind, syms []loader.Sym) (result []loader.Sym, maxAlign int32) {
 	var head, tail loader.Sym
 	ldr := ctxt.loader
@@ -2130,7 +2221,7 @@ func (state *dodataState) dodataSect(ctxt *Link, symn sym.SymKind, syms []loader
 		// PCLNTAB was built internally, and has the proper order based on value.
 		// Sort the symbols as such.
 		for k, s := range syms {
-			sl[k].val = ldr.SymValue(s)
+			sl[k].val = ldr.SymValue(s) // 都是偏移量值，pclnt.go 中已经写好
 		}
 		sort.Slice(sl, func(i, j int) bool { return sl[i].val < sl[j].val })
 	}
@@ -2175,6 +2266,7 @@ func (ctxt *Link) textbuildid() {
 	ctxt.Textp[0] = s.Sym()
 }
 
+// 固定32字节, 单独的section: .go.buildinfo
 func (ctxt *Link) buildinfo() {
 	if ctxt.linkShared || ctxt.BuildMode == BuildModePlugin {
 		// -linkshared and -buildmode=plugin get confused
@@ -2203,6 +2295,8 @@ func (ctxt *Link) buildinfo() {
 	}
 	s.SetData(data)
 	s.SetSize(int64(len(data)))
+
+	// 两个指针, &runtime.buildVersion, &runtime.modinfo
 	r, _ := s.AddRel(objabi.R_ADDR)
 	r.SetOff(16)
 	r.SetSiz(uint8(ctxt.Arch.PtrSize))
@@ -2214,6 +2308,8 @@ func (ctxt *Link) buildinfo() {
 }
 
 // assign addresses to text
+// sec.vaddr = 0x410000
+// sym.Value = 0x416800, 不是偏移量
 func (ctxt *Link) textaddress() {
 	addsection(ctxt.loader, ctxt.Arch, &Segtext, ".text", 05)
 
@@ -2245,11 +2341,14 @@ func (ctxt *Link) textaddress() {
 		ctxt.Textp[0] = text
 	}
 
-	start := uint64(Rnd(*FlagTextAddr, int64(Funcalign)))
+	start := uint64(Rnd(*FlagTextAddr, int64(Funcalign))) // amd64=0x401000
 	va := start
 	n := 1
 	sect.Vaddr = va
 
+	// 指call指令可以支持的最大跳转距离，如果超过这个值需要新建一个trampline函数
+	// 这个函数紧邻这放到当前函数后面，就这jump的距离就一定不会超过范围
+	// 这个新建的函数一般就是简单几条指令: 比如mov $func_addr, %rax; jmp %rax
 	limit := thearch.TrampLimit
 	if limit == 0 {
 		limit = 1 << 63 // unlimited
@@ -2300,6 +2399,10 @@ func (ctxt *Link) textaddress() {
 		for _, s := range ctxt.Textp {
 			sect, n, va = assignAddress(ctxt, sect, n, s, va, false, big)
 
+			// 对每条call/jump
+			//  - 新建一个trampline func sym
+			//  - 把call/jump的relocation改写为指向trampline
+			//  - 回调ctxt.AddTramp(), 把trampline func sym加到ctxt.tramps列表
 			trampoline(ctxt, s) // resolve jumps, may add trampolines if jump too far
 
 			// lay down trampolines after each function
@@ -2309,6 +2412,7 @@ func (ctxt *Link) textaddress() {
 					// Already set in assignAddress
 					continue
 				}
+				// 新增的trampline紧邻着函数
 				sect, n, va = assignAddress(ctxt, sect, n, tramp, va, true, big)
 			}
 		}
@@ -2317,6 +2421,7 @@ func (ctxt *Link) textaddress() {
 		if ntramps != 0 {
 			newtextp := make([]loader.Sym, 0, len(ctxt.Textp)+ntramps)
 			i := 0
+			// merge sort
 			for _, s := range ctxt.Textp {
 				for ; i < ntramps && ldr.SymValue(ctxt.tramps[i]) < ldr.SymValue(s); i++ {
 					newtextp = append(newtextp, ctxt.tramps[i])
@@ -2342,12 +2447,12 @@ func (ctxt *Link) textaddress() {
 // assigns address for a text symbol, returns (possibly new) section, its number, and the address
 func assignAddress(ctxt *Link, sect *sym.Section, n int, s loader.Sym, va uint64, isTramp, big bool) (*sym.Section, int, uint64) {
 	ldr := ctxt.loader
-	if thearch.AssignAddress != nil {
+	if thearch.AssignAddress != nil { // 仅wasm使用
 		return thearch.AssignAddress(ldr, sect, n, s, va, isTramp)
 	}
 
 	ldr.SetSymSect(s, sect)
-	if ldr.AttrSubSymbol(s) {
+	if ldr.AttrSubSymbol(s) { // 由container sym统一写入, 自己不用写入
 		return sect, n, va
 	}
 

@@ -39,7 +39,7 @@ type SymKind uint8
 // TODO(rsc): Give idiomatic Go names.
 //go:generate stringer -type=SymKind
 const (
-	Sxxx SymKind = iota
+	Sxxx SymKind = iota // 表示无效值
 	STEXT
 	SELFRXSECT
 	SMACHOPLT
@@ -97,7 +97,7 @@ const (
 	SNOPTRBSS
 	SLIBFUZZER_EXTRA_COUNTER
 	STLSBSS
-	SXREF
+	SXREF //应该是eXternal REFerence缩写?
 	SMACHOSYMSTR
 	SMACHOSYMTAB
 	SMACHOINDIRECTPLT

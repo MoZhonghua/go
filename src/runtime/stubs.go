@@ -64,6 +64,9 @@ func mcall(fn func(*g))
 //
 //go:noescape
 func systemstack(fn func())
+// 在call func_xxx.abi0指令之后会自动生成两条语句来恢复R14 => g, X15=0
+// XORPS X15, X15
+// MOVQ FS:0xfffffff8, R14
 
 var badsystemstackMsg = "fatal: systemstack called from unexpected goroutine"
 

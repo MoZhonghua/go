@@ -39,6 +39,8 @@ func (l *Loader) MakeSymbolUpdater(symIdx Sym) *SymbolBuilder {
 	if symIdx == 0 {
 		panic("can't update the null symbol")
 	}
+	// 复制原来的数据创建一个新的extSym, 注意用相同的symIdx, 最后更新loader
+	// 此后symIdx总是指向新创建的extSym, 有了内存中payload就可以更新了
 	if !l.IsExternal(symIdx) {
 		// Create a clone with the same name/version/kind etc.
 		l.cloneToExternal(symIdx)

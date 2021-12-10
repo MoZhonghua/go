@@ -19,6 +19,9 @@ func dumpsymname(prefix string, ldr *loader.Loader, name string) {
 }
 
 func dumpsym(prefix string, ldr *loader.Loader, sym loader.Sym) {
+	if sym == 0 {
+		fmt.Printf("%vsym = 0\n", prefix)
+	}
 	name := ldr.SymName(sym)
 	value := ldr.SymValue(sym)
 	ty := ldr.SymType(sym)
@@ -31,4 +34,11 @@ func dumpsym(prefix string, ldr *loader.Loader, sym loader.Sym) {
 	} else {
 		fmt.Printf(", sec=nil\n")
 	}
+}
+
+func dumpreloc(prefix string, ldr *loader.Loader, r loader.Reloc, from loader.Sym) {
+	addr := ldr.SymValue(from) + int64(r.Off())
+
+	fmt.Printf("%vreloc: off=%v (%x), size=%v, ref=%v, add=%v\n", prefix, r.Off(), addr, r.Siz(), r.Sym(), r.Add())
+	// dumpsym(prefix + "  ", ldr, r.Sym())
 }

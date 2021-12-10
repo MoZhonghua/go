@@ -70,12 +70,22 @@ const (
 	R_CALLRISCV
 	R_CONST
 	R_PCREL
+	
+	// This model can only reference TLS variables which are part of the TLS block of the dynamic
+	// executable. The link-editor calculates the thread pointer-relative offsets statically,
+	// without the need for dynamic relocations, or the extra reference to the GOT. This model can
+	// not be used to reference variables outside of the dynamic executable.
 
 	// R_TLS_LE, used on 386, amd64, and ARM, resolves to the offset of the
 	// thread-local symbol from the thread local base and is used to implement the
 	// "local exec" model for tls access (r.Sym is not set on intel platforms but is
 	// set to a TLS symbol -- runtime.tlsg -- in the linker when externally linking).
 	R_TLS_LE
+
+	// This model can only reference TLS variables which are available as part of the initial static
+	// TLS template. This template is composed of all TLS blocks that are available at process
+	// startup. In this model, the thread pointer-relative offset for a given variable x is stored
+	// in the GOT entry for x.
 
 	// R_TLS_IE, used 386, amd64, and ARM resolves to the PC-relative offset to a GOT
 	// slot containing the offset from the thread-local symbol from the thread local

@@ -544,8 +544,8 @@ type pclnSetUint func(*loader.SymbolBuilder, *sys.Arch, int64, uint64) int64
 //
 // runtime.functab contains two things:
 //
-//   - pc->func look up table.
-//   - array of func objects, interleaved with pcdata and funcdata
+//   - pc->func look up table. (item is [entry, off])
+//   - array of func objects, interleaved with pcdata offsets and funcdata offsets
 //
 // Because of timing in the linker, generating this table takes two passes.
 // The first pass is executed early in the link, and it creates any needed

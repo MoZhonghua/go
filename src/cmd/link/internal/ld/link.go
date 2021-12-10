@@ -161,6 +161,7 @@ type generatorFunc func(*Link, loader.Sym)
 
 // createGeneratorSymbol is a convenience method for creating a generator
 // symbol.
+// 只在plcn中使用
 func (ctxt *Link) createGeneratorSymbol(name string, version int, t sym.SymKind, size int64, gen generatorFunc) loader.Sym {
 	ldr := ctxt.loader
 	s := ldr.LookupOrCreateSym(name, version)

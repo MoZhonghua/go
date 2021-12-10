@@ -24,9 +24,6 @@ func asmb(ctxt *Link) {
 		return
 	}
 
-	fmt.Printf("ctxt.IsELF=%v\n", ctxt.IsELF)
-	fmt.Printf("thearch.CodePad=%v\n", thearch.CodePad)
-
 	if ctxt.IsELF {
 		Asmbelfsetup()
 	}
