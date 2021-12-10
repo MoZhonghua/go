@@ -2679,6 +2679,7 @@ func (ctxt *Link) address() []*sym.Segment {
 
 	// Assign Segdata's Filelen omitting the BSS. We do this here
 	// simply because right now we know where the BSS starts.
+	// 不写入，但是文件中分配空间, 加载时可以通过mmap直接处理?
 	Segdata.Filelen = bss.Vaddr - Segdata.Vaddr
 
 	va = uint64(Rnd(int64(va), int64(*FlagRound)))
@@ -2707,11 +2708,14 @@ func (ctxt *Link) address() []*sym.Segment {
 	)
 
 	for _, s := range ctxt.datap {
+		// 分配seciton时，sym.Value是在section中偏移量，这里加上section起始地址
+		// 就变成全局地址了
 		if sect := ldr.SymSect(s); sect != nil {
 			ldr.AddToSymValue(s, int64(sect.Vaddr))
 		}
 		v := ldr.SymValue(s)
 		for sub := ldr.SubSym(s); sub != 0; sub = ldr.SubSym(sub) {
+			// 指向sub的relocation是通过outer+offset_in_outer来实现?
 			ldr.AddToSymValue(sub, v)
 		}
 	}
@@ -2725,6 +2729,7 @@ func (ctxt *Link) address() []*sym.Segment {
 			if sub != 0 {
 				panic(fmt.Sprintf("unexpected sub-sym for %s %s", ldr.SymName(s), ldr.SymType(s).String()))
 			}
+			// TODO(mzh): unnecessary code?
 			v := ldr.SymValue(s)
 			for ; sub != 0; sub = ldr.SubSym(sub) {
 				ldr.AddToSymValue(s, v)
@@ -2755,6 +2760,7 @@ func (ctxt *Link) address() []*sym.Segment {
 		n++
 	}
 
+	// 都是之前创建好的，这里设置Value不是他们本身的地址，而是一个int64值
 	ctxt.xdefine("runtime.rodata", sym.SRODATA, int64(rodata.Vaddr))
 	ctxt.xdefine("runtime.erodata", sym.SRODATA, int64(rodata.Vaddr+rodata.Length))
 	ctxt.xdefine("runtime.types", sym.SRODATA, int64(types.Vaddr))

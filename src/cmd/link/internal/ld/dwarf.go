@@ -31,6 +31,8 @@ import (
 	"sync"
 )
 
+var _ dwarf.Context = (*dwctxt)(nil)
+
 // dwctxt is a wrapper intended to satisfy the method set of
 // dwarf.Context, so that functions like dwarf.PutAttrs will work with
 // DIEs that use loader.Sym as opposed to *sym.Symbol. It is also
