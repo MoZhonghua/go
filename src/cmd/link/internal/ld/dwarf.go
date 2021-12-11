@@ -32,6 +32,7 @@ import (
 )
 
 var _ dwarf.Context = (*dwctxt)(nil)
+
 // dwctxt is a wrapper intended to satisfy the method set of
 // dwarf.Context, so that functions like dwarf.PutAttrs will work with
 // DIEs that use loader.Sym as opposed to *sym.Symbol. It is also
@@ -43,13 +44,13 @@ type dwctxt struct {
 	ldr      *loader.Loader
 	arch     *sys.Arch
 
-	// This maps type name string (e.g. "uintptr") to loader symbol for
-	// the DWARF DIE for that type (e.g. "go.info.uintptr")
-
 	// 三个名字:
 	//  - uintptr类型_type对应的sym名称, "type.uintptr"
 	//  - DIE本身对应的sym名称: "go.info.uintptr"
 	//  - DIE中的DW_AT_name字段，"uintptr"
+
+	// This maps type name string (e.g. "uintptr") to loader symbol for
+	// the DWARF DIE for that type (e.g. "go.info.uintptr")
 	tmap map[string]loader.Sym
 
 	// This maps loader symbol for the DWARF DIE symbol generated for
@@ -307,6 +308,7 @@ func (d *dwctxt) newdie(parent *dwarf.DWDie, abbrev int, name string, version in
 	case dwarf.DW_ABRV_FUNCTYPEPARAM, dwarf.DW_ABRV_DOTDOTDOT, dwarf.DW_ABRV_STRUCTFIELD, dwarf.DW_ABRV_ARRAYRANGE:
 		// There are no relocations against these dies, and their names
 		// are not unique, so don't create a symbol.
+		// 输出的内容会放到前一个DIE的sym中, 在putdie()
 		return die
 	case dwarf.DW_ABRV_COMPUNIT, dwarf.DW_ABRV_COMPUNIT_TEXTLESS:
 		// Avoid collisions with "real" symbol names.
@@ -429,6 +431,8 @@ func (d *dwctxt) dtolsym(s dwarf.Sym) loader.Sym {
 func (d *dwctxt) putdie(syms []loader.Sym, die *dwarf.DWDie) []loader.Sym {
 	s := d.dtolsym(die.Sym)
 	if s == 0 {
+		// 把内容直接追加到最后一个sym中, 调用者需要更新size统计
+		// 就是newdie()中没有为DIE创建sym那些abbrev
 		s = syms[len(syms)-1]
 	} else {
 		syms = append(syms, s)
@@ -1036,6 +1040,7 @@ func (d *dwctxt) synthesizechantypes(ctxt *Link, die *dwarf.DWDie) {
 
 // createUnitLength creates the initial length field with value v and update
 // offset of unit_length if needed.
+// dwarf64里intial length占用12字节，前4个字节必须是0xFFFFFFFFF，用来区分dwarf32/64
 func (d *dwctxt) createUnitLength(su *loader.SymbolBuilder, v uint64) {
 	if isDwarf64(d.linkctxt) {
 		su.AddUint32(d.arch, 0xFFFFFFFF)
@@ -1139,6 +1144,7 @@ func (d *dwctxt) importInfoSymbol(dsym loader.Sym) {
 	d.ldr.SetAttrReachable(dsym, true)
 	d.ldr.SetAttrNotInSymbolTable(dsym, true)
 	dst := d.ldr.SymType(dsym)
+
 	if dst != sym.SDWARFCONST && dst != sym.SDWARFABSFCN {
 		log.Fatalf("error: DWARF info sym %d/%s with incorrect type %s", dsym, d.ldr.SymName(dsym), d.ldr.SymType(dsym).String())
 	}
@@ -1158,7 +1164,7 @@ func (d *dwctxt) importInfoSymbol(dsym loader.Sym) {
 		// FIXME: is there a way we could avoid materializing the
 		// symbol name here?
 		sn := d.ldr.SymName(rsym)
-		tn := sn[len(dwarf.InfoPrefix):] // go类型名
+		tn := sn[len(dwarf.InfoPrefix):] // 一定是go类型名?
 		ts := d.ldr.Lookup("type."+tn, 0)
 		d.defgotype(ts)
 	}
@@ -1295,6 +1301,8 @@ func (d *dwctxt) writelines(unit *sym.CompilationUnit, lineProlog loader.Sym) []
 	unitlen := lsu.Size() - unitstart
 
 	// Output the state machine for each function remaining.
+	// compiler已经生成好了line number program, 使用的fileIndex是CU内的index，不变
+	// PC地址是相对于函数第一个指令的偏移量，也不变，所以可以直接copy
 	for _, s := range unit.Textp {
 		fnSym := loader.Sym(s)
 		_, _, _, lines := d.ldr.GetFuncDwarfAuxSyms(fnSym)
@@ -1332,19 +1340,21 @@ func (d *dwctxt) writepcranges(unit *sym.CompilationUnit, base loader.Sym, pcs [
 	rDwSym := dwSym(rangeProlog)
 
 	// Create PC ranges for the compilation unit DIE.
+	// DW_FORM_sec_offset: rsu对应整个.debug_ranges，rsu.Size()就是当前偏移量
 	newattr(unit.DWInfo, dwarf.DW_AT_ranges, dwarf.DW_CLS_PTR, rsu.Size(), rDwSym)
 	newattr(unit.DWInfo, dwarf.DW_AT_low_pc, dwarf.DW_CLS_ADDRESS, 0, dwSym(base))
-	dwarf.PutBasedRanges(d, rDwSym, pcs)
+	dwarf.PutBasedRanges(d, rDwSym, pcs) // CU自己的ranges
 
 	// Collect up the ranges for functions in the unit.
 	rsize := uint64(rsu.Size())
 	for _, ls := range unit.RangeSyms {
 		s := loader.Sym(ls)
 		syms = append(syms, s)
-		rsize += uint64(d.ldr.SymSize(s))
+		rsize += uint64(d.ldr.SymSize(s)) // CU中每个函数的ranges，已经创建好
 	}
 
 	if d.linkctxt.HeadType == objabi.Haix {
+		// 记录这个CU在.debug_ranges中占用的空间大小
 		addDwsectCUSize(".debug_ranges", unit.Lib.Pkg, rsize)
 	}
 
@@ -1359,12 +1369,24 @@ const (
 )
 
 // appendPCDeltaCFA appends per-PC CFA deltas to b and returns the final slice.
+// 添加一条Call Frame Instruction，使得pc->cfa表增加deltapc行，并在最后一行更新CFA为值cfa
+// 用来生成CIE(Common Information Entry)和FDE(Frame Description Entry)
 func appendPCDeltaCFA(arch *sys.Arch, b []byte, deltapc, cfa int64) []byte {
+	// DW_CFA_def_cfa_offset_sf:
+	// The required action is to define the current CFA rule to use the provided offset (but to keep
+	// the old register).
+
+	// CIE中有"DW_CFA_def_cfa: r7 (rsp) ofs 8"，表示CFA=rsp+8
+	// 更新为CFA=rsp+cfa
 	b = append(b, dwarf.DW_CFA_def_cfa_offset_sf)
+	
+	// objdump --dwarf=frames 打印出来的DW_CFA_def_cfa_offset_sf参数值不对，应该当做Unsigned LEB128
+	// 来处理导致的.
 	b = dwarf.AppendSleb128(b, cfa/dataAlignmentFactor)
 
 	switch {
 	case deltapc < 0x40:
+		// 7.23: 低6位为offset,因此最大到63
 		b = append(b, uint8(dwarf.DW_CFA_advance_loc+deltapc))
 	case deltapc < 0x100:
 		b = append(b, dwarf.DW_CFA_advance_loc1)
@@ -1385,6 +1407,7 @@ func (d *dwctxt) writeframes(fs loader.Sym) dwarfSecInfo {
 	fsu.SetType(sym.SDWARFSECT)
 	isdw64 := isDwarf64(d.linkctxt)
 	haslr := haslinkregister(d.linkctxt)
+	fmt.Printf("writeframes to section %v; haslr=%v; isdw64=%v\n", fsu.Name(), haslr, isdw64)
 
 	// Length field is 4 bytes on Dwarf32 and 12 bytes on Dwarf64
 	lengthFieldSize := int64(4)
@@ -1410,6 +1433,8 @@ func (d *dwctxt) writeframes(fs loader.Sym) dwarfSecInfo {
 
 	fsu.AddUint8(dwarf.DW_CFA_def_cfa)                  // Set the current frame address..
 	dwarf.Uleb128put(d, fsd, int64(thearch.Dwarfregsp)) // ...to use the value in the platform's SP register (defined in l.go)...
+	// AMD64: set CFA=rsp+8
+	//        set LR(16) = *(cfa-8)
 	if haslr {
 		dwarf.Uleb128put(d, fsd, int64(0)) // ...plus a 0 offset.
 
@@ -1446,6 +1471,28 @@ func (d *dwctxt) writeframes(fs loader.Sym) dwarfSecInfo {
 		if !fi.Valid() {
 			continue
 		}
+		/*
+		00000014: FDE起始位置
+		0000000000000024: FDE长度
+		pc=0000000000401000..0000000000401059: startpc + sizeof(text)
+		-504 => 8
+		-480 => 8 + (504-480) = 32
+		00000014 0000000000000024 00000000 FDE cie=00000000 pc=0000000000401000..0000000000401059
+		  DW_CFA_def_cfa_offset_sf: -504 // 值不对，应该是-2，真实偏移需要*factor, 即-2*-4=8
+		  DW_CFA_advance_loc: 10 to 000000000040100a
+		  DW_CFA_def_cfa_offset_sf: -480
+		  DW_CFA_advance_loc: 51 to 000000000040103d
+		  DW_CFA_def_cfa_offset_sf: -504
+		  DW_CFA_advance_loc: 27 to 0000000000401058
+		  DW_CFA_nop // PAD
+		  DW_CFA_nop
+		  DW_CFA_nop
+		  DW_CFA_nop
+		  DW_CFA_nop
+		  DW_CFA_nop
+		  DW_CFA_nop
+		*/
+
 		fpcsp := fi.Pcsp()
 
 		// Emit a FDE, Section 6.4.1.
@@ -1563,7 +1610,7 @@ func (d *dwctxt) writeUnitInfo(u *sym.CompilationUnit, abbrevsym loader.Sym, inf
 	d.createUnitLength(su, 0) // unit_length (*), will be filled in later.
 	su.AddUint16(d.arch, 4)   // dwarf version (appendix F)
 
-	// debug_abbrev_offset (*)
+	// debug_abbrev_offset (*), 指向对应的abbrev项在.debug_abbrev中偏移量
 	d.addDwarfAddrRef(su, abbrevsym)
 
 	su.AddUint8(uint8(d.arch.PtrSize)) // address_size
@@ -1577,10 +1624,10 @@ func (d *dwctxt) writeUnitInfo(u *sym.CompilationUnit, abbrevsym loader.Sym, inf
 	cu = append(cu, s)
 	cu = appendSyms(cu, u.AbsFnDIEs)
 	cu = appendSyms(cu, u.FuncDIEs)
-	if u.Consts != 0 {
+	if u.Consts != 0 { // 所有const DIE打包到一个sym
 		cu = append(cu, loader.Sym(u.Consts))
 	}
-	cu = appendSyms(cu, u.VarDIEs)
+	cu = appendSyms(cu, u.VarDIEs) // 全局变量
 	var cusize int64
 	for _, child := range cu {
 		cusize += int64(len(d.ldr.Data(child)))
@@ -1589,7 +1636,7 @@ func (d *dwctxt) writeUnitInfo(u *sym.CompilationUnit, abbrevsym loader.Sym, inf
 	for die := compunit.Child; die != nil; die = die.Link {
 		l := len(cu)
 		lastSymSz := int64(len(d.ldr.Data(cu[l-1])))
-		cu = d.putdie(cu, die)
+		cu = d.putdie(cu, die) // 递归把所有子child都加到列表中
 		if lastSymSz != int64(len(d.ldr.Data(cu[l-1]))) {
 			// putdie will sometimes append directly to the last symbol of the list
 			cusize = cusize - lastSymSz + int64(len(d.ldr.Data(cu[l-1])))
@@ -1706,7 +1753,7 @@ func (d *dwctxt) dwarfVisitFunction(fnSym loader.Sym, unit *sym.CompilationUnit)
 	// of the text (fcn) symbol, so ask the loader to retrieve it,
 	// as well as the associated range symbol.
 	infosym, _, rangesym, _ := d.ldr.GetFuncDwarfAuxSyms(fnSym)
-	if infosym == 0 {
+	if infosym == 0 { // infosym就是函数在.debug_info中的DIE
 		return
 	}
 	d.ldr.SetAttrNotInSymbolTable(infosym, true)
@@ -1832,10 +1879,11 @@ func dwarfGenerateDebugInfo(ctxt *Link) {
 	flagVariants := make(map[string]bool)
 
 	for _, lib := range ctxt.Library {
-
+		// library对应一个go packge，即一个.a文件，多个CU(所有.go打包成一个CU，每个.s一个CU)
 		consts := d.ldr.Lookup(dwarf.ConstInfoPrefix+lib.Pkg, 0)
 		for _, unit := range lib.Units {
 			// We drop the constants into the first CU.
+			// 一个package中的所有const打包到一个sym，且这个sym放到第一个CU中
 			if consts != 0 {
 				unit.Consts = sym.LoaderSym(consts)
 				d.importInfoSymbol(consts)
@@ -1902,7 +1950,7 @@ func dwarfGenerateDebugInfo(ctxt *Link) {
 	// with different sets of flags, then don't issue an error if
 	// the -strictdups checks fail.
 	if checkStrictDups > 1 && len(flagVariants) > 1 {
-		checkStrictDups = 1
+		checkStrictDups = 1 // 0=off 1=warning 2=error
 	}
 
 	// Make a pass through all data symbols, looking for those
@@ -1960,6 +2008,9 @@ func dwarfGenerateDebugInfo(ctxt *Link) {
 	d.synthesizemaptypes(ctxt, dwtypes.Child)
 	d.synthesizechantypes(ctxt, dwtypes.Child)
 }
+
+// 在main.go中，之前已经调用dwarfGenerateDebugInfo()生成了所有的DIE和对应的sym
+// 但是sym的内容没有写入，这里是写入所有DIE sym的内容
 
 // dwarfGenerateDebugSyms constructs debug_line, debug_frame, and
 // debug_loc. It also writes out the debug_info section using symbols
@@ -2020,6 +2071,8 @@ func (d *dwctxt) dwarfGenerateDebugSyms() {
 		reversetree(&u.DWInfo.Child)
 	}
 	reversetree(&dwtypes.Child)
+
+	// 把那些基础类型, map, chan类型对应的DIE都放到runtime packge的第一个CU下
 	movetomodule(d.linkctxt, &dwtypes)
 
 	mkSecSym := func(name string) loader.Sym {
@@ -2228,6 +2281,7 @@ func dwarfcompress(ctxt *Link) {
 			newDwarfp = append(newDwarfp, ds)
 			Segdwarf.Sections = append(Segdwarf.Sections, ldr.SymSect(s))
 		} else {
+			// .zdebug_表示用zlib压缩过的
 			compressedSegName := ".zdebug_" + ldr.SymSect(s).Name[len(".debug_"):]
 			sect := addsection(ctxt.loader, ctxt.Arch, &Segdwarf, compressedSegName, 04)
 			sect.Align = 1
@@ -2255,6 +2309,8 @@ func dwarfcompress(ctxt *Link) {
 	var prevSect *sym.Section
 	for _, si := range dwarfp {
 		for _, s := range si.syms {
+			// 只是更新section的起始位置，Value(s)和Sect.vaddr的相对值还是压缩前的值
+			// dwarf中的引用全部都是基于在一个section内部的offset(相对于CU/Section起始位置)
 			ldr.SetSymValue(s, int64(pos))
 			sect := ldr.SymSect(s)
 			if sect != prevSect {

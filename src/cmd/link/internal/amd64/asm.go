@@ -46,8 +46,8 @@ func PADDR(x uint32) uint32 {
 
 func gentext(ctxt *ld.Link, ldr *loader.Loader) {
 	/*
-	// Called from linker-generated .initarray; declared for go vet; do NOT call from Go.
-	func addmoduledata()
+		// Called from linker-generated .initarray; declared for go vet; do NOT call from Go.
+		func addmoduledata()
 	*/
 
 	// addmoduledata是指向函数runtime.addmoduledata()
@@ -593,6 +593,13 @@ func addpltsym(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loade
 	ld.Adddynsym(ldr, target, syms, s)
 
 	if target.IsElf() {
+		// <<System V Application Binary Interface AMD64 Architecture Processor Supplement>> p79
+		// procedure linkage table
+
+		// 只需要访问c runtime函数时需要通过PLT，因此-buildmode=pie会有些项，但是不会太多(41个)
+		// 比如: abort@GLIBC_2.2.5, pthread_attr_destroy@GLIBC_2.2.5
+		// objdump -d -j .plt /tmp/main
+
 		plt := ldr.MakeSymbolUpdater(syms.PLT)
 		got := ldr.MakeSymbolUpdater(syms.GOTPLT)
 		rela := ldr.MakeSymbolUpdater(syms.RelaPLT)

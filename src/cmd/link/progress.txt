@@ -22,6 +22,9 @@ internal/ld/deadcode.go
 
 2021-12-10
 internal/ld/data.go
-internal/ld/dwarf.go ?
+
+2021-12-11
+internal/ld/dwarf.go
+internal/ld/elf.go ?
 internal/loadelf/ldelf.go ?
 internal/loader/loader.go ?

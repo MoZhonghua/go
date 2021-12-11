@@ -244,6 +244,9 @@ func AppendSleb128(b []byte, v int64) []byte {
 		c := uint8(v & 0x7f)
 		s := uint8(v & 0x40)
 		v >>= 7
+		// 两种情况结束
+		//  - 负数: v==-1 && s == 0x40, 比如: -2 => 0x7e, 7bit,最高位为1然后sign extend
+		//  - 正数: v==0 && s == 0, 比如: 0x7e => 0xfe,0x00, 14bit，最高位为0, 然后sign extent
 		if (v != -1 || s == 0) && (v != 0 || s != 0) {
 			c |= 0x80
 		}

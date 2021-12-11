@@ -2297,6 +2297,9 @@ func (ctxt *Link) buildinfo() {
 	s.SetSize(int64(len(data)))
 
 	// 两个指针, &runtime.buildVersion, &runtime.modinfo
+	// runtime.buildVersion="go1.17.2"
+	// runtime.modinfo字符串，编码path, mod, dep pkg(不包含runtime和系统库，如fmt)等信息
+	// go version -m /tmp/main 会读取这个.go.buildinfo中内容并输出
 	r, _ := s.AddRel(objabi.R_ADDR)
 	r.SetOff(16)
 	r.SetSiz(uint8(ctxt.Arch.PtrSize))

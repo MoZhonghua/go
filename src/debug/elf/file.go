@@ -139,12 +139,12 @@ func (s *Section) Open() io.ReadSeeker {
 // A ProgHeader represents a single ELF program header.
 type ProgHeader struct {
 	Type   ProgType
-	Flags  ProgFlag
-	Off    uint64
-	Vaddr  uint64
-	Paddr  uint64
-	Filesz uint64
-	Memsz  uint64
+	Flags  ProgFlag // RWX
+	Off    uint64 // offset in file
+	Vaddr  uint64 // virutal address, 0x401000
+	Paddr  uint64 // 0
+	Filesz uint64 // size in file
+	Memsz  uint64 // size in mem
 	Align  uint64
 }
 

@@ -21,6 +21,8 @@ import (
 	"strings"
 )
 
+// 统一同elf64的类型，只是写入时做按需转换为elf32
+
 /*
  * Derived from:
  * $FreeBSD: src/sys/sys/elf32.h,v 1.8.14.1 2005/12/30 22:13:58 marcel Exp $
@@ -195,6 +197,7 @@ type Elfstring struct {
 	off int
 }
 
+// 这些字符串出在.shstrtab这个section中
 var elfstr [100]Elfstring
 
 var nelfstr int
@@ -205,6 +208,7 @@ var buildinfo []byte
  Initialize the global variable that describes the ELF header. It will be updated as
  we write section and prog headers.
 */
+// called in archinit()
 func Elfinit(ctxt *Link) {
 	ctxt.IsELF = true
 
@@ -352,6 +356,11 @@ func elfwriteshdrs(out *OutBuf) uint32 {
 	return uint32(ehdr.Shnum) * ELF32SHDRSIZE
 }
 
+// 非常奇怪的机制，doelf()中对".shstrtab" sym调用AddString()会回调
+// 到这个函数。这里写入的elfstr只是为了能够获得section name在".shstrtab"
+// 中的偏移量。
+// 下面的doelf()函数会创建".shstrtab"并调用AddString()
+// TODO(mzh): fix elfsetstring
 func elfsetstring(ctxt *Link, s loader.Sym, str string, off int) {
 	if nelfstr >= len(elfstr) {
 		ctxt.Errorf(s, "too many elf strings")
@@ -386,6 +395,10 @@ func newElfPhdr() *ElfPhdr {
 		ehdr.Phnum++
 	}
 	if elf64 {
+		// ELF Header
+		// Program Headers
+		// Section Headers
+		// Section Datas
 		ehdr.Shoff += ELF64PHDRSIZE
 	} else {
 		ehdr.Shoff += ELF32PHDRSIZE
@@ -500,14 +513,16 @@ func elfwritedynentsymsize(ctxt *Link, s *loader.SymbolBuilder, tag elf.DynTag, 
 	} else {
 		s.AddUint32(ctxt.Arch, uint32(tag))
 	}
+	// link-relocate to size of sym t
 	s.AddSize(ctxt.Arch, t)
 }
 
+// 仅在生成dso有这个
 func elfinterp(sh *ElfShdr, startva uint64, resoff uint64, p string) int {
 	interp = p
 	n := len(interp) + 1
-	sh.Addr = startva + resoff - uint64(n)
-	sh.Off = resoff - uint64(n)
+	sh.Addr = startva + resoff - uint64(n) // address in memory image
+	sh.Off = resoff - uint64(n)            // offset in file
 	sh.Size = uint64(n)
 
 	return n
@@ -818,7 +833,7 @@ func addelflib(list **Elflib, file string, vers string) *Elfaux {
 		}
 	}
 	lib = new(Elflib)
-	lib.next = *list
+	lib.next = *list // add to head
 	lib.file = file
 	*list = lib
 
@@ -836,6 +851,7 @@ havelib:
 	return aux
 }
 
+// 为所有导出的sym按照名字创建一个hash表
 func elfdynhash(ctxt *Link) {
 	if !ctxt.IsELF {
 		return
@@ -844,6 +860,7 @@ func elfdynhash(ctxt *Link) {
 	nsym := Nelfsym
 	ldr := ctxt.loader
 	s := ldr.CreateSymForUpdate(".hash", 0)
+	// sym.SELFROSECT == ELF RO SECT， 每个sym分配一个section, 名字就是sym name
 	s.SetType(sym.SELFROSECT)
 
 	i := nsym
@@ -858,8 +875,7 @@ func elfdynhash(ctxt *Link) {
 	chain := make([]uint32, nsym)
 	buckets := make([]uint32, nbucket)
 
-	for _, sy := range ldr.DynidSyms() {
-
+	for _, sy := range ldr.DynidSyms() { // -buildmode=pie也是空
 		dynid := ldr.SymDynid(sy)
 		if ldr.SymDynimpvers(sy) != "" {
 			need[dynid] = addelflib(&needlib, ldr.SymDynimplib(sy), ldr.SymDynimpvers(sy))
@@ -950,6 +966,8 @@ func elfdynhash(ctxt *Link) {
 		}
 	}
 
+	// 这个section中每一项都是<tag, val>
+	// readelf -d /tmp/main
 	s = ldr.CreateSymForUpdate(".dynamic", 0)
 	if ctxt.BuildMode == BuildModePIE {
 		// https://github.com/bminor/glibc/blob/895ef79e04a953cac1493863bcae29ad85657ee1/elf/elf.h#L986
@@ -963,14 +981,27 @@ func elfdynhash(ctxt *Link) {
 		elfWriteDynEntSym(ctxt, s, elf.DT_VERSYM, gnuVersion.Sym())
 	}
 
-	sy := ldr.CreateSymForUpdate(elfRelType+".plt", 0)
+	sy := ldr.CreateSymForUpdate(elfRelType+".plt", 0) // -buildmode=pie => rela.plt
 	if sy.Size() > 0 {
+		// 在.dynamic增加描述.plt相关项
+		// rela 指 rel + addend
+
+		// DT_PLTREL:
+		// Indicates the type of relocation entry to which the procedure linkage table refers,
+		// either DT_REL or DT_RELA. All relocations in a procedure linkage table must use the same
+		// relocation.
 		if elfRelType == ".rela" {
 			Elfwritedynent(ctxt.Arch, s, elf.DT_PLTREL, uint64(elf.DT_RELA))
 		} else {
 			Elfwritedynent(ctxt.Arch, s, elf.DT_PLTREL, uint64(elf.DT_REL))
 		}
+
+		// DT_PLTRELSZ: The total size, in bytes, of the relocation entries associated with the
+		// procedure linkage table.
 		elfwritedynentsymsize(ctxt, s, elf.DT_PLTRELSZ, sy.Sym())
+
+		// DT_JMPREL: The address of relocation entries that are associated solely with the
+		// procedure linkage table.
 		elfWriteDynEntSym(ctxt, s, elf.DT_JMPREL, sy.Sym())
 	}
 
@@ -1045,13 +1076,17 @@ func elfshnamedup(name string) *ElfShdr {
 
 func elfshalloc(sect *sym.Section) *ElfShdr {
 	sh := elfshname(sect.Name)
-	sect.Elfsect = sh
+	sect.Elfsect = sh // 循环引用，因此只能定义为interface{}
 	return sh
 }
 
+// bits: SHT_PROGBITS/SHT_NOBITS
+//  - SHT_PROGBITS在文件中有数据, .text, .rodata, .data, .noptrdata
+//  - SHT_NOBITS在文件中没有有数据, .bss, .noptrbss
 func elfshbits(linkmode LinkMode, sect *sym.Section) *ElfShdr {
 	var sh *ElfShdr
 
+	// .text可以多个, 其他的section必须唯一
 	if sect.Name == ".text" {
 		if sect.Elfsect == nil {
 			sect.Elfsect = elfshnamedup(sect.Name)
@@ -1086,6 +1121,8 @@ func elfshbits(linkmode LinkMode, sect *sym.Section) *ElfShdr {
 	if sect.Vaddr < sect.Seg.Vaddr+sect.Seg.Filelen {
 		sh.Type = uint32(elf.SHT_PROGBITS)
 	} else {
+		// SHT_NOBITS: no space section, 比如.bss, .noptrbss，没有初始值，没必要出现在文件里
+		// 一定是在PT_LOAD类型的segment的最后面连续存放，fileoff全部相同, size>0
 		sh.Type = uint32(elf.SHT_NOBITS)
 	}
 	sh.Flags = uint64(elf.SHF_ALLOC)
@@ -1111,7 +1148,6 @@ func elfshbits(linkmode LinkMode, sect *sym.Section) *ElfShdr {
 	if sect.Name != ".tbss" {
 		sh.Off = sect.Seg.Fileoff + sect.Vaddr - sect.Seg.Vaddr
 	}
-
 	return sh
 }
 
@@ -1133,6 +1169,7 @@ func elfshreloc(arch *sys.Arch, sect *sym.Section) *ElfShdr {
 		typ = elf.SHT_RELA
 	}
 
+	// rela.<sect> / rel.<sect>
 	sh := elfshname(elfRelType + sect.Name)
 	// There could be multiple text sections but each needs
 	// its own .rela.text.

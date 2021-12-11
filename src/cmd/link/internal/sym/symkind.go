@@ -53,6 +53,7 @@ const (
 	SRODATA
 	SFUNCTAB
 
+	// ELF RO SECT， 每个sym分配一个section, 名字就是sym name
 	SELFROSECT
 
 	// Read-only sections with relocations.

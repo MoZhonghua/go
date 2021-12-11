@@ -42,3 +42,7 @@ func dumpreloc(prefix string, ldr *loader.Loader, r loader.Reloc, from loader.Sy
 	fmt.Printf("%vreloc: off=%v (%x), size=%v, ref=%v, add=%v\n", prefix, r.Off(), addr, r.Siz(), r.Sym(), r.Add())
 	// dumpsym(prefix + "  ", ldr, r.Sym())
 }
+
+func dumpelfshdr(prefix string, s *ElfShdr) {
+	fmt.Printf("%v%+v\n", prefix, s)
+}

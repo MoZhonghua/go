@@ -42,9 +42,50 @@ import (
 	"strings"
 )
 
-// Symbol table.
+// objdump -h /usr/bin/go 不会输出最后的.symtab和.strtab两个section
+// readlef -S /usr/bin/go 会输出全部的section
+
+// 所有kind=SSYMTAB的sym，最终输出到".gosymtab" seciton中
+// 实际只有runtime.symtab这个sym，大小为0
+
+// .gosymtab不是ELF的symtab。ELF symtab在ELF文件最后，不是在section中，link后期调用
+//  asmElfSym()直接输出
 
 // sh = section header
+
+// ELF中symtab中每一项如有下字段
+//  - st_name: 指向symbol string table偏移量，符号名称，relocation时用这个名字匹配
+//  - st_value: 多种含义，在exe/dso中通常是vaddr
+//  - st_shndx: 所在的section索引
+// st_value + st_shndx就能够计算出最终地址
+
+// objdump
+/*
+	Half=16, Word=32, Xword=64, Addr=64
+	typedef struct {
+	        Elf64_Word      st_name;
+	        unsigned char   st_info;  // (bind<<4) + (type&0xf)
+	        unsigned char   st_other; // visibility
+	        Elf64_Half      st_shndx; // section header table index
+	        Elf64_Addr      st_value;
+	        Elf64_Xword     st_size;
+	} Elf64_Sym;
+*/
+
+/*
+objdump -t /usr/bin/go
+0000000000401000 l     F .text	0000000000000000 runtime.text
+0000000000401e40 l     F .text	000000000000022d cmpbody
+00000000004020a0 l     F .text	000000000000013e memeqbody
+0000000000402220 l     F .text	0000000000000117 indexbytebody
+
+0000000000401000: 地址, 对应st_value值
+l: local
+F: function
+.text: section
+000000000000022d: size
+cmpbody: name
+*/
 
 func putelfstr(s string) int {
 	if len(Elfstrdat) == 0 && s != "" {
@@ -59,17 +100,6 @@ func putelfstr(s string) int {
 }
 
 func putelfsyment(out *OutBuf, off int, addr int64, size int64, info uint8, shndx elf.SectionIndex, other int) {
-	/*
-	Half=16, Word=32, Xword=64, Addr=64
-	typedef struct {
-	        Elf64_Word      st_name;
-	        unsigned char   st_info;  // (bind<<4) + (type&0xf)
-	        unsigned char   st_other; // visibility
-	        Elf64_Half      st_shndx; // section header table index
-	        Elf64_Addr      st_value;
-	        Elf64_Xword     st_size;
-	} Elf64_Sym;
-	*/
 	if elf64 {
 		out.Write32(uint32(off))
 		out.Write8(info)
@@ -188,6 +218,7 @@ func putelfsym(ctxt *Link, x loader.Sym, typ elf.SymType, curbind elf.SymBind) {
 	}
 
 	putelfsyment(ctxt.Out, putelfstr(sname), addr, size, elf.ST_INFO(bind, typ), elfshnum, other)
+	// 记录Sym => symbol entry index
 	ldr.SetSymElfSym(x, int32(ctxt.numelfsym))
 	ctxt.numelfsym++
 }
@@ -278,11 +309,13 @@ func genelfsym(ctxt *Link, elfbind elf.SymBind) {
 	}
 }
 
+// 在link后期，输出ELF文件时调用
 func asmElfSym(ctxt *Link) {
 
 	// the first symbol entry is reserved
 	putelfsyment(ctxt.Out, 0, 0, 0, elf.ST_INFO(elf.STB_LOCAL, elf.STT_NOTYPE), 0, 0)
 
+	// 为每个dwarf section创建一个symbol entry
 	dwarfaddelfsectionsyms(ctxt)
 
 	// Some linkers will add a FILE sym if one is not present.
@@ -447,6 +480,11 @@ func textsectionmap(ctxt *Link) (loader.Sym, uint32) {
 	return t.Sym(), uint32(n)
 }
 
+// 遍历所有sym
+//  - 根据sym类型设置SetAttrNotInSymbolTable()
+//  - 为每个sym重新计算一个合适的kind，返回数组，index就是SymIdx
+//  - 一些sym设置carrier sym
+// 设置runtime.firstmoduledata各个字段
 func (ctxt *Link) symtab(pcln *pclntab) []sym.SymKind {
 	ldr := ctxt.loader
 
@@ -696,15 +734,15 @@ func (ctxt *Link) symtab(pcln *pclntab) []sym.SymKind {
 	//   3. 对于所有需要通过link后才能确定的字段，通过relocation设置, 填入指向这个Sym的R_ADDR或者R_ADDROFF
 	//      - Sym本身有数据，此时Value就是Sym最终的地址, 比如pcln里的各个数据
 	//      - Sym本身没数据(size=0)，此时Value实际就是一个Int值，比如runtime.text
-	moduledata.AddAddr(ctxt.Arch, ldr.Lookup("runtime.text", 0))  // .text
+	moduledata.AddAddr(ctxt.Arch, ldr.Lookup("runtime.text", 0)) // .text
 	moduledata.AddAddr(ctxt.Arch, ldr.Lookup("runtime.etext", 0))
-	moduledata.AddAddr(ctxt.Arch, ldr.Lookup("runtime.noptrdata", 0))  // .noptrdata
+	moduledata.AddAddr(ctxt.Arch, ldr.Lookup("runtime.noptrdata", 0)) // .noptrdata
 	moduledata.AddAddr(ctxt.Arch, ldr.Lookup("runtime.enoptrdata", 0))
 	moduledata.AddAddr(ctxt.Arch, ldr.Lookup("runtime.data", 0)) // .data
 	moduledata.AddAddr(ctxt.Arch, ldr.Lookup("runtime.edata", 0))
 	moduledata.AddAddr(ctxt.Arch, ldr.Lookup("runtime.bss", 0)) // .bss
 	moduledata.AddAddr(ctxt.Arch, ldr.Lookup("runtime.ebss", 0))
-	moduledata.AddAddr(ctxt.Arch, ldr.Lookup("runtime.noptrbss", 0))  // .noptrbss
+	moduledata.AddAddr(ctxt.Arch, ldr.Lookup("runtime.noptrbss", 0)) // .noptrbss
 	moduledata.AddAddr(ctxt.Arch, ldr.Lookup("runtime.enoptrbss", 0))
 	moduledata.AddAddr(ctxt.Arch, ldr.Lookup("runtime.end", 0))
 
