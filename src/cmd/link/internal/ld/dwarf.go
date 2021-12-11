@@ -32,7 +32,6 @@ import (
 )
 
 var _ dwarf.Context = (*dwctxt)(nil)
-
 // dwctxt is a wrapper intended to satisfy the method set of
 // dwarf.Context, so that functions like dwarf.PutAttrs will work with
 // DIEs that use loader.Sym as opposed to *sym.Symbol. It is also
@@ -45,7 +44,12 @@ type dwctxt struct {
 	arch     *sys.Arch
 
 	// This maps type name string (e.g. "uintptr") to loader symbol for
-	// the DWARF DIE for that type (e.g. "go.info.type.uintptr")
+	// the DWARF DIE for that type (e.g. "go.info.uintptr")
+
+	// 三个名字:
+	//  - uintptr类型_type对应的sym名称, "type.uintptr"
+	//  - DIE本身对应的sym名称: "go.info.uintptr"
+	//  - DIE中的DW_AT_name字段，"uintptr"
 	tmap map[string]loader.Sym
 
 	// This maps loader symbol for the DWARF DIE symbol generated for
@@ -78,6 +82,7 @@ func newdwctxt(linkctxt *Link, forTypeGen bool) dwctxt {
 		tdmap:    make(map[loader.Sym]loader.Sym),
 		rtmap:    make(map[loader.Sym]loader.Sym),
 	}
+	// type.xxx都是指向类型数据，即一个runtime._type对象
 	d.typeRuntimeEface = d.lookupOrDiag("type.runtime.eface")
 	d.typeRuntimeIface = d.lookupOrDiag("type.runtime.iface")
 	return d
@@ -202,6 +207,7 @@ var gdbscript string
 // there are some sections (eg: .debug_ranges) where it is a mix (both
 // the section symbol and the sub-symbols have content)
 type dwarfSecInfo struct {
+	// syms[0] 是指向整个section的sym，可能所有数据都在这里，也可能size=0
 	syms []loader.Sym
 }
 
@@ -322,10 +328,10 @@ func (d *dwctxt) newdie(parent *dwarf.DWDie, abbrev int, name string, version in
 	if abbrev >= dwarf.DW_ABRV_NULLTYPE && abbrev <= dwarf.DW_ABRV_TYPEDECL {
 		d.tmap[name] = ds
 	}
-
 	return die
 }
 
+//找到真正的类型
 func walktypedef(die *dwarf.DWDie) *dwarf.DWDie {
 	if die == nil {
 		return nil
@@ -349,7 +355,7 @@ func (d *dwctxt) walksymtypedef(symIdx loader.Sym) loader.Sym {
 	// "type.uintptr") and then to the typedef DIE for the type.
 	// FIXME: this seems clunky, maybe there is a better way to do this.
 
-	if ts, ok := d.rtmap[symIdx]; ok {
+	if ts, ok := d.rtmap[symIdx]; ok { // DIE sym -> go type sym
 		if def, ok := d.tdmap[ts]; ok {
 			return def
 		}
@@ -400,6 +406,11 @@ func (d *dwctxt) adddwarfref(sb *loader.SymbolBuilder, t loader.Sym, size int) i
 	return result
 }
 
+// This type of reference (DW_FORM_ref_addr) is an offset from the beginning of the .debug_info
+// section of the target executable or shared object
+
+// DW_AT_type都是用DW_FORM_ref_addr，会重定位为目标sym在其所属section中的偏移量
+// 因为都在.debug_info中，实际就是在.debug_info的偏移量
 func (d *dwctxt) newrefattr(die *dwarf.DWDie, attr uint16, ref loader.Sym) *dwarf.DWAttr {
 	if ref == 0 {
 		return nil
@@ -473,6 +484,9 @@ func (d *dwctxt) lookupOrDiag(n string) loader.Sym {
 	return symIdx
 }
 
+// 比如 type T struct { int, int }
+// 实际上是两部分，首先定义了一个匿名类型struct {int, int}
+// 然后typedef T为改匿名类型
 func (d *dwctxt) dotypedef(parent *dwarf.DWDie, gotype loader.Sym, name string, def *dwarf.DWDie) *dwarf.DWDie {
 	// Only emit typedefs for real names.
 	if strings.HasPrefix(name, "map[") {
@@ -507,6 +521,7 @@ func (d *dwctxt) dotypedef(parent *dwarf.DWDie, gotype loader.Sym, name string, 
 	// circular definition loops, so that gdb can understand them.
 	die := d.newdie(parent, dwarf.DW_ABRV_TYPEDECL, name, 0)
 
+	// 放到列表第一个，因此使用name查找时会先找到这个
 	d.newrefattr(die, dwarf.DW_AT_type, tds)
 
 	return die
@@ -542,6 +557,7 @@ func (d *dwctxt) defgotype(gotype loader.Sym) loader.Sym {
 
 func (d *dwctxt) newtype(gotype loader.Sym) *dwarf.DWDie {
 	sn := d.ldr.SymName(gotype)
+	// type.xxx
 	name := sn[5:] // could also decode from Type.string
 	tdata := d.ldr.Data(gotype)
 	kind := decodetypeKind(d.arch, tdata)
@@ -703,6 +719,7 @@ func (d *dwctxt) newtype(gotype loader.Sym) *dwarf.DWDie {
 		d.newrefattr(die, dwarf.DW_AT_type, d.mustFind("<unspecified>"))
 	}
 
+	// go自定义的DW_AT_go_xxx
 	newattr(die, dwarf.DW_AT_go_kind, dwarf.DW_CLS_CONSTANT, int64(kind), 0)
 
 	if d.ldr.AttrReachable(gotype) {
@@ -1075,10 +1092,12 @@ func (d *dwctxt) calcCompUnitRanges() {
 			unit.PCs = append(unit.PCs, dwarf.Range{Start: sval - u0val})
 			prevUnit = unit
 		}
+		// range的地址相对于CU第一个func sym的地址
 		unit.PCs[len(unit.PCs)-1].End = sval - u0val + int64(len(d.ldr.Data(sym)))
 	}
 }
 
+// parent.Child列表追加到runtime CU child列表
 func movetomodule(ctxt *Link, parent *dwarf.DWDie) {
 	die := ctxt.runtimeCU.DWInfo.Child
 	if die == nil {
@@ -1139,7 +1158,7 @@ func (d *dwctxt) importInfoSymbol(dsym loader.Sym) {
 		// FIXME: is there a way we could avoid materializing the
 		// symbol name here?
 		sn := d.ldr.SymName(rsym)
-		tn := sn[len(dwarf.InfoPrefix):]
+		tn := sn[len(dwarf.InfoPrefix):] // go类型名
 		ts := d.ldr.Lookup("type."+tn, 0)
 		d.defgotype(ts)
 	}
