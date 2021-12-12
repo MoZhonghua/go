@@ -1407,7 +1407,6 @@ func (d *dwctxt) writeframes(fs loader.Sym) dwarfSecInfo {
 	fsu.SetType(sym.SDWARFSECT)
 	isdw64 := isDwarf64(d.linkctxt)
 	haslr := haslinkregister(d.linkctxt)
-	fmt.Printf("writeframes to section %v; haslr=%v; isdw64=%v\n", fsu.Name(), haslr, isdw64)
 
 	// Length field is 4 bytes on Dwarf32 and 12 bytes on Dwarf64
 	lengthFieldSize := int64(4)

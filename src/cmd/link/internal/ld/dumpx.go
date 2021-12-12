@@ -2,6 +2,7 @@ package ld
 
 import (
 	"cmd/link/internal/loader"
+	"cmd/link/internal/sym"
 	"fmt"
 )
 
@@ -45,4 +46,30 @@ func dumpreloc(prefix string, ldr *loader.Loader, r loader.Reloc, from loader.Sy
 
 func dumpelfshdr(prefix string, s *ElfShdr) {
 	fmt.Printf("%v%+v\n", prefix, s)
+}
+
+func dumpsegs() {
+	var segnames = []string{
+		"Segtext",
+		"Segrodata",
+		"Segrelrodata",
+		"Segdata",
+		"Segdwarf",
+	}
+
+	for i, seg := range []*sym.Segment{
+		&Segtext,
+		&Segrodata,
+		&Segrelrodata,
+		&Segdata,
+		&Segdwarf,
+	} {
+		fmt.Printf("Segment %v: nsections = %d; fileoff = %x; filelen = %x\n",
+			segnames[i], len(seg.Sections), seg.Fileoff, seg.Filelen)
+
+		for _, sec := range seg.Sections {
+			off := sec.Vaddr - seg.Vaddr + seg.Fileoff
+			fmt.Printf("  section %v: len = %x vaddr = %x; fileoff = %x\n", sec.Name, sec.Length, sec.Vaddr, off)
+		}
+	}
 }

@@ -37,6 +37,7 @@ func asmb(ctxt *Link) {
 		CodeblkPad(ctxt, out, start, length, pad)
 	}
 
+	// dumpsegs()
 	for _, sect := range Segtext.Sections {
 		// segtext.Vaddr是所有.text section的base地址
 		offset := sect.Vaddr - Segtext.Vaddr + Segtext.Fileoff

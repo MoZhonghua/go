@@ -1009,7 +1009,7 @@ func writeBlocks(ctxt *Link, out *OutBuf, sem chan int, ldr *loader.Loader, syms
 		}
 
 		// Start the block output operator.
-		if o, err := out.View(uint64(out.Offset() + written)); err == nil {
+		if o, err := out.View(uint64(out.Offset() + written)); err == nil || disableParallelWrite {
 			sem <- 1
 			wg.Add(1)
 			go func(o *OutBuf, ldr *loader.Loader, syms []loader.Sym, addr, size int64, pad []byte) {
@@ -1087,9 +1087,11 @@ func writeBlock(ctxt *Link, out *OutBuf, ldr *loader.Loader, syms []loader.Sym, 
 
 type writeFn func(*Link, *OutBuf, int64, int64)
 
+var disableParallelWrite = true
+
 // writeParallel handles scheduling parallel execution of data write functions.
 func writeParallel(wg *sync.WaitGroup, fn writeFn, ctxt *Link, seek, vaddr, length uint64) {
-	if out, err := ctxt.Out.View(seek); err != nil {
+	if out, err := ctxt.Out.View(seek); err != nil || disableParallelWrite {
 		ctxt.Out.SeekSet(int64(seek))
 		fn(ctxt, ctxt.Out, int64(vaddr), int64(length))
 	} else {

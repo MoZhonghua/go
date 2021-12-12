@@ -568,6 +568,8 @@ func (ctxt *Link) loadlib() {
 	// We now have enough information to determine the link mode.
 	determineLinkMode(ctxt)
 
+	fmt.Printf("buildmode = %v; linkmode = %v\n", ctxt.BuildMode.String(), ctxt.LinkMode.String())
+
 	if ctxt.LinkMode == LinkExternal && !iscgo && !(buildcfg.GOOS == "darwin" && ctxt.BuildMode != BuildModePlugin && ctxt.Arch.Family == sys.AMD64) {
 		// This indicates a user requested -linkmode=external.
 		// The startup code uses an import of runtime/cgo to decide
