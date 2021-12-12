@@ -25,6 +25,10 @@ internal/ld/data.go
 
 2021-12-11
 internal/ld/dwarf.go
+
+2021-12-12
 internal/ld/elf.go ?
+internal/ld/lib.go ?
+
 internal/loadelf/ldelf.go ?
 internal/loader/loader.go ?

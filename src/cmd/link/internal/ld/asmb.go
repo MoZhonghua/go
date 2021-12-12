@@ -186,7 +186,7 @@ func relocSectFn(ctxt *Link, relocSect func(*Link, *OutBuf, *sym.Section, []load
 	var fn func(ctxt *Link, sect *sym.Section, syms []loader.Sym)
 	var wg sync.WaitGroup
 	var sem chan int
-	if ctxt.Out.isMmapped() {
+	if ctxt.Out.isMmapped() && !disableParallelWrite {
 		// Write sections in parallel.
 		sem = make(chan int, 2*runtime.GOMAXPROCS(0))
 		fn = func(ctxt *Link, sect *sym.Section, syms []loader.Sym) {
