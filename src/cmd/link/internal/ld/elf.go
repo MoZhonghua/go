@@ -24,6 +24,21 @@ import (
 // 统一同elf64的类型，只是写入时做按需转换为elf32
 
 /*
+var x = 100;
+var y = &x;
+*/
+
+// buildmode=pie, linkinternal时访问数据
+//  - 数据引用数据生成relocation，类型为R_X86_64_RELATIVE=8, 比如y引用x, 生成的reloc项为
+//    * off = &y
+//    * <sym | type> = <0 | R_X86_64_RELATIVE>
+//    * addend = 0
+//    特别注意sym为0，没有指向x。编译后y的值为x的vaddr
+//    加载到内存后，loader计算出base addr，然后更新y的值为(*off) + base addr
+//    program base: exe文件中vaddr最小的对象加载到内存后的实际vaddr两者的差值称为base addr
+//  - 函数调用函数和访问数据全部走ip-relative, 不需要reloc
+
+/*
  * Derived from:
  * $FreeBSD: src/sys/sys/elf32.h,v 1.8.14.1 2005/12/30 22:13:58 marcel Exp $
  * $FreeBSD: src/sys/sys/elf64.h,v 1.10.14.1 2005/12/30 22:13:58 marcel Exp $
@@ -1185,6 +1200,13 @@ func elfshreloc(arch *sys.Arch, sect *sym.Section) *ElfShdr {
 	if typ == elf.SHT_RELA {
 		sh.Entsize += uint64(arch.RegSize)
 	}
+	// SHT_REL 和 SHT_RELA 类型的section:
+	// Link: The section header index of the associated symbol table.
+	//   - 每个ELF relocation项指向的目标是由<reloc_type | elf_sym_index, addent>组成
+	//   - elf_sym_index是指在Link字段指向的symtab section中索引
+	//   - 这里只有一个symtab，因此所有rel/rela section的link字段指向同一个symtab
+	// Info: The section header index of the section to which the relocation applies
+	//   - ELF relocation的修改地址是相对于Info指定的section中偏移量
 	sh.Link = uint32(elfshname(".symtab").shnum)
 	sh.Info = uint32(sect.Elfsect.(*ElfShdr).shnum)
 	sh.Off = sect.Reloff
@@ -1243,6 +1265,8 @@ func elfrelocsect(ctxt *Link, out *OutBuf, sect *sym.Section, syms []loader.Sym)
 			if !ldr.AttrReachable(rr.Xsym) {
 				ldr.Errorf(s, "unreachable reloc %d (%s) target %v", r.Type(), sym.RelocName(ctxt.Arch, r.Type()), ldr.SymName(rr.Xsym))
 			}
+			// ../amd64/asm.go:392, 每个relocation都是<reloc_type|elf_sym_index, add>
+			// symtab.go 中生成ELF symtab时记录了go sym index => elf sym index的映射关系
 			if !thearch.Elfreloc1(ctxt, out, ldr, s, rr, ri, int64(uint64(ldr.SymValue(s)+int64(r.Off()))-sect.Vaddr)) {
 				ldr.Errorf(s, "unsupported obj reloc %d (%s)/%d to %s", r.Type(), sym.RelocName(ctxt.Arch, r.Type()), r.Siz(), ldr.SymName(r.Sym()))
 			}
@@ -1295,7 +1319,7 @@ func elfEmitReloc(ctxt *Link) {
 func addgonote(ctxt *Link, sectionName string, tag uint32, desc []byte) {
 	ldr := ctxt.loader
 	s := ldr.CreateSymForUpdate(sectionName, 0)
-	s.SetType(sym.SELFROSECT)
+	s.SetType(sym.SELFROSECT) // 这种类型的每个sym单独创建一个section
 	// namesz
 	s.AddUint32(ctxt.Arch, uint32(len(ELF_NOTE_GO_NAME)))
 	// descsz
@@ -1326,7 +1350,7 @@ func (ctxt *Link) doelf() {
 
 	shstrtab.Addstring("")
 	shstrtab.Addstring(".text")
-	shstrtab.Addstring(".noptrdata")
+	shstrtab.Addstring(".noptrdata") // 会同时修改elfstr
 	shstrtab.Addstring(".data")
 	shstrtab.Addstring(".bss")
 	shstrtab.Addstring(".noptrbss")
@@ -1505,6 +1529,8 @@ func (ctxt *Link) doelf() {
 			// S390X uses .got instead of .got.plt
 			gotplt = got
 		}
+
+		// ../amd64/asm.go:563
 		thearch.Elfsetupplt(ctxt, plt, gotplt, dynamic.Sym())
 
 		/*
@@ -1521,6 +1547,7 @@ func (ctxt *Link) doelf() {
 		elfwritedynentsym(ctxt, dynamic, elf.DT_STRTAB, dynstr.Sym())
 		elfwritedynentsymsize(ctxt, dynamic, elf.DT_STRSZ, dynstr.Sym())
 		if elfRelType == ".rela" {
+			// .rel 和 .rela的区别就是后者多了一个addend
 			rela := ldr.LookupOrCreateSym(".rela", 0)
 			elfwritedynentsym(ctxt, dynamic, elf.DT_RELA, rela)
 			elfwritedynentsymsize(ctxt, dynamic, elf.DT_RELASZ, rela)
@@ -1625,6 +1652,7 @@ func shsym(sh *ElfShdr, ldr *loader.Loader, s loader.Sym) {
 	sh.Size = uint64(ldr.SymSize(s))
 }
 
+// 使得整个segment只包含这个seciton
 func phsh(ph *ElfPhdr, sh *ElfShdr) {
 	ph.Vaddr = sh.Addr
 	ph.Paddr = ph.Vaddr
@@ -1634,6 +1662,7 @@ func phsh(ph *ElfPhdr, sh *ElfShdr) {
 	ph.Align = sh.Addralign
 }
 
+// data.go dodata()中分配了所有seciton，特比的是对于SELFxxSEC的每个sym单独分配了一个section
 func Asmbelfsetup() {
 	/* This null SHdr must appear before all others */
 	elfshname("")
@@ -1672,9 +1701,12 @@ func asmbElf(ctxt *Link) {
 		asmElfSym(ctxt)
 		ctxt.Out.Write(Elfstrdat)
 		if ctxt.IsExternal() {
+			// 在当前位置写入所有reloc，注意仅当LinkExternal时
 			elfEmitReloc(ctxt)
 		}
 	}
+
+	// !!! seek到文件头
 	ctxt.Out.SeekSet(0)
 
 	ldr := ctxt.loader
@@ -1700,6 +1732,7 @@ func asmbElf(ctxt *Link) {
 		eh.Machine = uint16(elf.EM_S390)
 	}
 
+	// ELF文件开始保留4K。注意Segtext的起始位置为0x1000(4K), 也是.text的起始位置
 	elfreserve := int64(ELFRESERVE)
 
 	numtext := int64(0)
@@ -1718,13 +1751,20 @@ func asmbElf(ctxt *Link) {
 		elfreserve += elfreserve + numtext*64*2
 	}
 
-	startva := *FlagTextAddr - int64(HEADR)
+	// ELF中:
+	// - ld.HEADR = ld.ELFRESERVE = 0x1000
+	// - FlagTextAddr: 0x401000
+	// 这个值可以理解为文件位置0对应的vaddr。其他section的vaddr就是startva + fileoff
+	startva := *FlagTextAddr - int64(HEADR) // 0x400000
+
+	// resoff 即是ELF文件头预留位置，第一个section(.text)从这个位置开始写
 	resoff := elfreserve
 
 	var pph *ElfPhdr
 	var pnote *ElfPhdr
 	if *flagRace && ctxt.IsNetbsd() {
 		sh := elfshname(".note.netbsd.pax")
+		// 最前面单独加一个.section, 结束位置为resoff，然后更新resoff指向这个section的起始位置
 		resoff -= int64(elfnetbsdpax(sh, uint64(startva), uint64(resoff)))
 		pnote = newElfPhdr()
 		pnote.Type = elf.PT_NOTE
@@ -2027,6 +2067,8 @@ func asmbElf(ctxt *Link) {
 		sh.Flags = uint64(elf.SHF_ALLOC + elf.SHF_WRITE)
 		sh.Entsize = 2 * uint64(ctxt.Arch.RegSize)
 		sh.Addralign = uint64(ctxt.Arch.RegSize)
+		// Link指向的.dynamic中用到的字符串off是对应哪个string table section的
+		// 必须是指向一个SHT_STRTAB类型的section
 		sh.Link = uint32(elfshname(".dynstr").shnum)
 		shsym(sh, ldr, ldr.Lookup(".dynamic", 0))
 		ph := newElfPhdr()
@@ -2148,7 +2190,9 @@ elfobj:
 		sh.Size = uint64(symSize)
 		sh.Addralign = uint64(ctxt.Arch.RegSize)
 		sh.Entsize = 8 + 2*uint64(ctxt.Arch.RegSize)
+		// ELF规范要求Link指向对应的strtab
 		sh.Link = uint32(elfshname(".strtab").shnum)
+		// ELF规范要求Info是最后一个local sym index+1
 		sh.Info = uint32(elfglobalsymndx)
 
 		sh = elfshname(".strtab")
@@ -2195,22 +2239,26 @@ elfobj:
 	}
 
 	if ctxt.LinkMode != LinkExternal {
+		// _rt0_amd64_linux 的地址
 		eh.Entry = uint64(Entryvalue(ctxt))
 	}
 
 	eh.Version = uint32(elf.EV_CURRENT)
 
+	// pph 是一个特殊类型(elf.PT_PHDR)的program heade
 	if pph != nil {
 		pph.Filesz = uint64(eh.Phnum) * uint64(eh.Phentsize)
 		pph.Memsz = pph.Filesz
 	}
 
+	// 写入ELF_header, ELF_pheaders, ELF_sheaders
 	ctxt.Out.SeekSet(0)
 	a := int64(0)
 	a += int64(elfwritehdr(ctxt.Out))
 	a += int64(elfwritephdrs(ctxt.Out))
 	a += int64(elfwriteshdrs(ctxt.Out))
 	if !*FlagD {
+		// .interp section
 		a += int64(elfwriteinterp(ctxt.Out))
 	}
 	if ctxt.IsMIPS() {
@@ -2225,9 +2273,12 @@ elfobj:
 			a += int64(elfwriteopenbsdsig(ctxt.Out))
 		}
 		if len(buildinfo) > 0 {
+			// .note.gnu.build-id
 			a += int64(elfwritebuildinfo(ctxt.Out))
 		}
 		if *flagBuildid != "" {
+			// .note.go.build-id
+			// go build调用link时会传入buildid
 			a += int64(elfwritegobuildid(ctxt.Out))
 		}
 	}
@@ -2246,6 +2297,14 @@ elfobj:
 	}
 }
 
+// Sharable objects and dynamic executables usually have 2 distinct symbol tables, one named
+// ".symtab", and the other ".dynsym".
+
+// The dynsym is a smaller version of the symtab that only contains global symbols. The information
+// found in the dynsym is therefore also found in the symtab, while the reverse is not necessarily
+// true.
+
+// .dynsym 是 .symtab 的一部分, 关键区别是前者是ALLOC，运行程序时需要加载到内存中.
 func elfadddynsym(ldr *loader.Loader, target *Target, syms *ArchSyms, s loader.Sym) {
 	ldr.SetSymDynid(s, int32(Nelfsym))
 	Nelfsym++
@@ -2257,7 +2316,7 @@ func elfadddynsym(ldr *loader.Loader, target *Target, syms *ArchSyms, s loader.S
 	cgoeDynamic := ldr.AttrCgoExportDynamic(s)
 	cgoexp := (cgoeStatic || cgoeDynamic)
 
-	d.AddUint32(target.Arch, uint32(dstru.Addstring(name)))
+	d.AddUint32(target.Arch, uint32(dstru.Addstring(name))) // st_name
 
 	if elf64 {
 
@@ -2269,11 +2328,19 @@ func elfadddynsym(ldr *loader.Loader, target *Target, syms *ArchSyms, s loader.S
 		} else {
 			t = elf.ST_INFO(elf.STB_GLOBAL, elf.STT_OBJECT)
 		}
-		d.AddUint8(t)
+		d.AddUint8(t) // st_info: bind + type
 
 		/* reserved */
-		d.AddUint8(0)
+		d.AddUint8(0) // st_other
 
+		// To allow comparisons of function addresses to work as expected, if an executable file
+		// references a function defined in a shared object, the link editor will place the address
+		// of the procedure linkage table entry for that function in its associated symbol table
+		// entry. This will result in symbol table entries with section index of SHN_UNDEF but a
+		// type of STT_FUNC and a non-zero st_value. A reference to the address of a function from
+		// within a shared library will be satisfied by such a definition in the executable.
+
+		// 引用的其他DSO定义的函数, 符号表里特殊项
 		/* section where symbol is defined */
 		if st == sym.SDYNIMPORT {
 			d.AddUint16(target.Arch, uint16(elf.SHN_UNDEF))
@@ -2283,7 +2350,7 @@ func elfadddynsym(ldr *loader.Loader, target *Target, syms *ArchSyms, s loader.S
 
 		/* value */
 		if st == sym.SDYNIMPORT {
-			d.AddUint64(target.Arch, 0)
+			d.AddUint64(target.Arch, 0) // value值什么时候更新?
 		} else {
 			d.AddAddrPlus(target.Arch, s, 0)
 		}

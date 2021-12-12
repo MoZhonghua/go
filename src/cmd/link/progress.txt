@@ -27,8 +27,13 @@ internal/ld/data.go
 internal/ld/dwarf.go
 
 2021-12-12
-internal/ld/elf.go ?
+internal/ld/elf.go
+internal/ld/errors.go
+internal/ld/execarchive.go
+internal/ld/go.go ?
+internal/ld/ld.go ?
 internal/ld/lib.go ?
+internal/amd64/*.go ?
 
 internal/loadelf/ldelf.go ?
 internal/loader/loader.go ?

@@ -560,23 +560,41 @@ func archrelocvariant(*ld.Target, *loader.Loader, loader.Reloc, sym.RelocVariant
 	return -1
 }
 
+
+// 只设置了PLT[0]的代码。其他对应函数的PLT项在后面按照需要创建
 func elfsetupplt(ctxt *ld.Link, plt, got *loader.SymbolBuilder, dynamic loader.Sym) {
 	if plt.Size() == 0 {
+/* objdump -d -j .plt /tmp/main  // -buildmode=pie
+00000000004971a0 <.plt>:
+  // .PLT0
+  4971a0:       ff 35 82 9e 0d 00       push   0xd9e82(%rip)        # 571028 <runtime.epclntab+0x320>
+  4971a6:       ff 25 84 9e 0d 00       jmp    *0xd9e84(%rip)        # 571030 <runtime.epclntab+0x328>
+  4971ac:       0f 1f 40 00             nopl   0x0(%rax)
+
+.PLT0: pushq GOT+8(%rip)  // GOT[1] loader填写的，标识符，具体含义?
+       jmp *GOT+16(%rip)  // 跳转到GOT[2]，也就是到loader代码。也是由loader填写, 会设置GOT[$index1]指向name1实际地址
+       nopl
+
+.PLT1: jmp *name1@GOTPCREL(%rip) // lazy-reloc; 初始值指向pushq $index1这条指令。reloc之后指向name1实际地址
+       pushq $index1  //这个是name1这个exported函数对应的GOT项index
+	   jmp .PLT0
+*/
 		// pushq got+8(IP)
 		plt.AddUint8(0xff)
 
 		plt.AddUint8(0x35)
-		plt.AddPCRelPlus(ctxt.Arch, got.Sym(), 8)
+		plt.AddPCRelPlus(ctxt.Arch, got.Sym(), 8) // .got.plt + 8; .got.plt[1]
 
 		// jmpq got+16(IP)
 		plt.AddUint8(0xff)
 
 		plt.AddUint8(0x25)
-		plt.AddPCRelPlus(ctxt.Arch, got.Sym(), 16)
+		plt.AddPCRelPlus(ctxt.Arch, got.Sym(), 16) // .got.plt + 16; .got.plt[2]
 
 		// nopl 0(AX)
 		plt.AddUint32(ctxt.Arch, 0x00401f0f)
 
+		// .got.plt中增加三项。第一项应该指向.dynamic对象，对应PT_DYNAMIC program header
 		// assume got->size == 0 too
 		got.AddAddrPlus(ctxt.Arch, dynamic, 0)
 
@@ -616,16 +634,19 @@ func addpltsym(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loade
 		// add to got: pointer to current pos in plt
 		got.AddAddrPlus(target.Arch, plt.Sym(), plt.Size())
 
-		// pushq $x
+		// pushq $x; $x为s在GOT中对应项的index
 		plt.AddUint8(0x68)
 
+		// -24: GOT[0,1,2]保留, 含义见上面
+		// -8: 现在指向的当前项的结束地址，需要的是起始地址，-8字节
 		plt.AddUint32(target.Arch, uint32((got.Size()-24-8)/8))
 
 		// jmpq .plt
 		plt.AddUint8(0xe9)
 
-		plt.AddUint32(target.Arch, uint32(-(plt.Size() + 4)))
+		plt.AddUint32(target.Arch, uint32(-(plt.Size() + 4))) // IP-relative地址，指向PLT[0]
 
+		// 增加一个reloc项，lazy-reloc时填写, GOT[$x]指向程序加载后s的绝对地址
 		// rela
 		rela.AddAddrPlus(target.Arch, got.Sym(), got.Size()-8)
 

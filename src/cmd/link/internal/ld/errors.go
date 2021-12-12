@@ -20,7 +20,7 @@ type symNameFn func(s loader.Sym) string
 
 // ErrorReporter is used to make error reporting thread safe.
 type ErrorReporter struct {
-	loader.ErrorReporter
+	loader.ErrorReporter // 嵌入了loader.ErrorReporter
 	unresOnce  sync.Once
 	unresSyms  map[unresolvedSymKey]bool
 	unresMutex sync.Mutex

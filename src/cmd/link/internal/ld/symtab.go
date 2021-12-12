@@ -59,15 +59,49 @@ import (
 //  - st_shndx: 所在的section索引
 // st_value + st_shndx就能够计算出最终地址
 
-// objdump
+// binding就三种: 说的是定义sym，引用sym是通过st_index==SHN_UNDEF来表示
+// - LOCAL: Local symbols are not visible outside the object file containing their definition.
+// - GLOBAL: Global symbols are visible to all object files being combined
+// - WEAK: Weak symbols resemble global symbols, but their definitions have lower precedence
+
+// symbol type 主要用的就4种
+//  - STT_OBJECT: 数据
+//  - STT_FUNC: 函数
+//  - STT_SECTION: elf section
+//  - STT_FILE: A file symbol has STB_LOCAL binding, its section index is SHN_ABS
+
+// symbol的st_shndx字段有几个特殊值:
+//  - SHN_ABS: The symbol has an absolute value that will not change because of relocation
+//  - SHN_UNDEF: 表示这个sym未定义，link时通过relocation修改所有引用这个符号的数据指向sym真正地址
+
+// st_value的含义:
+//  - 普通的.o文件中，是sym在所属section中偏移量，方便link-relocation
+//  - .so和.exe中，是sym的vaddr，更方便load-relocation
+
+// elf rel/rela section的link和info两个字段含义:
+//  - info: reloc项修改是哪个section的数据。每个reloc项只有offset字段，哪个section这里决定
+//  - link: reloc项指向的哪个symtab section中的sym。每个reloc项只有sym index, 指向哪个symtab section这里决定
+// elf relocation项包含三个字段
+//  - offset: 在sect.info指向的section中偏移量，reloc在这里写入数据
+//  - info: sym index | reloc type. sym index是在sect.link指向的symtab section中的索引
+//  - addend
+
+// dynamic-linked pie有interp指定dynamic linker来完成
+// 但是static-linked pie executable中谁来完成relocation?
+//  - elf entry point => _rt0_amd64_linux
+//  - ??
+
 /*
+st_shndx: Every symbol table entry is "defined'' in relation to some section; this member holds the
+relevant section header table index
+
 	Half=16, Word=32, Xword=64, Addr=64
 	typedef struct {
 	        Elf64_Word      st_name;
 	        unsigned char   st_info;  // (bind<<4) + (type&0xf)
 	        unsigned char   st_other; // visibility
 	        Elf64_Half      st_shndx; // section header table index
-	        Elf64_Addr      st_value;
+	        Elf64_Addr      st_value; // addr?
 	        Elf64_Xword     st_size;
 	} Elf64_Sym;
 */
@@ -109,12 +143,12 @@ func putelfsyment(out *OutBuf, off int, addr int64, size int64, info uint8, shnd
 		out.Write64(uint64(size))
 		symSize += ELF64SYMSIZE
 	} else {
-		out.Write32(uint32(off))
-		out.Write32(uint32(addr))
-		out.Write32(uint32(size))
-		out.Write8(info)
-		out.Write8(uint8(other))
-		out.Write16(uint16(shndx))
+		out.Write32(uint32(off))  // name
+		out.Write32(uint32(addr)) // value
+		out.Write32(uint32(size)) // size
+		out.Write8(info)          // info
+		out.Write8(uint8(other)) // other
+		out.Write16(uint16(shndx)) // shndx
 		symSize += ELF32SYMSIZE
 	}
 }

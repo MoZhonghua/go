@@ -41,7 +41,7 @@ type SymKind uint8
 const (
 	Sxxx SymKind = iota // 表示无效值
 	STEXT
-	SELFRXSECT
+	SELFRXSECT  // ELF RX SECT， 每个sym分配一个section, 名字就是sym name
 	SMACHOPLT
 
 	// Read-only sections.
@@ -53,8 +53,7 @@ const (
 	SRODATA
 	SFUNCTAB
 
-	// ELF RO SECT， 每个sym分配一个section, 名字就是sym name
-	SELFROSECT
+	SELFROSECT // ELF RO SECT， 每个sym分配一个section, 名字就是sym name
 
 	// Read-only sections with relocations.
 	//
@@ -85,7 +84,7 @@ const (
 	// Writable sections.
 	SFirstWritable
 	SBUILDINFO
-	SELFSECT
+	SELFSECT // ELF SECT， 每个sym分配一个section, 名字就是sym name
 	SMACHO
 	SMACHOGOT
 	SWINDOWS

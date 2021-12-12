@@ -27,6 +27,7 @@ import (
 // go-specific code shared across loaders (5l, 6l, 8l).
 
 // replace all "". with pkg.
+// "". => packge.
 func expandpkg(t0 string, pkg string) string {
 	return strings.Replace(t0, `"".`, pkg+".", -1)
 }

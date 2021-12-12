@@ -1572,7 +1572,12 @@ func (ctxt *Link) dodata(symGroupType []sym.SymKind) {
 		machosymorder(ctxt)
 	}
 
-	// reloc 转换为 got/plt reloc, 普通exe/lib不用, *FlagD==true
+	// reloc 转换为 elf reloc, 普通exe/lib不用, *FlagD==true
+	// pie && linkinternal 时全部都是生成R_X86_64_RELATIVE类型的
+
+	// 可以通过file 命令判断最终最终生成的代码
+	// LD_DEBUG=statistics /tmp/main 实际调用了dynamic loader!!
+	// LD_DEBUG=help cat
 	state.dynreloc(ctxt)
 
 	// Move any RO data with relocations to a separate section.
