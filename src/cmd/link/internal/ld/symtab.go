@@ -87,9 +87,12 @@ import (
 //  - addend
 
 // dynamic-linked pie有interp指定dynamic linker来完成
-// 但是static-linked pie executable中谁来完成relocation?
-//  - elf entry point => _rt0_amd64_linux
-//  - ??
+// 注意-buildmode=pie生成的exe也是dynamic-linked
+//  file /tmp/main
+//    * ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2
+//  ldd /tmp/main
+//    * statically linked
+//  ldd输出非常容易让人误解!!
 
 /*
 st_shndx: Every symbol table entry is "defined'' in relation to some section; this member holds the
