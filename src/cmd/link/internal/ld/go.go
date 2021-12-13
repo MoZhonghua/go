@@ -38,7 +38,8 @@ func expandpkg(t0 string, pkg string) string {
 //		libmach, so that other linkers and ar can share.
 
 func ldpkg(ctxt *Link, f *bio.Reader, lib *sym.Library, length int64, filename string) {
-	if *flagG {
+	// lib.Pkg=main length=60 filename="$WORK/b001/_pkg_.a(_go_.o)"
+	if *flagG { // whether disable go package data checks
 		return
 	}
 
@@ -52,6 +53,7 @@ func ldpkg(ctxt *Link, f *bio.Reader, lib *sym.Library, length int64, filename s
 		fmt.Fprintf(os.Stderr, "%s: short pkg read %s\n", os.Args[0], filename)
 		return
 	}
+	// 数据为:  [build id "fVpY5Kl97W6gKFPmN2Rw/4Ccu9DAKj6seXMD2prl8"\n main \n]
 	data := string(bdata)
 
 	// process header lines
@@ -96,6 +98,9 @@ func ldpkg(ctxt *Link, f *bio.Reader, lib *sym.Library, length int64, filename s
 }
 
 func loadcgo(ctxt *Link, file string, pkg string, p string) {
+	// file="/tmp/go-build686244318/b001/_pkg_.a(_go_.o)"
+	// pkg="main"
+	// p="[["cgo_ldflag","-g"],["cgo_ldflag","-O2"],["cgo_import_dynamic","pthread_cond_wait", "pthread_cond_wait#GLIBC_2.3.2","libpthread.so.0"]]"
 	var directives [][]string
 	if err := json.NewDecoder(strings.NewReader(p)).Decode(&directives); err != nil {
 		fmt.Fprintf(os.Stderr, "%s: %s: failed decoding cgo directives: %v\n", os.Args[0], file, err)
@@ -113,7 +118,11 @@ func setCgoAttr(ctxt *Link, file string, pkg string, directives [][]string, host
 	l := ctxt.loader
 	for _, f := range directives {
 		switch f[0] {
+		// 两种来源:
+		//  - cgo生成的c代码加一个dummy main.c生成dynamic-linked exe, 然后go tool cgo -dynimport dummy生成
+		//  - 也可以在go代码里手动添加
 		case "cgo_import_dynamic":
+			// ["cgo_import_dynamic","pthread_cond_wait","pthread_cond_wait#GLIBC_2.3.2","libpthread.so.0"]
 			if len(f) < 2 || len(f) > 4 {
 				break
 			}
@@ -152,13 +161,14 @@ func setCgoAttr(ctxt *Link, file string, pkg string, directives [][]string, host
 			if i := strings.Index(remote, "#"); i >= 0 {
 				remote, q = remote[:i], remote[i+1:]
 			}
-			s := l.LookupOrCreateSym(local, 0)
-			st := l.SymType(s)
+			s := l.LookupOrCreateSym(local, 0) // local=pthread_cond_wait
+			st := l.SymType(s) // st=Sxxx(0), s!=0
 			if st == 0 || st == sym.SXREF || st == sym.SBSS || st == sym.SNOPTRBSS || st == sym.SHOSTOBJ {
-				l.SetSymDynimplib(s, lib)
-				l.SetSymExtname(s, remote)
-				l.SetSymDynimpvers(s, q)
+				l.SetSymDynimplib(s, lib) // libpthread.so.0
+				l.SetSymExtname(s, remote) // pthread_cond_wait
+				l.SetSymDynimpvers(s, q)   // GLIBC_2.3.2
 				if st != sym.SHOSTOBJ {
+					// 只有 cgo_import_static 会设置为sym.SHOSTOBJ
 					su := l.MakeSymbolUpdater(s)
 					su.SetType(sym.SDYNIMPORT)
 				} else {
@@ -363,6 +373,7 @@ func adddynlib(ctxt *Link, lib string) {
 	seenlib[lib] = true
 
 	if ctxt.IsELF {
+		// DT_NEEDED项需要指向名字偏移量
 		dsu := ctxt.loader.MakeSymbolUpdater(ctxt.DynStr)
 		if dsu.Size() == 0 {
 			dsu.Addstring("")
@@ -374,6 +385,7 @@ func adddynlib(ctxt *Link, lib string) {
 	}
 }
 
+// .dynsym表中添加一项
 func Adddynsym(ldr *loader.Loader, target *Target, syms *ArchSyms, s loader.Sym) {
 	if ldr.SymDynid(s) >= 0 || target.LinkMode == LinkExternal {
 		return
@@ -395,7 +407,7 @@ func fieldtrack(arch *sys.Arch, l *loader.Loader) {
 	for i := loader.Sym(1); i < loader.Sym(l.NSym()); i++ {
 		if name := l.SymName(i); strings.HasPrefix(name, "go.track.") {
 			if l.AttrReachable(i) {
-				l.SetAttrSpecial(i, true)
+				l.SetAttrSpecial(i, true) // specail sym的value不是sym的地址
 				l.SetAttrNotInSymbolTable(i, true)
 				buf.WriteString(name[9:])
 				for p := l.Reachparent[i]; p != 0; p = l.Reachparent[p] {

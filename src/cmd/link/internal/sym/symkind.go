@@ -103,7 +103,12 @@ const (
 	SMACHOINDIRECTPLT
 	SMACHOINDIRECTGOT
 	SFILEPATH
-	SDYNIMPORT // 这三个=>elf.SHN_UNDEF
+
+	// SDYNIMPORT: 主要是cgo生成的c代码编译后引用的libc/libpthread的函数
+	// cgo的获取这些函数列表方式是创建一个dummy main()，然后gcc编译为dynamic-linked exe
+	// 然后go tool cgo  -dynimport /tmp/main
+	// //go:cgo_import_dynamic strerror strerror#GLIBC_2.2.5 "libc.so.6"
+	SDYNIMPORT // 这三个=>elf.SHN_UNDEF, 因为引用的外部函数
 	SHOSTOBJ
 	SUNDEFEXT // Undefined symbol for resolution by external linker
 
