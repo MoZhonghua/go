@@ -32,13 +32,13 @@ type Sym int
 type Relocs struct {
 	rs []goobj.Reloc
 
-	li uint32   // local index of symbol whose relocs we're examining
 	r  *oReader // object reader for containing package
 	l  *Loader  // loader
 }
 
 // ExtReloc contains the payload for an external relocation.
 type ExtReloc struct {
+	// 没有offset字段, AMD64是用offset of sectio
 	Xsym Sym
 	Xadd int64
 	Type objabi.RelocType
@@ -68,6 +68,7 @@ type Aux struct {
 	l *Loader
 }
 
+// goobj.SymRef{PkgIdx,SymIdx} -> loader.Sym
 func (a Aux) Sym() Sym { return a.l.resolve(a.r, a.Aux.Sym()) }
 
 // oReader is a wrapper type of obj.Reader, along with some
@@ -210,6 +211,12 @@ type Loader struct {
 
 	objSyms []objSym // global index mapping to local index
 
+	// 整个命名空间是所有<name, ver>的组合, 相同<name, ver>不能同时出现，除非attrDuplicateOK=true
+	// 其中ABI0, ABIInternal是全局命名空间，即所有obj中的global sym都用这两个ver, 包括
+	//  - go object中所有sym都是global
+	//  - elf object中symtab中binding=global/weak的sym
+	//  - link自己构造的extSym
+	// 每个elf object分配独立的static version, bindging=local的sym都用这个ver，因此两个elf obj之间不会冲突
 	symsByName    [2]map[string]Sym // map symbol name to index, two maps are for ABI0 and ABIInternal
 	extStaticSyms map[nameVer]Sym   // externally defined static symbols, keyed by name
 
@@ -225,6 +232,7 @@ type Loader struct {
 
 	deferReturnTramp map[Sym]bool // whether the symbol is a trampoline of a deferreturn call
 
+	// index to `objs []objIdx`
 	objByPkg map[string]uint32 // map package path to the index of its Go object reader
 
 	anonVersion int // most recently assigned ext static sym pseudo-version
@@ -250,6 +258,7 @@ type Loader struct {
 	attrCgoExportStatic  map[Sym]struct{} // "cgo_export_static" symbols
 	generatedSyms        map[Sym]struct{} // symbols that generate their content
 
+	// 一对一的关系??
 	// Outer and Sub relations for symbols.
 	// TODO: figure out whether it's more efficient to just have these
 	// as fields on extSymPayload (note that this won't be a viable
@@ -261,14 +270,14 @@ type Loader struct {
 	dynimplib   map[Sym]string      // stores Dynimplib symbol attribute
 	dynimpvers  map[Sym]string      // stores Dynimpvers symbol attribute
 	localentry  map[Sym]uint8       // stores Localentry symbol attribute
-	extname     map[Sym]string      // stores Extname symbol attribute
+	extname     map[Sym]string      // stores Extname symbol attribute: cgo_import_xxx, dso加载的sym的extname
 	elfType     map[Sym]elf.SymType // stores elf type symbol property
-	elfSym      map[Sym]int32       // stores elf sym symbol property
+	elfSym      map[Sym]int32       // stores elf sym symbol property: sym在.symtab中的index
 	localElfSym map[Sym]int32       // stores "local" elf sym symbol property
 	symPkg      map[Sym]string      // stores package for symbol, or library for shlib-derived syms
-	plt         map[Sym]int32       // stores dynimport for pe objects
-	got         map[Sym]int32       // stores got for pe objects
-	dynid       map[Sym]int32       // stores Dynid for symbol
+	plt         map[Sym]int32       // stores dynimport for pe objects: .plt中对应项的offset，不是index
+	got         map[Sym]int32       // stores got for pe objects: .got中对应项的index
+	dynid       map[Sym]int32       // stores Dynid for symbol: sym在.dynsym中的index
 
 	relocVariant map[relocId]sym.RelocVariant // stores variant relocs
 
@@ -686,6 +695,7 @@ func (l *Loader) resolve(r *oReader, s goobj.SymRef) Sym {
 	case goobj.PkgIdxSelf:
 		rr = r
 	default:
+		// TODO(mzh): pkg应该对应多个.o，即多个*oReader
 		rr = l.objs[r.pkg[p]].r
 	}
 	return l.toGlobal(rr, s.SymIdx)
@@ -1913,7 +1923,6 @@ func (l *Loader) relocs(r *oReader, li uint32) Relocs {
 	}
 	return Relocs{
 		rs: rs,
-		li: li,
 		r:  r,
 		l:  l,
 	}

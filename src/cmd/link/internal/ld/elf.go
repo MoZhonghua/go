@@ -830,7 +830,7 @@ var elfverneed int
 type Elfaux struct {
 	next *Elfaux
 	num  int
-	vers string
+	vers string // GLIBC_2.2.5
 }
 
 type Elflib struct {
@@ -890,8 +890,9 @@ func elfdynhash(ctxt *Link) {
 	chain := make([]uint32, nsym)
 	buckets := make([]uint32, nbucket)
 
-	for _, sy := range ldr.DynidSyms() { // -buildmode=pie也是空
+	for _, sy := range ldr.DynidSyms() { // cgo_import_dynamic函数时会在这里出现
 		dynid := ldr.SymDynid(sy)
+		//go:cgo_import_dynamic freeaddrinfo freeaddrinfo#GLIBC_2.2.5 "libc.so.6"
 		if ldr.SymDynimpvers(sy) != "" {
 			need[dynid] = addelflib(&needlib, ldr.SymDynimplib(sy), ldr.SymDynimpvers(sy))
 		}
@@ -927,7 +928,39 @@ func elfdynhash(ctxt *Link) {
 
 	dynstr := ldr.CreateSymForUpdate(".dynstr", 0)
 
+	// .dynstr <--> .gnu.version 一一对应
+	// .gnu.version中每一项的值 --> .gnu.version_r中aux的vna_other字段
+
 	// version symbols
+		/*
+Elf64_Half=uint16
+Elf64_Word=uint32
+typedef struct {
+	Elf64_Half    vn_version; // 1
+	Elf64_Half    vn_cnt;  // Number of associated verneed array entries.
+	Elf64_Word    vn_file; // .dynstr "libc.so.6"
+	Elf64_Word    vn_aux;  // Offset to a corresponding entry in the vernaux array, in bytes.
+	Elf64_Word    vn_next; // Offset to the next verneed entry, in bytes.
+} Elf64_Verneed;  // 16 bytes
+
+typedef struct {
+	Elf64_Word    vna_hash;
+	Elf64_Half    vna_flags;
+	Elf64_Half    vna_other; // sym index/name?
+	Elf64_Word    vna_name;  // ver string, GLIBC_2.2.5
+	Elf64_Word    vna_next;
+} Elf64_Vernaux; // 16 bytes
+
+Elf64_Verneed 0    // 对应一个.so文件
+	Elf64_Vernaux 0  // 对应name@vers, 比如stderr#GLIBC_2.2.5
+	Elf64_Vernaux 1
+	...
+Elf64_Verneed 0
+	Elf64_Vernaux 0
+	Elf64_Vernaux 1
+	...
+*/
+
 	gnuVersionR := ldr.CreateSymForUpdate(".gnu.version_r", 0)
 	s = gnuVersionR
 	i = 2
@@ -938,7 +971,7 @@ func elfdynhash(ctxt *Link) {
 		// header
 		s.AddUint16(ctxt.Arch, 1) // table version
 		j := 0
-		for x := l.aux; x != nil; x = x.next {
+		for x := l.aux; x != nil; x = x.next { // l的aux列表
 			j++
 		}
 		s.AddUint16(ctxt.Arch, uint16(j))                        // aux count
@@ -951,12 +984,16 @@ func elfdynhash(ctxt *Link) {
 		}
 
 		for x := l.aux; x != nil; x = x.next {
+			// .gnu.version 中的value 0，1是保留值
+			// i从2开始，而每个aux对应一个sym，因此x.num实际就是aux的编号
+			// .gnu.version中用这个num来引用aux
 			x.num = i
 			i++
 
 			// aux struct
 			s.AddUint32(ctxt.Arch, elfhash(x.vers))                  // hash
 			s.AddUint16(ctxt.Arch, 0)                                // flags
+			// other: Bit number 15 controls whether or not the object is hidden
 			s.AddUint16(ctxt.Arch, uint16(x.num))                    // other - index we refer to this by
 			s.AddUint32(ctxt.Arch, uint32(dynstr.Addstring(x.vers))) // version string offset
 			if x.next != nil {
@@ -966,17 +1003,21 @@ func elfdynhash(ctxt *Link) {
 			}
 		}
 	}
-
 	// version references
 	gnuVersion := ldr.CreateSymForUpdate(".gnu.version", 0)
 	s = gnuVersion
 
 	for i := 0; i < nsym; i++ {
+		// 每一项为uint16，对应.dynsym中一个symbol，两者数量必须一致
 		if i == 0 {
+			// spec: The symbol is local, not available outside the object
 			s.AddUint16(ctxt.Arch, 0) // first entry - no symbol
 		} else if need[i] == nil {
+			// spec: The symbol is defined in this object and is globally available.
+			// 没有版本号要求或者是自己定义的(go sym都没有版本号)
 			s.AddUint16(ctxt.Arch, 1) // global
 		} else {
+			// 对应的aux项
 			s.AddUint16(ctxt.Arch, uint16(need[i].num))
 		}
 	}
