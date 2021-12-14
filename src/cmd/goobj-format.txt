@@ -1,0 +1,43 @@
+## objabi header string
+首先是写入objapi.HeaderString()
+
+asm/main.go
+		buf.WriteString(objabi.HeaderString())
+		fmt.Fprintf(buf, "!\n")
+
+go object linux amd64 go1.17.2 X:regabiwrappers,regabig,regabireflect,regabidefer,regabiargs
+          GOOS  GOARCH VERSION Enabled GOEXPEIRMENTS
+
+
+## 写入goobj.Header
+
+./internal/goobj/objfile.go
+
+const (
+	ObjFlagShared            = 1 << iota // this object is built with -shared
+	ObjFlagNeedNameExpansion             // the linker needs to expand `"".` to package path in symbol names
+	ObjFlagFromAssembly                  // object is from asm src, not go
+)
+
+const Magic = "\x00go117ld"
+
+type Header struct {
+	Magic       string
+	Fingerprint FingerprintType  // 8字节
+	Flags       uint32
+	Offsets     [NBlk]uint32
+}
+
+## 写入string table
+
+把所有需要的string写入文件，同时记录每个string在文件中偏移量.
+string结尾没有\0
+
+通过StringRef {len + off}来引用
+
+## 写入Autolib，即ImportedPkg列表
+
+每个导入的Package都写入一项: StringRef + Fingerprint
+
+
+link加载go object时会通过读取autolib数据来确定依赖项.

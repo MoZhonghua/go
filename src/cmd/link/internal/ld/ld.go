@@ -44,6 +44,14 @@ import (
 	"strings"
 )
 
+// go build -x -work . 可以看到生成importcfg文件
+// -importcfg $WORK/b001/importcfg.link
+// 文件内容如下:
+/*
+# import config
+packagefile fmt=/home/mozhonghua/.cache/go-build/10/10e9e7f2882559931ee7d7cf8ab8cbaea3a343281f914064ae3738fc377399ec-d
+packagefile io/ioutil=/home/mozhonghua/.cache/go-build/d1/d1481b0f5b92037ee7a1e0384d095472d5ee4115675ef1eb47f75436f288d034-d
+*/
 func (ctxt *Link) readImportCfg(file string) {
 	ctxt.PackageFile = make(map[string]string)
 	ctxt.PackageShlib = make(map[string]string)
@@ -89,6 +97,7 @@ func (ctxt *Link) readImportCfg(file string) {
 	}
 }
 
+// runtime => runtime
 func pkgname(ctxt *Link, lib string) string {
 	name := path.Clean(lib)
 
@@ -105,6 +114,8 @@ func pkgname(ctxt *Link, lib string) string {
 	return pkg
 }
 
+// math/bits => ($WORK/b019/_pkg_.a, false)
+// b019是按照顺序分配的临时变量，每个package一个?
 func findlib(ctxt *Link, lib string) (string, bool) {
 	name := path.Clean(lib)
 
@@ -157,8 +168,13 @@ func findlib(ctxt *Link, lib string) (string, bool) {
 }
 
 func addlib(ctxt *Link, src, obj, lib string, fingerprint goobj.FingerprintType) *sym.Library {
+	// src=internal/poll
+	// obj=/tmp/go-build901049703/b030/_pkg_.a(_go_.o)
+	// lib=sync/atomic
+	// 同一个src调用多次，每个依赖lib调用一次
 	pkg := pkgname(ctxt, lib)
 
+	// fingerprint是编译src时计算出的依赖项的fingerprint，和已经加载进来的对比
 	// already loaded?
 	if l := ctxt.LibraryByPkg[pkg]; l != nil && !l.Fingerprint.IsZero() {
 		// Normally, packages are loaded in dependency order, and if l != nil
@@ -192,7 +208,9 @@ func addlib(ctxt *Link, src, obj, lib string, fingerprint goobj.FingerprintType)
  *	fingerprint: if not 0, expected fingerprint for import from srcref
  *	             fingerprint is 0 if the library is not imported (e.g. main)
  */
+ // 只记录，还没真正读取.a/.so文件
 func addlibpath(ctxt *Link, srcref, objref, file, pkg, shlib string, fingerprint goobj.FingerprintType) *sym.Library {
+	// 被多个package引用时只会添加一次，Library.Objref/Srcref是第一个引用者
 	if l := ctxt.LibraryByPkg[pkg]; l != nil {
 		return l
 	}
@@ -237,6 +255,8 @@ func PrepareAddmoduledata(ctxt *Link) (*loader.SymbolBuilder, loader.Sym) {
 	if !ctxt.DynlinkingGo() {
 		return nil, 0
 	}
+
+	// runtime.addmoduledata是一个汇编函数
 	amd := ctxt.loader.LookupOrCreateSym("runtime.addmoduledata", 0)
 	if ctxt.loader.SymType(amd) == sym.STEXT && ctxt.BuildMode != BuildModePlugin {
 		// we're linking a module containing the runtime -> no need for
@@ -260,6 +280,7 @@ func PrepareAddmoduledata(ctxt *Link) (*loader.SymbolBuilder, loader.Sym) {
 	ctxt.Textp = append(ctxt.Textp, initfunc.Sym())
 
 	// Create an init array entry
+	// 这一项指向上面刚创建的initfunc，loader加载时会自动调用initfunc函数
 	amdi := ctxt.loader.LookupOrCreateSym("go.link.addmoduledatainit", 0)
 	initarray_entry := ctxt.loader.MakeSymbolUpdater(amdi)
 	ctxt.loader.SetAttrReachable(amdi, true)
@@ -267,5 +288,7 @@ func PrepareAddmoduledata(ctxt *Link) (*loader.SymbolBuilder, loader.Sym) {
 	initarray_entry.SetType(sym.SINITARR)
 	initarray_entry.AddAddr(ctxt.Arch, ifs)
 
+	// initfunc的函数体由调用者填写。一般是调用amd指向的runtime.addmoduledata()函数
+	// 注意DI应该是指向新加moduledata的指针
 	return initfunc, amd
 }

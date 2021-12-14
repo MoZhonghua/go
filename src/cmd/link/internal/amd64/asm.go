@@ -51,6 +51,7 @@ func gentext(ctxt *ld.Link, ldr *loader.Loader) {
 	*/
 
 	// addmoduledata是指向函数runtime.addmoduledata()
+	// 在.init会有一项指向initfunc，我们要做的是构造initfunc函数体
 	initfunc, addmoduledata := ld.PrepareAddmoduledata(ctxt)
 	if initfunc == nil {
 		return

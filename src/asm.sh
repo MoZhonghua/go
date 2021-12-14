@@ -6,9 +6,11 @@ function asm() {
 	export PATH=/home/mozhonghua/go/src/github.com/golang/go/bin:$PATH
 	export GOROOT=/home/mozhonghua/go/src/github.com/golang/go
 
-	go build -o ../pkg/tool/linux_amd64/asm2 ./cmd/asm/
+	cp ../pkg/tool/linux_amd64/asm.old ../pkg/tool/linux_amd64/asm
 
-	../pkg/tool/linux_amd64/asm2 "$@"
+	go build -o ../pkg/tool/linux_amd64/asm ./cmd/asm/
+
+	../pkg/tool/linux_amd64/asm "$@"
 }
 
 SELF_DIR=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")

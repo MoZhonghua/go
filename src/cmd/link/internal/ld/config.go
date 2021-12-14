@@ -20,7 +20,7 @@ import (
 type BuildMode uint8
 
 const (
-	BuildModeUnset BuildMode = iota  // 互斥的
+	BuildModeUnset BuildMode = iota // 互斥的
 	BuildModeExe
 	BuildModePIE
 	BuildModeCArchive
@@ -256,10 +256,17 @@ func mustLinkExternal(ctxt *Link) (res bool, reason string) {
 // It is called after flags are processed and inputs are processed,
 // so the ctxt.LinkMode variable has an initial value from the -linkmode
 // flag and the iscgo, externalobj, and unknownObjFormat variables are set.
+
+// linkmode决定方式
+//  - -ldflags="-linkmode=xx"
+//  - GO_EXTLINK_ENABLED环境变量
+//  - buildcfg.defaultGO_EXTLINK_ENABLED值
 func determineLinkMode(ctxt *Link) {
 	extNeeded, extReason := mustLinkExternal(ctxt)
 	via := ""
 
+	// flag.Var(&ctxt.LinkMode, "linkmode", "set link `mode`")
+	// 如果没有-ldflags="-linkmode=xx"参数则是这个默认值LinkAuto
 	if ctxt.LinkMode == LinkAuto {
 		// The environment variable GO_EXTLINK_ENABLED controls the
 		// default value of -linkmode. If it is not set when the
@@ -273,6 +280,10 @@ func determineLinkMode(ctxt *Link) {
 			ctxt.LinkMode = LinkExternal
 			via = "via GO_EXTLINK_ENABLED "
 		default:
+			// externalobj指输入的object文件是否有不是go生成的，比如gcc生成
+			// iscgo不一定就一定有gcc生成的.o，比如net包引入了runtime/cgo，但是不需要
+			// gcc来编译.o文件
+			// 不是直接引用runtime/cgo, 而是import "C"
 			if extNeeded || (iscgo && externalobj) {
 				ctxt.LinkMode = LinkExternal
 			} else {

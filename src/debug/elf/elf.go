@@ -617,6 +617,16 @@ func (i SectionIndex) GoString() string { return stringName(uint32(i), shnString
 // Section type.
 type SectionType uint32
 
+// link字段
+//   - SHT_DYNAMIC: string table used by entries in this section
+//   - SHT_HASH: symbol table to which the hash table applies
+//   - SHT_REL/SHT_RELA: symbol table references by relocations
+//   - SHT_SYMTAB/SHT_DYNSYM: string table used by entries in this section
+
+// info字段
+//   - SHT_REL/SHT_RELA: section index of section to which the relocations apply
+//   - SHT_SYMTAB/SHT_DYNSYM: index of first non-local symbol(i.e number of local symbols)
+
 const (
 	SHT_NULL           SectionType = 0          /* inactive */
 	SHT_PROGBITS       SectionType = 1          /* program defined information */

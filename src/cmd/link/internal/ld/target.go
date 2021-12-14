@@ -20,7 +20,7 @@ type Target struct {
 	BuildMode BuildMode
 
 	linkShared    bool
-	canUsePlugins bool
+	canUsePlugins bool // 代码中引用了"runtime/cgo"和"plugin"
 	IsELF         bool
 }
 

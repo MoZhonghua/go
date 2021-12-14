@@ -37,6 +37,8 @@ func WriteObjFile(ctxt *Link, b *bio.Writer) {
 	}
 
 	start := b.Offset()
+
+	// 把pkg列表展平，包括自己和依赖的pkg
 	w.init()
 
 	// Header
@@ -56,13 +58,15 @@ func WriteObjFile(ctxt *Link, b *bio.Writer) {
 		Fingerprint: ctxt.Fingerprint,
 		Flags:       flags,
 	}
+	// 此时offsets里还都是0
 	h.Write(w.Writer)
 
 	// String table
 	w.StringTable()
 
-	// Autolib
+	// Autolib: 指的就是ImportedPkg列表
 	h.Offsets[goobj.BlkAutolib] = w.Offset()
+
 	for i := range ctxt.Imports {
 		ctxt.Imports[i].Write(w.Writer)
 	}
@@ -654,7 +658,7 @@ func nAuxSym(s *LSym) int {
 
 // generate symbols for FuncInfo.
 func genFuncInfoSyms(ctxt *Link) {
-	infosyms := make([]*LSym, 0, len(ctxt.Text)) // dwarf相关的LSym
+	infosyms := make([]*LSym, 0, len(ctxt.Text))     // dwarf相关的LSym
 	hashedsyms := make([]*LSym, 0, 4*len(ctxt.Text)) // golang的runtime用的LSym，比如pcln，inltable等等
 	preparePcSym := func(s *LSym) *LSym {
 		if s == nil {

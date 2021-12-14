@@ -32,10 +32,11 @@ internal/ld/errors.go
 internal/ld/execarchive.go
 
 2021-12-13
-internal/ld/go.go ?
-internal/ld/ld.go ?
+internal/ld/go.go
+internal/ld/ld.go
 internal/ld/lib.go ?
-internal/amd64/*.go ?
 
+2021-12-14
 internal/loadelf/ldelf.go ?
+internal/amd64/*.go ?
 internal/loader/loader.go ?

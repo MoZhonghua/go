@@ -218,6 +218,8 @@ func setCgoAttr(ctxt *Link, file string, pkg string, directives [][]string, host
 				}
 			}
 
+			// 正常应该是返回函数定义本身的sym(type=STEXT), 但是//go:cgo_export local 没要求local一
+			// 定定义，可能返回一个新建的sym, type=Sxxx
 			s := l.LookupOrCreateSym(local, sym.ABIToVersion(abi))
 
 			if l.SymType(s) == sym.SHOSTOBJ {
@@ -242,6 +244,7 @@ func setCgoAttr(ctxt *Link, file string, pkg string, directives [][]string, host
 				su.SetType(0)
 			}
 
+			// 如果之前见过同名的//go:cgo_export_dynamic local, 因为下面会设置这两个Attr，一定有一个为真
 			if !(l.AttrCgoExportStatic(s) || l.AttrCgoExportDynamic(s)) {
 				l.SetSymExtname(s, remote)
 			} else if l.SymExtname(s) != remote {

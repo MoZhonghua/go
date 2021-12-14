@@ -884,18 +884,8 @@ func dynrelocsym(ctxt *Link, s loader.Sym) {
 			// don't worry if Adddynrel returns false.
 
 			// 注意会把ELF reloc 转换为go reloc!!
-			// 同时会把对外部变量的引用reloc转换为对PLT/GOT的reloc(会在PTL/GOT增加对应的项)
-			//   - r.Sym() = GOT/PLT
-			//   - r.Type() = R_PCREL
-			//   - r.Add() = 原来的r.Sym()在GOT/PLT对应项的偏移量
-			// 最终结果
-			//   - link-relocation: $offset(IP) -> GOT/PLT对应项
-			//   - load-relocation: 更新GOT/PLT指向原来的r.Sym()的真正地址
 
-			// dso访问自己内部定义func/data, 相对于IP的偏移量在link时可以计算出来，不需要
-			// load-relocation
-
-			// ./internal/amd64/asm.go:78
+			// ../amd64/asm.go:78
 			thearch.Adddynrel(target, ldr, syms, s, r, ri)
 			continue
 		}
@@ -1572,12 +1562,10 @@ func (ctxt *Link) dodata(symGroupType []sym.SymKind) {
 		machosymorder(ctxt)
 	}
 
-	// reloc 转换为 elf reloc, 普通exe/lib不用, *FlagD==true
-	// pie && linkinternal 时全部都是生成R_X86_64_RELATIVE类型的
-
-	// 可以通过file 命令判断最终最终生成的代码
-	// LD_DEBUG=statistics /tmp/main 实际调用了dynamic loader!!
-	// LD_DEBUG=help cat
+	// 为buildmode=pie, linkinternal重新处理reloc
+	//  - load-relocation只需要R_X86_64_RELATIVE
+	//    * 只在data -> data引用时需要，代码中都是ip-relative，不需要load-relocation
+	//  - 其他都可以转成go reloc，只需要link-relocation
 	state.dynreloc(ctxt)
 
 	// Move any RO data with relocations to a separate section.

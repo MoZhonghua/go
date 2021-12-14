@@ -96,30 +96,32 @@ import (
 // ArchSyms holds a number of architecture specific symbols used during
 // relocation.  Rather than allowing them universal access to all symbols,
 // we keep a subset for relocation application.
-type ArchSyms struct {
-	Rel     loader.Sym
-	Rela    loader.Sym
-	RelPLT  loader.Sym
-	RelaPLT loader.Sym
+type ArchSyms struct { // 嵌入到Link中
+	Rel     loader.Sym // .rel
+	Rela    loader.Sym // .rela amd64都是用rela
+	RelPLT  loader.Sym // .rel.plt
+	RelaPLT loader.Sym // .rela.plt
 
+	// for darwin
 	LinkEditGOT loader.Sym
 	LinkEditPLT loader.Sym
 
+	// for ppc64
 	TOC    loader.Sym
 	DotTOC []loader.Sym // for each version
 
-	GOT    loader.Sym
-	PLT    loader.Sym
-	GOTPLT loader.Sym
+	GOT    loader.Sym // .got
+	PLT    loader.Sym // .plt
+	GOTPLT loader.Sym // .got.plt, 给plt专用GOT, 前三项保留，lazy-reloc用
 
-	Tlsg      loader.Sym
+	Tlsg      loader.Sym // .tbss
 	Tlsoffset int
 
-	Dynamic loader.Sym
-	DynSym  loader.Sym
-	DynStr  loader.Sym
+	Dynamic loader.Sym // .dynamic
+	DynSym  loader.Sym // .dynsym
+	DynStr  loader.Sym // .dynstr
 
-	unreachableMethod loader.Sym
+	unreachableMethod loader.Sym // runtime.unreachableMethod(), 里面直接throw()
 }
 
 // mkArchSym is a helper for setArchSyms, to set up a special symbol.
@@ -177,18 +179,26 @@ func (ctxt *Link) setArchSyms() {
 }
 
 type Arch struct {
-	Funcalign  int
-	Maxalign   int
-	Minalign   int
-	Dwarfregsp int
-	Dwarfreglr int
+	Funcalign int
+	Maxalign  int
+	Minalign  int
+
+	// <System V Application Binary Interface: AMD64 Architecture Processor Supplement>>
+	// Figure 3.36: DWARF Register Number Mapping
+	Dwarfregsp int // =7
+	Dwarfreglr int // =16
 
 	// Threshold of total text size, used for trampoline insertion. If the total
 	// text size is smaller than TrampLimit, we won't need to insert trampolines.
 	// It is pretty close to the offset range of a direct CALL machine instruction.
 	// We leave some room for extra stuff like PLT stubs.
+	// 一般就是call/jmp指令中最大的offset，如果.text超过这个范围就不能通过near jump跳转会在当前函数
+	// 后面为每个call生成一个trampline函数，原来的call name1 变成 call name1.trampline
+	// name1.trampline里通过long jump跳转
+	// amd64中=0无限制
 	TrampLimit uint64
 
+	// ld.so文件路径, 写入到.interp section, 同时PT_INTERP这个program header记录
 	Androiddynld   string
 	Linuxdynld     string
 	Freebsddynld   string
@@ -201,14 +211,16 @@ type Arch struct {
 	// For example an architecture might want to pad with a trap instruction to
 	// catch wayward programs. Architectures that do not define a padding value
 	// are padded with zeros.
-	CodePad []byte
+	CodePad []byte // [0xcc] int3
 
 	// Plan 9 variables.
 	Plan9Magic  uint32
 	Plan9_64Bit bool
 
+	// ../amd64/asm.go:80
 	Adddynrel func(*Target, *loader.Loader, *ArchSyms, loader.Sym, loader.Reloc, int) bool
-	Archinit  func(*Link)
+
+	Archinit func(*Link)
 	// Archreloc is an arch-specific hook that assists in relocation processing
 	// (invoked by 'relocsym'); it handles target-specific relocation tasks.
 	// Here "rel" is the current relocation being examined, "sym" is the symbol
@@ -234,7 +246,7 @@ type Arch struct {
 
 	// Generate a trampoline for a call from s to rs if necessary. ri is
 	// index of the relocation.
-	Trampoline func(ctxt *Link, ldr *loader.Loader, ri int, rs, s loader.Sym)
+	Trampoline func(ctxt *Link, ldr *loader.Loader, ri int, rs, s loader.Sym) // AMD64 nil
 
 	// Assembling the binary breaks into two phases, writing the code/data/
 	// dwarf information (which is rather generic), and some more architecture
@@ -243,17 +255,18 @@ type Arch struct {
 	// every architecture, but only if architecture has an Asmb function will
 	// it be used for assembly.  Otherwise a generic assembly Asmb function is
 	// used.
-	Asmb  func(*Link, *loader.Loader)
-	Asmb2 func(*Link, *loader.Loader)
+	Asmb  func(*Link, *loader.Loader) // AMD64 nil
+	Asmb2 func(*Link, *loader.Loader) // AMD64 nil
 
 	// Extreloc is an arch-specific hook that converts a Go relocation to an
 	// external relocation. Return the external relocation and whether it is
 	// needed.
 	Extreloc func(*Target, *loader.Loader, loader.Reloc, loader.Sym) (loader.ExtReloc, bool)
 
-	Elfreloc1      func(*Link, *OutBuf, *loader.Loader, loader.Sym, loader.ExtReloc, int, int64) bool
-	ElfrelocSize   uint32 // size of an ELF relocation record, must match Elfreloc1.
-	Elfsetupplt    func(ctxt *Link, plt, gotplt *loader.SymbolBuilder, dynamic loader.Sym)
+	Elfreloc1    func(*Link, *OutBuf, *loader.Loader, loader.Sym, loader.ExtReloc, int, int64) bool
+	ElfrelocSize uint32 // size of an ELF relocation record, must match Elfreloc1.
+	Elfsetupplt  func(ctxt *Link, plt, gotplt *loader.SymbolBuilder, dynamic loader.Sym)
+	// AMD64中生成一个.init项，注册moduledata
 	Gentext        func(*Link, *loader.Loader) // Generate text before addressing has been performed.
 	Machoreloc1    func(*sys.Arch, *OutBuf, *loader.Loader, loader.Sym, loader.ExtReloc, int64) bool
 	MachorelocSize uint32 // size of an Mach-O relocation record, must match Machoreloc1.
@@ -262,7 +275,7 @@ type Arch struct {
 
 	// Generate additional symbols for the native symbol table just prior to
 	// code generation.
-	GenSymsLate func(*Link, *loader.Loader)
+	GenSymsLate func(*Link, *loader.Loader) // AMD64 nil
 
 	// https://docs.oracle.com/cd/E18752_01/html/817-1984/chapter8-20.html
 	// 访问TLS有多种方式:
@@ -292,9 +305,9 @@ type Arch struct {
 var (
 	thearch Arch
 	lcSize  int32
-	rpath   Rpath
+	rpath   Rpath // .dynamic 中 DT_RUNPATH
 	spSize  int32
-	symSize int32
+	symSize int32 // 指.symtab的总大小，symtab.go中更新
 )
 
 const (
@@ -328,7 +341,7 @@ var (
 	ldflag          []string
 	havedynamic     int
 	Funcalign       int
-	iscgo           bool
+	iscgo           bool // ctxt.LibraryByPkg["runtime/cgo"] != nil
 	elfglobalsymndx int
 	interpreter     string
 
@@ -368,6 +381,7 @@ var (
 	theline string
 )
 
+// -L xxx
 func Lflag(ctxt *Link, arg string) {
 	ctxt.Libdir = append(ctxt.Libdir, arg)
 }
@@ -403,6 +417,10 @@ func libinit(ctxt *Link) {
 		suffix = "msan"
 	}
 
+	// $GOROOT/pkg/linux_amd64/
+	// $GOROOT/pkg/linux_amd64_shared/ (link -installsuffix shared -buildmode=pie)
+	// $GOROOT/pkg/linux_amd64_race/
+	// $GOROOT/pkg/linux_amd64_msan/
 	Lflag(ctxt, filepath.Join(buildcfg.GOROOT, "pkg", fmt.Sprintf("%s_%s%s%s", buildcfg.GOOS, buildcfg.GOARCH, suffixsep, suffix)))
 
 	mayberemoveoutfile()
@@ -438,6 +456,7 @@ func errorexit() {
 	Exit(0)
 }
 
+// 用一个假的引用者"internal"导入name
 func loadinternal(ctxt *Link, name string) *sym.Library {
 	zerofp := goobj.FingerprintType{}
 	if ctxt.linkShared && ctxt.PackageShlib != nil {
@@ -493,6 +512,7 @@ func (ctxt *Link) findLibPathCmd(cmd, libname string) string {
 	if ctxt.Debugvlog != 0 {
 		ctxt.Logf("%s %v\n", extld, args)
 	}
+
 	out, err := exec.Command(extld, args...).Output()
 	if err != nil {
 		if ctxt.Debugvlog != 0 {
@@ -537,6 +557,7 @@ func (ctxt *Link) loadlib() {
 			if ctxt.Debugvlog > 1 {
 				ctxt.Logf("autolib: %s (from %s)\n", lib.File, lib.Objref)
 			}
+			// 读文件，并且会解析依赖项
 			loadobjfile(ctxt, lib)
 		}
 	}
@@ -567,8 +588,6 @@ func (ctxt *Link) loadlib() {
 
 	// We now have enough information to determine the link mode.
 	determineLinkMode(ctxt)
-
-	fmt.Printf("buildmode = %v; linkmode = %v\n", ctxt.BuildMode.String(), ctxt.LinkMode.String())
 
 	if ctxt.LinkMode == LinkExternal && !iscgo && !(buildcfg.GOOS == "darwin" && ctxt.BuildMode != BuildModePlugin && ctxt.Arch.Family == sys.AMD64) {
 		// This indicates a user requested -linkmode=external.
@@ -605,8 +624,10 @@ func (ctxt *Link) loadlib() {
 	ctxt.loadcgodirectives()
 
 	// Conditionally load host objects, or setup for external linking.
-	hostobjs(ctxt)
-	hostlinksetup(ctxt)
+	hostobjs(ctxt)  // only for LinkInternal
+
+	// 关闭ctxt.Out，然后重新打开输出到/tmpdir/go.o，最终结果由extld来输出
+	hostlinksetup(ctxt) // only for LinkExternal
 
 	if ctxt.LinkMode == LinkInternal && len(hostobj) != 0 {
 		// If we have any undefined symbols in external
@@ -618,6 +639,8 @@ func (ctxt *Link) loadlib() {
 		}
 		if any {
 			if *flagLibGCC == "" {
+				// gcc --print-libgcc-file-name
+				//   /usr/lib/gcc/x86_64-pc-linux-gnu/11.1.0/libgcc.a
 				*flagLibGCC = ctxt.findLibPathCmd("--print-libgcc-file-name", "libgcc")
 			}
 			if runtime.GOOS == "openbsd" && *flagLibGCC == "libgcc.a" {
@@ -648,6 +671,7 @@ func (ctxt *Link) loadlib() {
 				*/
 			}
 			if *flagLibGCC != "none" {
+				// 此时*flagLibGCC = /usr/lib/gcc/x86_64-pc-linux-gnu/11.1.0/libgcc.a
 				hostArchive(ctxt, *flagLibGCC)
 			}
 		}
@@ -659,6 +683,9 @@ func (ctxt *Link) loadlib() {
 	importcycles()
 
 	strictDupMsgCount = ctxt.loader.NStrictDupMsgs()
+
+	fmt.Printf("buildmode = %v; linkmode = %v; ", ctxt.BuildMode.String(), ctxt.LinkMode.String())
+	fmt.Printf("iscgo = %v; externalobj = %v; tmpdir=%v\n", iscgo, externalobj, *flagTmpdir)
 }
 
 // loadcgodirectives reads the previously discovered cgo directives, creating
@@ -667,6 +694,7 @@ func (ctxt *Link) loadcgodirectives() {
 	l := ctxt.loader
 	hostObjSyms := make(map[loader.Sym]struct{})
 	for _, d := range ctxt.cgodata {
+		// hostObjSyms存的是静态链接的符号，也就是link自己能处理的?
 		setCgoAttr(ctxt, d.file, d.pkg, d.directives, hostObjSyms)
 	}
 	ctxt.cgodata = nil
@@ -684,7 +712,7 @@ func (ctxt *Link) loadcgodirectives() {
 				if l.SymExtname(symIdx) != "" && l.SymDynimplib(symIdx) != "" && !(l.AttrCgoExportStatic(symIdx) || l.AttrCgoExportDynamic(symIdx)) {
 					su.SetType(sym.SDYNIMPORT)
 				} else {
-					su.SetType(0)
+					su.SetType(0) // Sxxx
 				}
 			}
 		}
@@ -767,7 +795,9 @@ func (ctxt *Link) linksetup() {
 		moduledata = ctxt.loader.LookupOrCreateSym("runtime.firstmoduledata", 0)
 		mdsb = ctxt.loader.MakeSymbolUpdater(moduledata)
 	}
+
 	if mdsb.Type() != 0 && mdsb.Type() != sym.SDYNIMPORT {
+		// 正常情况下都是走这个逻辑。因为都会runtime.a
 		// If the module (toolchain-speak for "executable or shared
 		// library") we are linking contains the runtime package, it
 		// will define the runtime.firstmoduledata symbol and we
@@ -797,6 +827,7 @@ func (ctxt *Link) linksetup() {
 			sb.AddUint8(1) // true bool
 		}
 	} else {
+		// OTOH = On The Other Hand
 		// If OTOH the module does not contain the runtime package,
 		// create a local symbol for the moduledata.
 		moduledata = ctxt.loader.LookupOrCreateSym("local.moduledata", 0)
@@ -832,6 +863,8 @@ func (ctxt *Link) linksetup() {
 	ctxt.Textp = ctxt.loader.AssignTextSymbolOrder(ctxt.Library, intlibs, ctxt.Textp)
 }
 
+
+// 只用处理type.xxx这样的sym
 // mangleTypeSym shortens the names of symbols that represent Go types
 // if they are visible in the symbol table.
 //
@@ -875,7 +908,7 @@ func (ctxt *Link) mangleTypeSym() {
 				st := ldr.SymType(s)
 				dt := ldr.SymType(dup)
 				if st == sym.Sxxx && dt != sym.Sxxx {
-					ldr.CopySym(dup, s)
+					ldr.CopySym(dup, s) // copy dup to s
 				}
 			}
 		}
@@ -888,6 +921,7 @@ func (ctxt *Link) mangleTypeSym() {
 // DWARF generator) know means the symbol is not decodable.
 // Leave type.runtime. symbols alone, because other parts of
 // the linker manipulates them.
+// type.very_long_name => type.hash
 func typeSymbolMangle(name string) string {
 	if !strings.HasPrefix(name, "type.") {
 		return name
@@ -938,6 +972,10 @@ func nextar(bp *bio.Reader, off int64, a *ArHdr) int64 {
 	return arsize + SAR_HDR
 }
 
+// 只能加载.a, .o文件，不能加载dso(lib.Shlib != "")
+// cgo中自动生成.c文件会通过gcc编译为_x001.o, _x002.o等，然后和_go_.o一起打包到_pkg_.a
+// _go_.o go object
+// _x001.o elf object
 func loadobjfile(ctxt *Link, lib *sym.Library) {
 	pkg := objabi.PathToPrefix(lib.Pkg)
 
@@ -1036,9 +1074,12 @@ var internalpkg = []string{
 	"runtime/msan",
 }
 
+// 加载非go object, 比如elf object; 这里只是创建Hostobj对象，还没有真正调用ld()来加载
+// 如果是不认识的object文件类型，ld为nil
 func ldhostobj(ld func(*Link, *bio.Reader, string, int64, string), headType objabi.HeadType, f *bio.Reader, pkg string, length int64, pn string, file string) *Hostobj {
 	isinternal := false
 	for _, intpkg := range internalpkg {
+		// 这些pkg对应的_pkg_.a中包含_x001.o这样的gcc编译的elf object，特别处理
 		if pkg == intpkg {
 			isinternal = true
 			break
@@ -1246,11 +1287,13 @@ func (ctxt *Link) archive() {
 	}
 }
 
+// 调用extld完成最后操作
 func (ctxt *Link) hostlink() {
 	if ctxt.LinkMode != LinkExternal || nerrors > 0 {
 		return
 	}
 	if ctxt.BuildMode == BuildModeCArchive {
+		// 这种情况由上面的 archive() 处理
 		return
 	}
 
@@ -1810,6 +1853,9 @@ var wantHdr = objabi.HeaderString()
 // compiled by a non-Go compiler) it returns the Hostobj pointer. If
 // it is a Go object, it returns nil.
 func ldobj(ctxt *Link, f *bio.Reader, lib *sym.Library, length int64, pn string, file string) *Hostobj {
+	// lib.Pkg="main"
+	// pn="$WORK/b001/_pkg_.a(_x001.o)"
+	// file="_x001.o"
 	pkg := objabi.PathToPrefix(lib.Pkg)
 
 	eof := f.Offset() + length
@@ -1820,7 +1866,7 @@ func ldobj(ctxt *Link, f *bio.Reader, lib *sym.Library, length int64, pn string,
 	c4 := bgetc(f)
 	f.MustSeek(start, 0)
 
-	unit := &sym.CompilationUnit{Lib: lib}
+	unit := &sym.CompilationUnit{Lib: lib} // 每个.o对应一个CU
 	lib.Units = append(lib.Units, unit)
 
 	magic := uint32(c1)<<24 | uint32(c2)<<16 | uint32(c3)<<8 | uint32(c4)
@@ -1869,6 +1915,7 @@ func ldobj(ctxt *Link, f *bio.Reader, lib *sym.Library, length int64, pn string,
 	}
 
 	if c1 == 0x01 && (c2 == 0xD7 || c2 == 0xF7) {
+		// a.out
 		ldxcoff := func(ctxt *Link, f *bio.Reader, pkg string, length int64, pn string) {
 			textp, err := loadxcoff.Load(ctxt.loader, ctxt.Arch, ctxt.IncVersion(), f, pkg, length, pn)
 			if err != nil {
@@ -1895,6 +1942,9 @@ func ldobj(ctxt *Link, f *bio.Reader, lib *sym.Library, length int64, pn string,
 		return nil
 	}
 
+	// go object linux amd64 go1.17.2 X:regabiwrappers,regabig,regabireflect,regabidefer,regabiargs
+	// ... \n!\n
+
 	if !strings.HasPrefix(line, "go object ") {
 		if strings.HasSuffix(pn, ".go") {
 			Exitf("%s: uncompiled .go source file", pn)
@@ -1912,6 +1962,7 @@ func ldobj(ctxt *Link, f *bio.Reader, lib *sym.Library, length int64, pn string,
 	}
 
 	// First, check that the basic GOOS, GOARCH, and Version match.
+	// 必须用相同的配置编译，主要是go tool版本和GOEXPERIMENT配置
 	if line != wantHdr {
 		Errorf(nil, "%s: linked object header mismatch:\nhave %q\nwant %q\n", pn, line, wantHdr)
 	}
@@ -1951,6 +2002,7 @@ func ldobj(ctxt *Link, f *bio.Reader, lib *sym.Library, length int64, pn string,
 	import1 := f.Offset()
 
 	f.MustSeek(import0, 0)
+	// 注意这里加载不是整个go object，而是读取了文件开始的信息
 	ldpkg(ctxt, f, lib, import1-import0-2, pn) // -2 for !\n
 	f.MustSeek(import1, 0)
 
