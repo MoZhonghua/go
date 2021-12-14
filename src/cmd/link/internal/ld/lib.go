@@ -624,7 +624,7 @@ func (ctxt *Link) loadlib() {
 	ctxt.loadcgodirectives()
 
 	// Conditionally load host objects, or setup for external linking.
-	hostobjs(ctxt)  // only for LinkInternal
+	hostobjs(ctxt) // only for LinkInternal
 
 	// 关闭ctxt.Out，然后重新打开输出到/tmpdir/go.o，最终结果由extld来输出
 	hostlinksetup(ctxt) // only for LinkExternal
@@ -862,7 +862,6 @@ func (ctxt *Link) linksetup() {
 	}
 	ctxt.Textp = ctxt.loader.AssignTextSymbolOrder(ctxt.Library, intlibs, ctxt.Textp)
 }
-
 
 // 只用处理type.xxx这样的sym
 // mangleTypeSym shortens the names of symbols that represent Go types
@@ -2201,7 +2200,7 @@ func ldshlibsyms(ctxt *Link, shlib string) {
 			continue
 		}
 		su := l.MakeSymbolUpdater(s)
-		su.SetType(sym.SDYNIMPORT)
+		su.SetType(sym.SDYNIMPORT) // 从.so文件中加载的sym标记为SDYNIMPORT
 		l.SetSymElfType(s, elf.ST_TYPE(elfsym.Info))
 		su.SetSize(int64(elfsym.Size))
 		if elfsym.Section != elf.SHN_UNDEF {
@@ -2229,6 +2228,7 @@ func ldshlibsyms(ctxt *Link, shlib string) {
 			}
 			su := l.MakeSymbolUpdater(alias)
 			su.SetType(sym.SABIALIAS)
+			// informational relocation, size=0
 			r, _ := su.AddRel(0) // type doesn't matter
 			r.SetSym(s)
 		}
@@ -2236,6 +2236,7 @@ func ldshlibsyms(ctxt *Link, shlib string) {
 	ctxt.Shlibs = append(ctxt.Shlibs, Shlib{Path: libpath, Hash: hash, Deps: deps, File: f})
 }
 
+// sym.Section是通用section结构，可以对应到ELF, PE, XCOFF, MACHO多种文件的section
 func addsection(ldr *loader.Loader, arch *sys.Arch, seg *sym.Segment, name string, rwx int) *sym.Section {
 	sect := ldr.NewSection()
 	sect.Rwx = uint8(rwx)
@@ -2256,6 +2257,10 @@ func haslinkregister(ctxt *Link) bool {
 	return ctxt.FixedFrameSize() != 0
 }
 
+// 返回地址两种方式:
+//  - lr register
+//  - auto-push to stack
+// 不会并存
 func callsize(ctxt *Link) int {
 	if haslinkregister(ctxt) {
 		return 0
@@ -2312,6 +2317,7 @@ func (ctxt *Link) dostkcheck() {
 	}
 }
 
+// 其实就是DFS，深度优先便利调用关系
 func (sc *stkChk) check(up *chain, depth int) int {
 	limit := up.limit
 	s := up.sym
@@ -2484,7 +2490,7 @@ const (
 	TLSSym       SymbolType = 't'
 	FrameSym     SymbolType = 'm'
 	ParamSym     SymbolType = 'p'
-	AutoSym      SymbolType = 'a'
+	AutoSym      SymbolType = 'a' // local variables?
 
 	// Deleted auto (not a real sym, just placeholder for type)
 	DeletedAutoSym = 'x'
@@ -2494,7 +2500,7 @@ const (
 func (ctxt *Link) defineInternal(p string, t sym.SymKind) loader.Sym {
 	s := ctxt.loader.CreateSymForUpdate(p, 0)
 	s.SetType(t)
-	s.SetSpecial(true)
+	s.SetSpecial(true) // Value不是sym的地址
 	s.SetLocal(true)
 	return s.Sym()
 }
@@ -2505,7 +2511,9 @@ func (ctxt *Link) xdefine(p string, t sym.SymKind, v int64) loader.Sym {
 	return s
 }
 
+// 返回的是s的fileoff
 func datoff(ldr *loader.Loader, s loader.Sym, addr int64) int64 {
+	// Segtext.vaddr一定是小于Segdata.Vaddr
 	if uint64(addr) >= Segdata.Vaddr {
 		return int64(uint64(addr) - Segdata.Vaddr + Segdata.Fileoff)
 	}
@@ -2516,6 +2524,7 @@ func datoff(ldr *loader.Loader, s loader.Sym, addr int64) int64 {
 	return 0
 }
 
+// 计算ELF.entry_point, _rt0_amd64_linux _rt0_<GOARCH>_<GOOS>
 func Entryvalue(ctxt *Link) int64 {
 	a := *flagEntrySymbol
 	if a[0] >= '0' && a[0] <= '9' {
@@ -2609,6 +2618,8 @@ func dfs(lib *sym.Library, mark map[*sym.Library]markKind, order *[]*sym.Library
 	*order = append(*order, lib)
 }
 
+// 这个映射关系是在symtab.go生成.symtab时创建
+// go sym -> elf sym index
 func ElfSymForReloc(ctxt *Link, s loader.Sym) int32 {
 	// If putelfsym created a local version of this symbol, use that in all
 	// relocations.
@@ -2620,6 +2631,13 @@ func ElfSymForReloc(ctxt *Link, s loader.Sym) int32 {
 	}
 }
 
+// 在GOT中增加一项，可能是.got或者.got.plt, 实际要增加3个:
+//  - .dynsym中增加被引用的sym对应的elf sym
+//  - .got 写入8字节
+//  - .rela增加一个elf relocation
+//     - offset要指向s在GOT中的offset, 本身也是一个relocation: R_ADDR => Value(got) + Offset
+//     - info: elf_sym_idx要是s在.dynsym中的索引，reloc_type为参数指定值
+//     - adddend: 0
 func AddGotSym(target *Target, ldr *loader.Loader, syms *ArchSyms, s loader.Sym, elfRelocTyp uint32) {
 	if ldr.SymGot(s) >= 0 {
 		return
@@ -2632,8 +2650,12 @@ func AddGotSym(target *Target, ldr *loader.Loader, syms *ArchSyms, s loader.Sym,
 
 	if target.IsElf() {
 		if target.Arch.PtrSize == 8 {
+			// 规范要求amd64一定是使用rela
 			rela := ldr.MakeSymbolUpdater(syms.Rela)
+			// offset本身也是一个relocation， R_ADDR，最终结果为: Value(got) + Offset of s in got
 			rela.AddAddrPlus(target.Arch, got.Sym(), int64(ldr.SymGot(s)))
+
+			// elfadddynsym()会设置SetSymDynid(), 因此elf_sym_idx是在.dynsym中的idx
 			rela.AddUint64(target.Arch, elf.R_INFO(uint32(ldr.SymDynid(s)), elfRelocTyp))
 			rela.AddUint64(target.Arch, 0)
 		} else {
