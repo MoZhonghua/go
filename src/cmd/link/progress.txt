@@ -37,6 +37,8 @@ internal/ld/ld.go
 
 2021-12-14
 internal/ld/lib.go
-internal/loadelf/ldelf.go ?
-internal/amd64/*.go ?
+internal/loadelf/ldelf.go
+internal/amd64/l.go
+internal/amd64/asm.go
+internal/amd64/obj.go
 internal/loader/loader.go ?

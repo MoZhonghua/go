@@ -11,7 +11,10 @@ import (
 const (
 	SymVerABI0        = 0
 	SymVerABIInternal = 1
-	// 只要大于等于这个值都认为是Static symbol
+
+	// 每加载一个hostobj .o文件 ctxt.version+1，也就是分配独立的命名空间，因为查找时是<name, ver>来
+	// 唯一确定sym的
+	// go object的sym只能是0/1，也就是全部在同一个命名空间里
 	SymVerStatic      = 10 // Minimum version used by static (file-local) syms
 )
 

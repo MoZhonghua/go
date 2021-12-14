@@ -40,15 +40,15 @@ func Init() (*sys.Arch, ld.Arch) {
 	arch := sys.ArchAMD64
 
 	theArch := ld.Arch{
-		Funcalign:  funcAlign,
-		Maxalign:   maxAlign,
-		Minalign:   minAlign,
-		Dwarfregsp: dwarfRegSP,
+		Funcalign:  funcAlign,  // 32, 函数体必须32整数倍，int3指令补齐
+		Maxalign:   maxAlign,   // 32
+		Minalign:   minAlign,   // 1
+		Dwarfregsp: dwarfRegSP, // 7
 		// .debug_frame通过CIE和FDE生成每个register的计算方式
 		// 16这个虚拟表示返回值，计算方式为*(CFA-8)
 		Dwarfreglr: dwarfRegLR, // dwarf规范中规定16
 		// 0xCC is INT $3 - breakpoint instruction
-		CodePad: []byte{0xCC},
+		CodePad: []byte{0xCC}, // int3
 
 		Plan9Magic:  uint32(4*26*26 + 7),
 		Plan9_64Bit: true,
@@ -109,7 +109,9 @@ func archinit(ctxt *ld.Link) {
 		objabi.Hsolaris:   /* solaris */
 		ld.Elfinit(ctxt)
 
-		ld.HEADR = ld.ELFRESERVE
+		// .text的vaddr为4M+4K, 在文件中偏移量为4K, 文件偏移量0对应的vaddr是4M
+		// start vaddr为4M
+		ld.HEADR = ld.ELFRESERVE // 4k
 		if *ld.FlagTextAddr == -1 {
 			// 4M + 4K
 			*ld.FlagTextAddr = (1 << 22) + int64(ld.HEADR)

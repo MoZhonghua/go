@@ -63,12 +63,13 @@ type ElfSect struct {
 	info        uint32
 	align       uint64
 	entsize     uint64
-	base        []byte
+	base        []byte // mmap section内容
 	readOnlyMem bool // Is this section in readonly memory?
 	sym         loader.Sym
 }
 
 type ElfObj struct {
+	// 可能是单独的.o文件，也可能是在.a中，此时base!=0
 	f         *bio.Reader
 	base      int64 // offset in f where ELF begins
 	length    int64 // length of ELF
@@ -77,11 +78,11 @@ type ElfObj struct {
 	e         binary.ByteOrder
 	sect      []ElfSect
 	nsect     uint
-	nsymtab   int
+	nsymtab   int  // 不是symtab section个数，而是.symtab中符号的个数
 	symtab    *ElfSect
 	symstr    *ElfSect
 	type_     uint32
-	machine   uint32
+	machine   uint32  //基本就是对应elf.Header64中字段
 	version   uint32
 	entry     uint64
 	phoff     uint64
@@ -95,8 +96,11 @@ type ElfObj struct {
 	shstrndx  uint32
 }
 
+
 type ElfSym struct {
 	name  string
+
+	// 对ELF来说每个Sym只有一个唯一的uint64值，不是指Sym本身的内容, 一般是vaddr/offset in section/const value
 	value uint64
 	size  uint64
 	bind  elf.SymBind
@@ -127,6 +131,7 @@ type elfAttributeList struct {
 	err  error
 }
 
+// 读取一个\0结尾的字符串
 func (a *elfAttributeList) string() string {
 	if a.err != nil {
 		return ""
@@ -254,7 +259,7 @@ func Load(l *loader.Loader, arch *sys.Arch, localSymVersion int, f *bio.Reader, 
 
 	base := f.Offset()
 
-	var hdrbuf [64]byte
+	var hdrbuf [64]byte // e_ident实际只有16字节
 	if _, err := io.ReadFull(f, hdrbuf[:]); err != nil {
 		return errorf("malformed elf file: %v", err)
 	}
@@ -443,11 +448,19 @@ func Load(l *loader.Loader, arch *sys.Arch, localSymVersion int, f *bio.Reader, 
 	// load string table for symbols into memory.
 	elfobj.symtab = section(elfobj, ".symtab")
 
+	// link的输入有elf object时，只能走linkexternal方式。link要处理的仅仅是
+	// 把go object转换为elf object, 设置好go引用elf sym的数据。然后由extld把
+	// 所有的elf object链接成exe/dso
+
+	// 特例: 几个标准库中的package(net, runtime/cgo...)用了cgo，也就是_pkg_.a中有gcc编译的.o文件，还
+	// 是走linkinternal
+	// ../ld/lib.go:1085
 	if elfobj.symtab == nil {
 		// our work is done here - no symbols means nothing can refer to this file
 		return
 	}
 
+	// .symtab的link字段指向对应.symstr section, info字段是local sym的个数
 	if elfobj.symtab.link <= 0 || elfobj.symtab.link >= uint32(elfobj.nsect) {
 		return errorf("elf object has symbol table with invalid string table link")
 	}
@@ -511,6 +524,8 @@ func Load(l *loader.Loader, arch *sys.Arch, localSymVersion int, f *bio.Reader, 
 		}
 		sectsymNames[name] = true
 
+		// 每个host object使用独立的sym version, 也就是有独立的命名空间
+		// 查找sym的时候是<name, version>，这样不同object中的同名sym不是同一个
 		sb := l.MakeSymbolUpdater(lookup(name, localSymVersion))
 
 		switch sect.flags & (elf.SHF_ALLOC | elf.SHF_WRITE | elf.SHF_EXECINSTR) {
@@ -558,6 +573,12 @@ func Load(l *loader.Loader, arch *sys.Arch, localSymVersion int, f *bio.Reader, 
 		if elfsym.type_ != elf.STT_FUNC && elfsym.type_ != elf.STT_OBJECT && elfsym.type_ != elf.STT_NOTYPE && elfsym.type_ != elf.STT_COMMON {
 			continue
 		}
+
+		// 特殊含义
+		// The symbol labels a common block that has not yet been allocated. The symbol's value
+		// gives alignment constraints, similar to a section's sh_addralign member. That is, the
+		// link editor will allocate the storage for the symbol at an address that is a multiple of
+		// st_value. The symbol's size tells how many bytes are required.
 		if elfsym.shndx == elf.SHN_COMMON || elfsym.type_ == elf.STT_COMMON {
 			sb := l.MakeSymbolUpdater(elfsym.sym)
 			if uint64(sb.Size()) < elfsym.size {
@@ -577,6 +598,7 @@ func Load(l *loader.Loader, arch *sys.Arch, localSymVersion int, f *bio.Reader, 
 		if elfsym.sym == 0 {
 			continue
 		}
+
 		sect = &elfobj.sect[elfsym.shndx]
 		if sect.sym == 0 {
 			if strings.HasPrefix(elfsym.name, ".Linfo_string") { // clang does this
@@ -604,6 +626,9 @@ func Load(l *loader.Loader, arch *sys.Arch, localSymVersion int, f *bio.Reader, 
 
 		s := elfsym.sym
 		if l.OuterSym(s) != 0 {
+			// 注意每个host obj中的local symbol是独立的ver
+			// - 在其他obj定义过，都是是global symbol
+			// - 在这个.o中定义过，是local symbol
 			if l.AttrDuplicateOK(s) {
 				continue
 			}
@@ -611,11 +636,14 @@ func Load(l *loader.Loader, arch *sys.Arch, localSymVersion int, f *bio.Reader, 
 				l.SymName(s), l.SymName(l.OuterSym(s)), l.SymName(sect.sym))
 		}
 
+		// elf object(.o), st_value holds a section offset for a defined symbol
 		sectsb := l.MakeSymbolUpdater(sect.sym)
 		sb := l.MakeSymbolUpdater(s)
 
+		// 注意.symtab中没有说明sym的类型，只能根据section type和flag判断也就是同一个section中的所有
+		// sym都是一种类型
 		sb.SetType(sectsb.Type())
-		sectsb.AddInteriorSym(s)
+		sectsb.AddInteriorSym(s) // s.OuterSym = sectsb
 		if !l.AttrCgoExportDynamic(s) {
 			sb.SetDynimplib("") // satisfy dynimport
 		}
@@ -741,6 +769,7 @@ func Load(l *loader.Loader, arch *sys.Arch, localSymVersion int, f *bio.Reader, 
 				rSym = 0
 			} else {
 				var elfsym ElfSym
+				// 这里只是检查一下symIdx在.symtab是指向一个合法的sym entry
 				if err := readelfsym(newSym, lookup, l, arch, elfobj, int(symIdx), &elfsym, 0, 0); err != nil {
 					return errorf("malformed elf file: %v", err)
 				}
@@ -878,6 +907,8 @@ func readelfsym(newSym, lookup func(string, int) loader.Sym, l *loader.Loader, a
 				// TODO(minux): correctly handle __i686.get_pc_thunk.bx without
 				// set dupok generally. See https://golang.org/cl/5823055
 				// comment #5 for details.
+				// A symbol's visibility, determined from its st_other field
+				// 2 => STV_HIDDEN
 				if s != 0 && elfsym.other == 2 {
 					if !l.IsExternal(s) {
 						l.MakeSymbolUpdater(s)

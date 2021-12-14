@@ -263,6 +263,7 @@ type Arch struct {
 	// needed.
 	Extreloc func(*Target, *loader.Loader, loader.Reloc, loader.Sym) (loader.ExtReloc, bool)
 
+	// 注意offset, info, addend都已经确定, 写入后没有link-reloc来修改
 	Elfreloc1    func(*Link, *OutBuf, *loader.Loader, loader.Sym, loader.ExtReloc, int, int64) bool
 	ElfrelocSize uint32 // size of an ELF relocation record, must match Elfreloc1.
 	Elfsetupplt  func(ctxt *Link, plt, gotplt *loader.SymbolBuilder, dynamic loader.Sym)
@@ -2674,6 +2675,8 @@ func AddGotSym(target *Target, ldr *loader.Loader, syms *ArchSyms, s loader.Sym,
 			// 规范要求amd64一定是使用rela
 			rela := ldr.MakeSymbolUpdater(syms.Rela)
 			// offset本身也是一个relocation， R_ADDR，最终结果为: Value(got) + Offset of s in got
+			// elf reloc的offset在.o中为offset of section. 在exe和dso中为vaddr, load时修改的数据位置
+			// 为vaddr + program base
 			rela.AddAddrPlus(target.Arch, got.Sym(), int64(ldr.SymGot(s)))
 
 			// elfadddynsym()会设置SetSymDynid(), 因此elf_sym_idx是在.dynsym中的idx

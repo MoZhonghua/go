@@ -40,16 +40,12 @@ import (
 	"log"
 )
 
+// amd64要求48位地址sign-extended
 func PADDR(x uint32) uint32 {
 	return x &^ 0x80000000
 }
 
 func gentext(ctxt *ld.Link, ldr *loader.Loader) {
-	/*
-		// Called from linker-generated .initarray; declared for go vet; do NOT call from Go.
-		func addmoduledata()
-	*/
-
 	// addmoduledata是指向函数runtime.addmoduledata()
 	// 在.init会有一项指向initfunc，我们要做的是构造initfunc函数体
 	initfunc, addmoduledata := ld.PrepareAddmoduledata(ctxt)
@@ -76,7 +72,14 @@ func gentext(ctxt *ld.Link, ldr *loader.Loader) {
 	o(0xc3)
 }
 
-// rIdx: reloction index
+// 调用方式:
+//  - buildmode=pie && linkinternal 时对所有的go, elf reloc都调用这个转换
+//    * 大部分都是转换为go reloc, 在link时处理
+//    * 其他变成R_X86_64_RELATIVE类型的elf reloc，添加对应的.got, .rela, .symtab, .dynsym项
+//  - 特定reloc: SymType(target) == sym.SDYNIMPORT || reloc.Type() >= objabi.ElfRelocOffsetr.Sym
+//    * 引用的dso中sym，需要生成elf reloc
+//    * reloc本身是elf reloc，也就是从host object中加载进来的reloc
+//    * 只有GOT和PLT类型的reloc才能引用SDYNIMPORT sym
 func adddynrel(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loader.Sym, r loader.Reloc, rIdx int) bool {
 	targ := r.Sym()
 	var targType sym.SymKind
@@ -93,6 +96,7 @@ func adddynrel(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loade
 
 		// Handle relocations found in ELF object files.
 	case objabi.ElfRelocOffset + objabi.RelocType(elf.R_X86_64_PC32):
+		// 能用ip-relative addressing的一定是定义在同一个.o中的，因此不可能是SDYNIMPORT
 		if targType == sym.SDYNIMPORT {
 			ldr.Errorf(s, "unexpected R_X86_64_PC32 relocation for dynamic symbol %s", ldr.SymName(targ))
 		}
@@ -102,6 +106,7 @@ func adddynrel(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loade
 			ldr.Errorf(s, "unknown symbol %s in pcrel", ldr.SymName(targ))
 		}
 		su := ldr.MakeSymbolUpdater(s)
+		// 指令中相对pc的偏移量，ip-relative addressing是指令结束地址+offset, 因此+4
 		su.SetRelocType(rIdx, objabi.R_PCREL)
 		su.SetRelocAdd(rIdx, r.Add()+4)
 		return true
@@ -119,10 +124,12 @@ func adddynrel(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loade
 		return true
 
 	case objabi.ElfRelocOffset + objabi.RelocType(elf.R_X86_64_PLT32):
+		// 通过PTL调用，一般都是SDYNIMPORT, 即引用的dso中的函数
 		su := ldr.MakeSymbolUpdater(s)
 		su.SetRelocType(rIdx, objabi.R_PCREL)
 		su.SetRelocAdd(rIdx, r.Add()+4)
 		if targType == sym.SDYNIMPORT {
+			// call name1 => call name1@plt(%rip);
 			addpltsym(target, ldr, syms, targ)
 			su.SetRelocSym(rIdx, syms.PLT)
 			su.SetRelocAdd(rIdx, r.Add()+int64(ldr.SymPlt(targ)))
@@ -133,10 +140,19 @@ func adddynrel(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loade
 	case objabi.ElfRelocOffset + objabi.RelocType(elf.R_X86_64_GOTPCREL),
 		objabi.ElfRelocOffset + objabi.RelocType(elf.R_X86_64_GOTPCRELX),
 		objabi.ElfRelocOffset + objabi.RelocType(elf.R_X86_64_REX_GOTPCRELX):
+		// REX => 指x86指令的REX prefix, 用在add name1@GOT(%rip), %rax这种指令中
+		// opcode不是call，jump之类的
 		su := ldr.MakeSymbolUpdater(s)
 		if targType != sym.SDYNIMPORT {
+			// x86-64-psABI v1.0: B.2 Optimize GOTPCRELX Relocations
+			// 如果target不是外部sym，我们可以直接在link时计算出ip-relative offset，不用走GOT
 			// have symbol
 			sData := ldr.Data(s)
+			// 48 8b 1d 8b 38 5f 00
+			// mov 0x5f388b(%rip),%rbx
+			// 转换为
+			// 48 8d 1d 00 00 00 00
+			// lea <ip_relative_offset_of_target>(%rip),%rbx
 			if r.Off() >= 2 && sData[r.Off()-2] == 0x8b {
 				su.MakeWritable()
 				// turn MOVQ of GOT entry into LEAQ of symbol itself
@@ -150,6 +166,11 @@ func adddynrel(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loade
 
 		// fall back to using GOT and hope for the best (CMOV*)
 		// TODO: just needs relocation, no need to put in .dynsym
+		// 三个操作:
+		//  - .dynsym 增加 target
+		//  - .got写入一个8字节
+		//  - .rela写入一个elf reloc
+		//    * elf reloc的offset字段需要通过link-reloc来设置
 		ld.AddGotSym(target, ldr, syms, targ, uint32(elf.R_X86_64_GLOB_DAT))
 
 		su.SetRelocType(rIdx, objabi.R_PCREL)
@@ -167,6 +188,7 @@ func adddynrel(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loade
 			// For internal linking PIE, this R_ADDR relocation cannot
 			// be resolved statically. We need to generate a dynamic
 			// relocation. Let the code below handle it.
+			// 注意上面已经把reloc type改成了R_ADDR
 			break
 		}
 		return true
@@ -274,6 +296,7 @@ func adddynrel(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loade
 		return true
 
 	case objabi.R_ADDR:
+		// 一定是call *name1@GOT(%rip)?
 		if ldr.SymType(s) == sym.STEXT && target.IsElf() {
 			su := ldr.MakeSymbolUpdater(s)
 			if target.IsSolaris() {
@@ -325,11 +348,15 @@ func adddynrel(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loade
 			// symbol offset as determined by reloc(), not the
 			// final dynamically linked address as a dynamic
 			// relocation would provide.
+
+			// 这些section中的数据在load时都不会修改，也就是不会有load-relocation来修改这些
+			// 全部都是link-relocation来修改，比如.rela的offset字段. 不需要特别处理，后面的
+			// reloc()阶段会填入正确值
 			switch ldr.SymName(s) {
 			case ".dynsym", ".rela", ".rela.plt", ".got.plt", ".dynamic":
 				return false
 			}
-		} else {
+		} else { // !target.IsPIE() || !target.IsInternal()
 			// Either internally linking a static executable,
 			// in which case we can resolve these relocations
 			// statically in the 'reloc' phase, or externally
@@ -359,6 +386,8 @@ func adddynrel(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loade
 			// AddAddrPlus is used for r_offset and r_addend to
 			// generate new R_ADDR relocations that will update
 			// these fields in the 'reloc' phase.
+
+			// 注意只是在.rela增加了一项，reloc本身没有修改
 			rela := ldr.MakeSymbolUpdater(syms.Rela)
 			rela.AddAddrPlus(target.Arch, s, int64(r.Off()))
 			if r.Siz() == 8 {
@@ -390,10 +419,14 @@ func adddynrel(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loade
 	return false
 }
 
+
+// ctxt.IsExternal()时调用
+
+// ../ld/data.go:635 extreloc() 把loader.Reloc -> loader.ExtReloc
 func elfreloc1(ctxt *ld.Link, out *ld.OutBuf, ldr *loader.Loader, s loader.Sym, r loader.ExtReloc, ri int, sectoff int64) bool {
 	out.Write64(uint64(sectoff))
 
-	elfsym := ld.ElfSymForReloc(ctxt, r.Xsym)
+	elfsym := ld.ElfSymForReloc(ctxt, r.Xsym) //
 	siz := r.Size
 	switch r.Type {
 	default:
@@ -604,6 +637,15 @@ func elfsetupplt(ctxt *ld.Link, plt, got *loader.SymbolBuilder, dynamic loader.S
 	}
 }
 
+// .plt中增加一项, 涉及到4个section
+//  - .dynsym中创建s的elf sym entry，且设置ldr.SetSymDynid(s, dynid)
+//  - .plt中创建一项，且设置ldr.SetPlt(target, plt_offset)
+//  - .got.plt中写入8字节，通过link-relocation指向.plt项的起始位置
+//  - .rela.plt中写入一项elf reloc:
+//      - off -> vaddr of .got.plt entry when load, 通过link-relocation填写
+//      - sym_idx -> dynid
+//      - type = R_X86_64_JMP_SLOT
+//      - addend =  0
 func addpltsym(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loader.Sym) {
 	if ldr.SymPlt(s) >= 0 {
 		return
@@ -648,7 +690,8 @@ func addpltsym(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loade
 		plt.AddUint32(target.Arch, uint32(-(plt.Size() + 4))) // IP-relative地址，指向PLT[0]
 
 		// 增加一个reloc项，lazy-reloc时填写, GOT[$x]指向程序加载后s的绝对地址
-		// rela
+		// In relocatable files, r_offset holds a section offset
+		// In executable and shared object files, r_offset holds a virtual address
 		rela.AddAddrPlus(target.Arch, got.Sym(), got.Size()-8)
 
 		sDynid := ldr.SymDynid(s)
