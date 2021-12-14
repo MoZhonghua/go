@@ -37,6 +37,8 @@ func expandpkg(t0 string, pkg string) string {
 //	once the dust settles, try to move some code to
 //		libmach, so that other linkers and ar can share.
 
+// ../../../goobj-format.txt
+// 处理objabi头数据，以 \n ! \n为结束标志，内容是分行字符串
 func ldpkg(ctxt *Link, f *bio.Reader, lib *sym.Library, length int64, filename string) {
 	// lib.Pkg=main length=60 filename="$WORK/b001/_pkg_.a(_go_.o)"
 	if *flagG { // whether disable go package data checks
@@ -53,7 +55,6 @@ func ldpkg(ctxt *Link, f *bio.Reader, lib *sym.Library, length int64, filename s
 		fmt.Fprintf(os.Stderr, "%s: short pkg read %s\n", os.Args[0], filename)
 		return
 	}
-	// 数据为:  [build id "fVpY5Kl97W6gKFPmN2Rw/4Ccu9DAKj6seXMD2prl8"\n main \n]
 	data := string(bdata)
 
 	// process header lines
@@ -73,6 +74,13 @@ func ldpkg(ctxt *Link, f *bio.Reader, lib *sym.Library, length int64, filename s
 	}
 
 	// look for cgo section
+
+	/*
+	$$  // cgo
+	[["cgo_import_dynamic","__stack_chk_fail", "__stack_chk_fail#GLIBC_2.4","libc.so.6"]]
+
+	$$
+	*/
 	p0 := strings.Index(data, "\n$$  // cgo")
 	var p1 int
 	if p0 >= 0 {
@@ -162,9 +170,9 @@ func setCgoAttr(ctxt *Link, file string, pkg string, directives [][]string, host
 				remote, q = remote[:i], remote[i+1:]
 			}
 			s := l.LookupOrCreateSym(local, 0) // local=pthread_cond_wait
-			st := l.SymType(s) // st=Sxxx(0), s!=0
+			st := l.SymType(s)                 // st=Sxxx(0), s!=0
 			if st == 0 || st == sym.SXREF || st == sym.SBSS || st == sym.SNOPTRBSS || st == sym.SHOSTOBJ {
-				l.SetSymDynimplib(s, lib) // libpthread.so.0
+				l.SetSymDynimplib(s, lib)  // libpthread.so.0
 				l.SetSymExtname(s, remote) // pthread_cond_wait
 				l.SetSymDynimpvers(s, q)   // GLIBC_2.3.2
 				if st != sym.SHOSTOBJ {

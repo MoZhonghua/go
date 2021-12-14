@@ -529,6 +529,16 @@ func (ctxt *Link) findLibPath(libname string) string {
 	return ctxt.findLibPathCmd("--print-file-name="+libname, libname)
 }
 
+// 三种object: go object, elf object(hostobj), shared-object(shlib)
+// 加载顺序为：
+//  - 首先获取所有object的列表, go object会解析依赖项，递归获取
+//    * go object => *Library, ctxt.Library.Units列表 (.o对应的是CU，不是package!!)
+//    * elf object => *Hostobj, ctxt.Library.Units列表和hostobj列表
+//       - cgo生成.o打包到_pkg_.a，因此和_go_.o在同一个Library中，属于不同的CU
+//    * shlib => Shlib, ctxt.Shlibs列表
+//  - 加载go object
+//  - 加载elf object: hostobjs()
+//  - 加载shared-object
 func (ctxt *Link) loadlib() {
 	var flags uint32
 	switch *FlagStrictDups {
@@ -608,6 +618,7 @@ func (ctxt *Link) loadlib() {
 	}
 
 	// Add non-package symbols and references of externally defined symbols.
+	// 读取所有go object文件内容
 	ctxt.loader.LoadSyms(ctxt.Arch)
 
 	// Load symbols from shared libraries, after all Go object symbols are loaded.
@@ -624,6 +635,7 @@ func (ctxt *Link) loadlib() {
 	ctxt.loadcgodirectives()
 
 	// Conditionally load host objects, or setup for external linking.
+	// 读取elf object内容
 	hostobjs(ctxt) // only for LinkInternal
 
 	// 关闭ctxt.Out，然后重新打开输出到/tmpdir/go.o，最终结果由extld来输出
@@ -971,10 +983,15 @@ func nextar(bp *bio.Reader, off int64, a *ArHdr) int64 {
 	return arsize + SAR_HDR
 }
 
-// 只能加载.a, .o文件，不能加载dso(lib.Shlib != "")
 // cgo中自动生成.c文件会通过gcc编译为_x001.o, _x002.o等，然后和_go_.o一起打包到_pkg_.a
 // _go_.o go object
 // _x001.o elf object
+// 都会在Library.Units增加一项，后者会同时添加到hostobj列表中
+
+// loadobjfile
+//    -> ldobj -> ldhostobj(elf object)
+//             -> ldpkg(go object), 读取goobj中的Autlib数据(依赖项)
+//    -> for .o in .a do ldobj
 func loadobjfile(ctxt *Link, lib *sym.Library) {
 	pkg := objabi.PathToPrefix(lib.Pkg)
 
@@ -1112,6 +1129,7 @@ func ldhostobj(ld func(*Link, *bio.Reader, string, int64, string), headType obja
 	return h
 }
 
+// 读取elf object内容
 func hostobjs(ctxt *Link) {
 	if ctxt.LinkMode != LinkInternal {
 		return
@@ -1851,10 +1869,10 @@ var wantHdr = objabi.HeaderString()
 // ldobj loads an input object. If it is a host object (an object
 // compiled by a non-Go compiler) it returns the Hostobj pointer. If
 // it is a Go object, it returns nil.
+// lib.Pkg="main"
+// pn="$WORK/b001/_pkg_.a(_x001.o)"
+// file="_x001.o"
 func ldobj(ctxt *Link, f *bio.Reader, lib *sym.Library, length int64, pn string, file string) *Hostobj {
-	// lib.Pkg="main"
-	// pn="$WORK/b001/_pkg_.a(_x001.o)"
-	// file="_x001.o"
 	pkg := objabi.PathToPrefix(lib.Pkg)
 
 	eof := f.Offset() + length
@@ -2001,10 +2019,12 @@ func ldobj(ctxt *Link, f *bio.Reader, lib *sym.Library, length int64, pn string,
 	import1 := f.Offset()
 
 	f.MustSeek(import0, 0)
-	// 注意这里加载不是整个go object，而是读取了文件开始的信息
+	// 解析objabi header中的多行字符串信息，主要判断lib是否为main pacakge，以及cgo指令
 	ldpkg(ctxt, f, lib, import1-import0-2, pn) // -2 for !\n
 	f.MustSeek(import1, 0)
 
+	// 此时f.Offset()指向的是goobj.Header数据, 创建了一个goobj.Reader对象，读取Autolib
+	// 追加到lib.Autolib列表中
 	fingerprint := ctxt.loader.Preload(ctxt.IncVersion(), f, lib, unit, eof-f.Offset())
 	if !fingerprint.IsZero() { // Assembly objects don't have fingerprints. Ignore them.
 		// Check fingerprint, to ensure the importing and imported packages
@@ -2018,6 +2038,7 @@ func ldobj(ctxt *Link, f *bio.Reader, lib *sym.Library, length int64, pn string,
 		checkFingerprint(lib, fingerprint, lib.Srcref, lib.Fingerprint)
 	}
 
+	// 把新增加的Autolib追加到ctxt.Library中，之后的会加载
 	addImports(ctxt, lib, pn)
 	return nil
 }

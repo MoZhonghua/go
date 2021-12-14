@@ -1,12 +1,33 @@
-## objabi header string
-首先是写入objapi.HeaderString()
+## objapi.HeaderString()
+
+首先写入HeaderString()，然后可以写入任何字符串，最终由 '\n' '!' '\n' 结束
 
 asm/main.go
 		buf.WriteString(objabi.HeaderString())
 		fmt.Fprintf(buf, "!\n")
 
+```txt
 go object linux amd64 go1.17.2 X:regabiwrappers,regabig,regabireflect,regabidefer,regabiargs
-          GOOS  GOARCH VERSION Enabled GOEXPEIRMENTS
+
+build id "jCKcapZqREPfScPWbV7E/UsYGU0IhOxCWCwL4VARB"
+main // link用来判断是否为main packge
+
+
+$$
+
+$$
+
+
+$$  // cgo
+[["cgo_ldflag","-g"],["cgo_import_dynamic","__stack_chk_fail", "__stack_chk_fail#GLIBC_2.4","libc.so.6"]]  // 所有cgo指令
+
+$$
+
+
+
+!  // 结束标志
+
+```
 
 
 ## 写入goobj.Header
