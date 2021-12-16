@@ -20,11 +20,23 @@ type SymbolBuilder struct {
 	l              *Loader // loader
 }
 
+// 三个函数都返回SymbolBuilder，注意使用情况
+// MakeSymbolBuilder(name): 每次都必然新建一个static sym, ver唯一且ver<0
+// MakeSymbolUpdater(sym):
+//   - 如果不是extSym，则新建并复制，且用新的sym覆盖原来的，symIdx不变
+//   - 否则就是返回已有的extSym
+// CreateSymForUpdate(name, ver):
+//   - 先用<name, ver>查找，如果没有则新建extSym
+//   - 调用MakeSymbolUpdater(sym)
+//
+// 这里新建都是通过newExtSymbol()，会加入到全局lookup表中。sym本身不一定是全局的，
+// 但是都可以查找。
+
 // MakeSymbolBuilder creates a symbol builder for use in constructing
 // an entirely new symbol.
 func (l *Loader) MakeSymbolBuilder(name string) *SymbolBuilder {
 	// for now assume that any new sym is intended to be static
-	symIdx := l.CreateStaticSym(name)
+	symIdx := l.CreateStaticSym(name) // ver为负数
 	sb := &SymbolBuilder{l: l, symIdx: symIdx}
 	sb.extSymPayload = l.getPayload(symIdx)
 	return sb
@@ -380,6 +392,7 @@ func (sb *SymbolBuilder) AddAddr(arch *sys.Arch, tgt Sym) int64 {
 }
 
 func (sb *SymbolBuilder) AddPCRelPlus(arch *sys.Arch, tgt Sym, add int64) int64 {
+	// 用到的pc-relative addresssing offset都是4字节
 	return sb.addSymRef(tgt, add, objabi.R_PCREL, 4)
 }
 
@@ -403,6 +416,7 @@ func GenAddAddrPlusFunc(internalExec bool) func(s *SymbolBuilder, arch *sys.Arch
 	if internalExec {
 		return func(s *SymbolBuilder, arch *sys.Arch, tgt Sym, add int64) int64 {
 			if v := s.l.SymValue(tgt); v != 0 {
+				// 如果tgt位置已知，直接写入地址，不用增加reloc项
 				return s.AddUint(arch, uint64(v+add))
 			}
 			return s.AddAddrPlus(arch, tgt, add)
@@ -414,6 +428,7 @@ func GenAddAddrPlusFunc(internalExec bool) func(s *SymbolBuilder, arch *sys.Arch
 
 func (sb *SymbolBuilder) MakeWritable() {
 	if sb.ReadOnly() {
+		// sb.data是RO mmap数据，不能写入，此处相当于分配新内存并复制数据
 		sb.data = append([]byte(nil), sb.data...)
 		sb.l.SetAttrReadOnly(sb.symIdx, false)
 	}

@@ -20,6 +20,7 @@ type Library struct {
 	Units       []*CompilationUnit
 
 	Textp       []LoaderSym // text syms defined in this library
+	// 注意是有Dupok()属性的text sym，不是指text sym本身和其他sym重复
 	DupTextSyms []LoaderSym // dupok text syms defined in this library
 }
 

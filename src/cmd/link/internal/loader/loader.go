@@ -21,6 +21,11 @@ import (
 	"strings"
 )
 
+// TODO(mzh): obj 和 package, .a, ,o, CompilationUnit 之间的关系
+// package <==> .a
+// object <==> .o <==> CompilationUnit
+// package 包含多个 object
+
 var _ = fmt.Print
 
 // Sym encapsulates a global symbol index, used to identify a specific
@@ -32,8 +37,8 @@ type Sym int
 type Relocs struct {
 	rs []goobj.Reloc
 
-	r  *oReader // object reader for containing package
-	l  *Loader  // loader
+	r *oReader // object reader for containing package
+	l *Loader  // loader
 }
 
 // ExtReloc contains the payload for an external relocation.
@@ -217,8 +222,10 @@ type Loader struct {
 	//  - elf object中symtab中binding=global/weak的sym
 	//  - link自己构造的extSym
 	// 每个elf object分配独立的static version, bindging=local的sym都用这个ver，因此两个elf obj之间不会冲突
-	symsByName    [2]map[string]Sym // map symbol name to index, two maps are for ABI0 and ABIInternal
-	extStaticSyms map[nameVer]Sym   // externally defined static symbols, keyed by name
+	// object中static symbol不能通过名字查找，因此oReader中没有name
+	symsByName [2]map[string]Sym // map symbol name to index, two maps are for ABI0 and ABIInternal
+	// link自己创建symbol支持用name,ver查找
+	extStaticSyms map[nameVer]Sym // externally defined static symbols, keyed by name
 
 	extReader    *oReader         // a dummy oReader, for external symbols
 	payloadBatch []extSymPayload  // 用于优化分配extSymPayload对象，批量分配1000个
@@ -232,7 +239,8 @@ type Loader struct {
 
 	deferReturnTramp map[Sym]bool // whether the symbol is a trampoline of a deferreturn call
 
-	// index to `objs []objIdx`
+	// index to `objs []objIdx`, 注意一个package有多个object，在objs中是连续
+	// 存放，这里是第一个object的index
 	objByPkg map[string]uint32 // map package path to the index of its Go object reader
 
 	anonVersion int // most recently assigned ext static sym pseudo-version
@@ -242,16 +250,20 @@ type Loader struct {
 	// corresponding loader "AttrXXX" and "SetAttrXXX" methods. Please
 	// visit the comments on these methods for more details on the
 	// semantics / interpretation of the specific flags or attribute.
+	// 这些是所有sym都有的属性
 	attrReachable        Bitmap // reachable symbols, indexed by global index
 	attrOnList           Bitmap // "on list" symbols, indexed by global index
 	attrLocal            Bitmap // "local" symbols, indexed by global index
 	attrNotInSymbolTable Bitmap // "not in symtab" symbols, indexed by global idx
 	attrUsedInIface      Bitmap // "used in interface" symbols, indexed by global idx
+
+	// 这4个只有extSym有
 	attrVisibilityHidden Bitmap // hidden symbols, indexed by ext sym index
 	attrDuplicateOK      Bitmap // dupOK symbols, indexed by ext sym index
 	attrShared           Bitmap // shared symbols, indexed by ext sym index
 	attrExternal         Bitmap // external symbols, indexed by ext sym index
 
+	// 比较少的sym有这些属性
 	attrReadOnly         map[Sym]bool     // readonly data for this sym
 	attrSpecial          map[Sym]struct{} // "special" frame symbols
 	attrCgoExportDynamic map[Sym]struct{} // "cgo_export_dynamic" symbols
@@ -286,6 +298,8 @@ type Loader struct {
 	// the symbol that triggered the marking of symbol K as live.
 	Reachparent []Sym
 
+	// cgo_export_static local [extName]
+	// cgo_export_dynamic local [extName]
 	// CgoExports records cgo-exported symbols by SymName.
 	CgoExports map[string]Sym
 
@@ -335,6 +349,7 @@ type extSymPayload struct {
 
 const (
 	// Loader.flags
+	// 如果sym.Dupok()，这个标志位为1，则要求两个sym的内容也一样
 	FlagStrictDups = 1 << iota
 	FlagUseABIAlias
 )
@@ -379,6 +394,14 @@ func NewLoader(flags uint32, elfsetstring elfsetstringFunc, reporter *ErrorRepor
 	return ldr
 }
 
+// package 对应多个 object/CU. 这一一定是在处理go自己生成_pkg_.a，也就是说每个
+// pkg第一个添加的obj一定是_go_.o，即pkg中所有go文件打包编译后的.o文件，然后是
+// .s文件编译后对应的.o文件。而.c编译的文件是elf object，不会在这里加载.
+
+// 注意: .s文件中每个函数都会在.go中定义原型，也就是_go_.o会包含pkg定义的所有sym
+// 包括.s中的。其他pkg引用这个pkg的符号一定可以在_go_.o中找到, 因为只有在.go中
+// 定义了才能在其他pkg中调用，否则编译错误!!
+
 // Add object file r, return the start index.
 func (l *Loader) addObj(pkg string, r *oReader) Sym {
 	if _, ok := l.start[r]; ok {
@@ -386,19 +409,26 @@ func (l *Loader) addObj(pkg string, r *oReader) Sym {
 	}
 	pkg = objabi.PathToPrefix(pkg) // the object file contains escaped package path
 	if _, ok := l.objByPkg[pkg]; !ok {
-		l.objByPkg[pkg] = r.objidx
+		l.objByPkg[pkg] = r.objidx // package中第一个object的index，多个object会连续存放
 	}
+
 	i := Sym(len(l.objSyms))
 	l.start[r] = i
 	l.objs = append(l.objs, objIdx{r, i})
 	if r.NeedNameExpansion() && !r.FromAssembly() {
 		l.hasUnknownPkgPath = true
 	}
+
+	/*
+		idx := l.objByPkg[pkg]
+		l.objs[idx].r.objidx == idx
+	*/
 	return i
 }
 
 // Add a symbol from an object file, return the global index.
 // If the symbol already exist, it returns the index of that symbol.
+// osym不是old sym，而是指sym在go object中sym entry原始数据
 func (st *loadState) addSym(name string, ver int, r *oReader, li uint32, kind int, osym *goobj.Sym) Sym {
 	l := st.l
 	if l.extStart != 0 {
@@ -410,6 +440,7 @@ func (st *loadState) addSym(name string, ver int, r *oReader, li uint32, kind in
 	}
 	if name == "" && kind != hashed64Def && kind != hashedDef {
 		addToGlobal()
+		// 之后不能通过loopup(name, ver)的方式查找，只能记录下返回Sym
 		return i // unnamed aux symbol
 	}
 	if ver == r.version {
@@ -477,6 +508,7 @@ func (st *loadState) addSym(name string, ver int, r *oReader, li uint32, kind in
 	}
 
 	// Non-package (named) symbol. Check if it already exists.
+	// ver只能是0, 1, r.version: r.version的情况已经处理并返回
 	oldi, existed := l.symsByName[ver][name]
 	if !existed {
 		l.symsByName[ver][name] = i
@@ -484,7 +516,7 @@ func (st *loadState) addSym(name string, ver int, r *oReader, li uint32, kind in
 		return i
 	}
 	// symbol already exists
-	if osym.Dupok() {
+	if osym.Dupok() { // 新增的sym支持Dupok()
 		if l.flags&FlagStrictDups != 0 {
 			l.checkdup(name, r, li, oldi)
 		}
@@ -500,10 +532,11 @@ func (st *loadState) addSym(name string, ver int, r *oReader, li uint32, kind in
 		return oldi
 	}
 	oldr, oldli := l.toLocal(oldi)
-	oldsym := oldr.Sym(oldli)
-	if oldsym.Dupok() {
+	oldsym := oldr.Sym(oldli) // 返回的是在go object中sym entry
+	if oldsym.Dupok() {       // 已有的sym支持Dupok()
 		return oldi
 	}
+	// 两个都不支持Dupok(), Data类型的sym支持overwrite(有限制, 被覆盖的sym.Size() == 0)
 	overwrite := r.DataSize(li) != 0
 	if overwrite {
 		// new symbol overwrites old symbol.
@@ -729,6 +762,8 @@ func (l *Loader) reportMissingBuiltin(bsym int, reflib string) {
 // new symbol.
 func (l *Loader) Lookup(name string, ver int) Sym {
 	if ver >= sym.SymVerStatic || ver < 0 {
+		// ver<0是通过CreateStaticSym()创建的
+		// ver>=sym.SymVerStatic是加载obj中local sym每个obj用同一个ver
 		return l.extStaticSyms[nameVer{name, ver}]
 	}
 	return l.symsByName[ver][name]
@@ -801,6 +836,7 @@ func (l *Loader) SymNameLen(i Sym) int {
 }
 
 // Returns the raw (unpatched) name of the i-th symbol.
+// 和SymName()的区别是是否做了NameExpansion，即把"".替换为pkg_name.
 func (l *Loader) RawSymName(i Sym) string {
 	if l.IsExternal(i) {
 		pp := l.getPayload(i)
@@ -834,6 +870,7 @@ func (l *Loader) SymVersion(i Sym) int {
 		return pp.ver
 	}
 	r, li := l.toLocal(i)
+	// r.Sym(li).ABI()是从goobj文件中读取ABI字段
 	return int(abiToVer(r.Sym(li).ABI(), r.version))
 }
 
@@ -1175,6 +1212,20 @@ func (l *Loader) SetAttrReadOnly(i Sym, v bool) {
 	l.attrReadOnly[i] = v
 }
 
+
+// case1: Size(y)=Size(x1)+Size(x2)+...，y包含了x1和x2内容，只需要写入y，不需要写入x1和x2
+// sub字段形成一个链表，s为链表头，特别的s.outer=0
+// y.sub -> x1
+// x1.sub -> x2
+// x2.sub -> 0
+// out字段都是直接指向y，不是链表
+// y.out = 0
+// x1.out = y
+// x2.out = y
+
+// case2: Size(y)=0, 不包含x1和x2的内容。不需要写入y，而是需要单独写入x1和x2
+// 只有out指针，所有sub字段都是0
+
 // AttrSubSymbol returns true for symbols that are listed as a
 // sub-symbol of some other outer symbol. The sub/outer mechanism is
 // used when loading host objects (sections from the host object
@@ -1197,6 +1248,7 @@ func (l *Loader) SetAttrReadOnly(i Sym, v bool) {
 // FIXME: would be better to do away with this and have a better way
 // to represent container symbols.
 
+// 有out指针，且没有通过sub形成链表
 func (l *Loader) AttrSubSymbol(i Sym) bool {
 	// we don't explicitly store this attribute any more -- return
 	// a value based on the sub-symbol setting.
@@ -1378,6 +1430,7 @@ func (l *Loader) SymDynimplib(i Sym) string {
 }
 
 // SetSymDynimplib sets the "dynimplib" attribute for a symbol.
+// value="libc.so.6"
 func (l *Loader) SetSymDynimplib(i Sym, value string) {
 	// reject bad symbols
 	if i >= Sym(len(l.objSyms)) || i == 0 {
@@ -1398,6 +1451,7 @@ func (l *Loader) SymDynimpvers(i Sym) string {
 }
 
 // SetSymDynimpvers sets the "dynimpvers" attribute for a symbol.
+// value="GLIBC_2.2.5"
 func (l *Loader) SetSymDynimpvers(i Sym, value string) {
 	// reject bad symbols
 	if i >= Sym(len(l.objSyms)) || i == 0 {
@@ -1420,6 +1474,8 @@ func (l *Loader) SymExtname(i Sym) string {
 }
 
 // SetSymExtname sets the  "extname" attribute for a symbol.
+// cgo_import_dynamic <name> <remote>
+// SymName(i)=name, value=remote
 func (l *Loader) SetSymExtname(i Sym, value string) {
 	// reject bad symbols
 	if i >= Sym(len(l.objSyms)) || i == 0 {
@@ -1463,6 +1519,7 @@ func (l *Loader) SymElfSym(i Sym) int32 {
 }
 
 // SetSymElfSym sets the elf symbol index for a symbol.
+// loader.Sym => index in elf .symtab
 func (l *Loader) SetSymElfSym(i Sym, es int32) {
 	if i == 0 {
 		panic("bad sym index")
@@ -1541,6 +1598,8 @@ func (l *Loader) SymDynid(i Sym) int32 {
 }
 
 // SetSymDynid sets the "dynid" property for a symbol.
+// loader.Sym => index in .dynsym
+// dynid is index in .dynsym
 func (l *Loader) SetSymDynid(i Sym, val int32) {
 	// reject bad symbols
 	if i >= Sym(len(l.objSyms)) || i == 0 {
@@ -1640,6 +1699,7 @@ func (l *Loader) SetSymPkg(i Sym, pkg string) {
 	l.symPkg[i] = pkg
 }
 
+// 仅ppc64使用，elf sym.others字段相关
 // SymLocalentry returns the "local entry" value for the specified
 // symbol.
 func (l *Loader) SymLocalentry(i Sym) uint8 {
@@ -1685,6 +1745,9 @@ func (l *Loader) Aux(i Sym, j int) Aux {
 // introduction of the loader, this was done purely using name
 // lookups, e.f. for function with name XYZ we would then look up
 // go.info.XYZ, etc.
+// 这些dwarf内容都是位置无关的:
+//  - 和函数本身最终位置无关
+//  - 和自己最终位置无关(特别的和在section中的相对位置无关)
 func (l *Loader) GetFuncDwarfAuxSyms(fnSymIdx Sym) (auxDwarfInfo, auxDwarfLoc, auxDwarfRanges, auxDwarfLines Sym) {
 	if l.SymType(fnSymIdx) != sym.STEXT {
 		log.Fatalf("error: non-function sym %d/%s t=%s passed to GetFuncDwarfAuxSyms", fnSymIdx, l.SymName(fnSymIdx), l.SymType(fnSymIdx).String())
@@ -1768,7 +1831,7 @@ func (l *Loader) AddInteriorSym(container Sym, interior Sym) {
 	if l.OuterSym(interior) != 0 {
 		panic("outer already set for subsym")
 	}
-	l.sub[interior] = l.sub[container]
+	l.sub[interior] = l.sub[container] // 插入sub链表头
 	l.sub[container] = interior
 	l.outer[interior] = container
 }
@@ -1810,7 +1873,7 @@ func (l *Loader) SetCarrierSym(s Sym, c Sym) {
 	if len(l.Data(c)) != 0 {
 		panic("unexpected non-empty carrier symbol")
 	}
-	l.outer[s] = c
+	l.outer[s] = c // 只设置outer，不通过sub形成链表
 	// relocsym's foldSubSymbolOffset requires that we only
 	// have a single level of containment-- enforce here.
 	if l.outer[c] != 0 {
@@ -1919,7 +1982,7 @@ func (l *Loader) relocs(r *oReader, li uint32) Relocs {
 		pp := l.payloads[li]
 		rs = pp.relocs
 	} else {
-		rs = r.Relocs(li)
+		rs = r.Relocs(li) // 从goobj文件中读取
 	}
 	return Relocs{
 		rs: rs,
@@ -2214,6 +2277,8 @@ func (st *loadState) preloadSyms(r *oReader, kind int) {
 		}
 		if strings.HasPrefix(name, "runtime.") ||
 			(loadingRuntimePkg && strings.HasPrefix(name, "type.")) {
+				// base type，比如int, *int，这些类型sym的名字不是runtime开头的
+				// 只会在runtime pkg中定义
 			if bi := goobj.BuiltinIdx(name, v); bi != -1 {
 				// This is a definition of a builtin symbol. Record where it is.
 				l.builtinSyms[bi] = gi
@@ -2232,6 +2297,9 @@ func (l *Loader) LoadSyms(arch *sys.Arch) {
 	// This function was determined empirically by looking at the cmd/compile on
 	// Darwin, and picking factors for hashed and hashed64 syms.
 	var symSize, hashedSize, hashed64Size int
+	// NewLoader()
+	// l.objs[0].r = nil
+	// l.objs[1].r = l.extReader
 	for _, o := range l.objs[goObjStart:] {
 		symSize += o.r.ndef + o.r.nhasheddef/2 + o.r.nhashed64def/2 + o.r.NNonpkgdef()
 		hashedSize += o.r.nhasheddef / 2
@@ -2247,6 +2315,7 @@ func (l *Loader) LoadSyms(arch *sys.Arch) {
 		hashedSyms:   make(map[goobj.HashType]symAndSize, hashedSize),
 	}
 
+	// 注意所有go obj用同一个loadState加载, hash sym是跨obj去重
 	for _, o := range l.objs[goObjStart:] {
 		st.preloadSyms(o.r, pkgDef)
 	}
@@ -2255,6 +2324,7 @@ func (l *Loader) LoadSyms(arch *sys.Arch) {
 		st.preloadSyms(o.r, hashedDef)
 		st.preloadSyms(o.r, nonPkgDef)
 	}
+	// 上面是xxxDef，这里是xxxRef
 	l.nhashedsyms = len(st.hashed64Syms) + len(st.hashedSyms)
 	for _, o := range l.objs[goObjStart:] {
 		loadObjRefs(l, o.r, arch)
@@ -2272,6 +2342,10 @@ func loadObjRefs(l *Loader, r *oReader, arch *sys.Arch) {
 		if needNameExpansion {
 			name = strings.Replace(name, "\"\".", r.pkgprefix, -1)
 		}
+		// go obj生成sym tab是会为sym分配三种ABI:
+		//  - ABI0 => 0, 全局变量
+		//  - ABIInternal => 1, 全局变量
+		//  - ABIStatic => r.version，即每个obj独立的命名空间
 		v := abiToVer(osym.ABI(), r.version)
 		r.syms[ndef+i] = l.LookupOrCreateSym(name, v)
 		gi := r.syms[ndef+i]
@@ -2288,6 +2362,7 @@ func loadObjRefs(l *Loader, r *oReader, arch *sys.Arch) {
 	r.pkg = make([]uint32, npkg)
 	for i := 1; i < npkg; i++ { // PkgIdx 0 is a dummy invalid package
 		pkg := r.Pkg(i)
+		// 按照依赖顺序加载，被引用的pkg一定已经加载完成
 		objidx, ok := l.objByPkg[pkg]
 		if !ok {
 			log.Fatalf("%v: reference to nonexistent package %s", r.unit.Lib, pkg)
@@ -2333,7 +2408,7 @@ func (l *Loader) ResolveABIAlias(s Sym) Sym {
 		return s
 	}
 	relocs := l.Relocs(s)
-	target := relocs.At(0).Sym()
+	target := relocs.At(0).Sym() // 必须是第一个reloc,应该也是只有这个唯一的reloc
 	if l.SymType(target) == sym.SABIALIAS {
 		panic(fmt.Sprintf("ABI alias %s references another ABI alias %s", l.SymName(s), l.SymName(target)))
 	}
@@ -2344,6 +2419,7 @@ func (l *Loader) ResolveABIAlias(s Sym) Sym {
 // the symbol first class sym (participating in the link) or is an
 // anonymous aux or sub-symbol containing some sub-part or payload of
 // another symbol.
+// 非top level sym一般是指aux sym，名字为""
 func (l *Loader) TopLevelSym(s Sym) bool {
 	return topLevelSym(l.RawSymName(s), l.SymType(s))
 }
@@ -2440,6 +2516,7 @@ func (l *Loader) CopySym(src, dst Sym) {
 	l.payloads[l.extIndex(dst)] = l.payloads[l.extIndex(src)]
 	l.SetSymPkg(dst, l.SymPkg(src))
 	// TODO: other attributes?
+	// call CopyAttributes()?
 }
 
 // CopyAttributes copies over all of the attributes of symbol 'src' to
@@ -2469,12 +2546,14 @@ func (l *Loader) CopyAttributes(src Sym, dst Sym) {
 
 // CreateExtSym creates a new external symbol with the specified name
 // without adding it to any lookup tables, returning a Sym index for it.
+// 调用的ver=0/1，全局sym。是extSym
 func (l *Loader) CreateExtSym(name string, ver int) Sym {
 	return l.newExtSym(name, ver)
 }
 
 // CreateStaticSym creates a new static symbol with the specified name
 // without adding it to any lookup tables, returning a Sym index for it.
+// 负数ver，也是static(local) sym，每个sym一个独立的版本号。是extSym
 func (l *Loader) CreateStaticSym(name string) Sym {
 	// Assign a new unique negative version -- this is to mark the
 	// symbol so that it is not included in the name lookup table.
@@ -2498,6 +2577,7 @@ type relocId struct {
 
 // SetRelocVariant sets the 'variant' property of a relocation on
 // some specific symbol.
+// 仅ppc64使用
 func (l *Loader) SetRelocVariant(s Sym, ri int, v sym.RelocVariant) {
 	// sanity check
 	if relocs := l.Relocs(s); ri >= relocs.Count() {
@@ -2598,6 +2678,8 @@ func (l *Loader) AssignTextSymbolOrder(libs []*sym.Library, intlibs []bool, exts
 				// We still need to record its presence in the current
 				// package, as the trampoline pass expects packages
 				// are laid out in dependency order.
+				// 和其他sym重复定义且被替换为其他sym, 不一定是Dupok()的, 注意这个gi指向
+				// 的是其他sym
 				lib.DupTextSyms = append(lib.DupTextSyms, sym.LoaderSym(gi))
 				continue // symbol in different object
 			}
@@ -2611,6 +2693,7 @@ func (l *Loader) AssignTextSymbolOrder(libs []*sym.Library, intlibs []bool, exts
 	}
 
 	// Now assemble global textp, and assign text symbols to units.
+	// 两次遍历lib列表，第一次处理internal lib，第二次处理其他lib
 	for _, doInternal := range [2]bool{true, false} {
 		for idx, lib := range libs {
 			if intlibs[idx] != doInternal {
@@ -2620,6 +2703,7 @@ func (l *Loader) AssignTextSymbolOrder(libs []*sym.Library, intlibs []bool, exts
 			for i, list := range lists {
 				for _, s := range list {
 					sym := Sym(s)
+					// 在上面的逻辑中，同一个sym可能出现多次出现[dupok]
 					if !assignedToUnit.Has(sym) {
 						textp = append(textp, sym)
 						unit := l.SymUnit(sym)

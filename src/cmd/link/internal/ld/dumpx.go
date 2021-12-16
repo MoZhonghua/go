@@ -73,3 +73,13 @@ func dumpsegs() {
 		}
 	}
 }
+
+func dumpliblist(ctxt *Link) {
+	fmt.Println("lib list:")
+	for _, lib := range ctxt.Library {
+		fmt.Printf("  %v (ref=%v, units=%d) => %v\n", lib.Pkg, lib.Srcref, len(lib.Units), lib.File)
+	}
+	for _, h := range hostobj {
+		fmt.Printf("  hostobj: %v\n", h.file)
+	}
+}

@@ -141,6 +141,7 @@ func Main(arch *sys.Arch, theArch Arch) {
 	objabi.Flagcount("v", "print link trace", &ctxt.Debugvlog)
 	objabi.Flagfn1("importcfg", "read import configuration from `file`", ctxt.readImportCfg)
 
+	// 主要是处理 @file 这样的参数，读取file内容并把每行做为一个单独参数
 	objabi.Flagparse(usage)
 
 	if ctxt.Debugvlog > 0 {
@@ -164,6 +165,7 @@ func Main(arch *sys.Arch, theArch Arch) {
 	}
 
 	if !*flagAslr && ctxt.BuildMode != BuildModeCShared {
+		// 只能通过extld链接，flagAslr会多传参数
 		Errorf(nil, "-aslr=false is only allowed for -buildmode=c-shared")
 		usage()
 	}
@@ -175,10 +177,14 @@ func Main(arch *sys.Arch, theArch Arch) {
 		ctxt.BuildMode.Set("exe")
 	}
 
+	// go build package时只需要compile生成_pkg_.a，然后复制到合适位置，不需要link步骤
+
+	// !!注意其他buildmode只能有一个参数，比如exe下的main package编译后的_pkg_.a
 	if ctxt.BuildMode != BuildModeShared && flag.NArg() != 1 {
 		usage()
 	}
 
+	// go build时会设置临时路径，link完成后在复制到合适位置
 	if *flagOutfile == "" {
 		*flagOutfile = "a.out"
 		if ctxt.HeadType == objabi.Hwindows {
@@ -209,11 +215,14 @@ func Main(arch *sys.Arch, theArch Arch) {
 		}
 	}
 
+	// amd64.Init() 返回sys.Arch和ld.Arch对象，设置了字段和回调函数
 	bench.Start("libinit")
 	libinit(ctxt) // creates outfile
 	bench.Start("computeTLSOffset")
 	ctxt.computeTLSOffset()
 	bench.Start("Archinit")
+
+	// ../amd64/obj.go:112
 	thearch.Archinit(ctxt)
 
 	if ctxt.linkShared && !ctxt.IsELF {
@@ -226,7 +235,7 @@ func Main(arch *sys.Arch, theArch Arch) {
 
 	zerofp := goobj.FingerprintType{}
 	switch ctxt.BuildMode {
-	case BuildModeShared:
+	case BuildModeShared: // 可以有多个输入文件
 		for i := 0; i < flag.NArg(); i++ {
 			arg := flag.Arg(i)
 			parts := strings.SplitN(arg, "=", 2)

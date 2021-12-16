@@ -7,10 +7,11 @@ function link() {
 	export GOROOT=/home/mozhonghua/go/src/github.com/golang/go
 
 	cp ../pkg/tool/linux_amd64/{link.old,link}
-	go build -o ../pkg/tool/linux_amd64/link ./cmd/link/
+	go build -a -o ../pkg/tool/linux_amd64/link2 ./cmd/link/
 
-	echo "build link ok"
+	echo "------build link ok-------------"
 
+	cp ../pkg/tool/linux_amd64/{link2,link}
 	../pkg/tool/linux_amd64/link "$@"
 }
 

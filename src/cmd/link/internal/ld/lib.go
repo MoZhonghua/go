@@ -418,10 +418,10 @@ func libinit(ctxt *Link) {
 		suffix = "msan"
 	}
 
-	// $GOROOT/pkg/linux_amd64/
-	// $GOROOT/pkg/linux_amd64_shared/ (link -installsuffix shared -buildmode=pie)
-	// $GOROOT/pkg/linux_amd64_race/
-	// $GOROOT/pkg/linux_amd64_msan/
+	// -L $GOROOT/pkg/linux_amd64/
+	// -L $GOROOT/pkg/linux_amd64_shared/ (link -installsuffix shared -buildmode=pie)
+	// -L $GOROOT/pkg/linux_amd64_race/
+	// -L $GOROOT/pkg/linux_amd64_msan/
 	Lflag(ctxt, filepath.Join(buildcfg.GOROOT, "pkg", fmt.Sprintf("%s_%s%s%s", buildcfg.GOOS, buildcfg.GOARCH, suffixsep, suffix)))
 
 	mayberemoveoutfile()
@@ -540,6 +540,8 @@ func (ctxt *Link) findLibPath(libname string) string {
 //  - 加载go object
 //  - 加载elf object: hostobjs()
 //  - 加载shared-object
+
+// 调用前已经添加了main package，指向输入文件路径
 func (ctxt *Link) loadlib() {
 	var flags uint32
 	switch *FlagStrictDups {
@@ -581,6 +583,9 @@ func (ctxt *Link) loadlib() {
 		loadinternal(ctxt, "runtime/msan")
 	}
 	loadinternal(ctxt, "runtime")
+
+	// 所有go package的.a文件已经处理?
+
 	for ; i < len(ctxt.Library); i++ {
 		lib := ctxt.Library[i]
 		if lib.Shlib == "" {
@@ -1898,6 +1903,7 @@ func ldobj(ctxt *Link, f *bio.Reader, lib *sym.Library, length int64, pn string,
 			ehdr.Flags = flags
 			ctxt.Textp = append(ctxt.Textp, textp...)
 		}
+
 		return ldhostobj(ldelf, ctxt.HeadType, f, pkg, length, pn, file)
 	}
 

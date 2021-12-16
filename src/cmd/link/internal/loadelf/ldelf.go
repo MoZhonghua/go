@@ -20,6 +20,8 @@ import (
 	"strings"
 )
 
+// 注意: 所有从host object加载的sym都是当做extSym处理
+
 /*
 Derived from Plan 9 from User Space's src/libmach/elf.h, elf.c
 http://code.swtch.com/plan9port/src/tip/src/libmach/

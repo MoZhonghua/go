@@ -41,4 +41,10 @@ internal/loadelf/ldelf.go
 internal/amd64/l.go
 internal/amd64/asm.go
 internal/amd64/obj.go
-internal/loader/loader.go ?
+
+2021-12-15
+
+2021-12-16
+internal/loader/loader.go
+internal/loader/symbolbuilder.go
+internal/ld/main.go ?

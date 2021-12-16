@@ -267,6 +267,7 @@ const (
 	// address (offset from thread pointer), by encoding it into the instruction.
 	R_ADDRMIPSTLS
 
+	// 只用来重定位到相对于CU中第一个函数的起始位置
 	// R_ADDRCUOFF resolves to a pointer-sized offset from the start of the
 	// symbol's DWARF compile unit.
 	R_ADDRCUOFF

@@ -107,6 +107,8 @@ func archinit(ctxt *ld.Link) {
 		objabi.Hopenbsd,   /* openbsd */
 		objabi.Hdragonfly, /* dragonfly */
 		objabi.Hsolaris:   /* solaris */
+
+		// 在这里初始化ELf header
 		ld.Elfinit(ctxt)
 
 		// .text的vaddr为4M+4K, 在文件中偏移量为4K, 文件偏移量0对应的vaddr是4M

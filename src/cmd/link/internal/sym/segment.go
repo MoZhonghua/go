@@ -45,7 +45,7 @@ type Segment struct {
 	Sections []*Section
 }
 
-// 对应ELF文件中的section
+// 抽象的Section，和各种具体的object文件格式中的section对应
 type Section struct {
 	Rwx     uint8
 	Extnum  int16

@@ -19,9 +19,11 @@ type Target struct {
 	LinkMode  LinkMode
 	BuildMode BuildMode
 
-	linkShared    bool
+	// go build -linkshared
+	// build code that will be linked against shared libraries previously created with -buildmode=shared.
+	linkShared    bool // link against installed Go shared libraries
 	canUsePlugins bool // 代码中引用了"runtime/cgo"和"plugin"
-	IsELF         bool
+	IsELF         bool // HeadType = Hlinux
 }
 
 //

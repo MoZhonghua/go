@@ -97,7 +97,7 @@ const (
 	SNOPTRBSS
 	SLIBFUZZER_EXTRA_COUNTER
 	STLSBSS
-	SXREF //应该是eXternal REFerence缩写?
+	SXREF //应该是eXternal REFerence缩写?, cgo_import_xxx
 	SMACHOSYMSTR
 	SMACHOSYMTAB
 	SMACHOINDIRECTPLT
@@ -131,6 +131,7 @@ const (
 
 // AbiSymKindToSymKind maps values read from object files (which are
 // of type cmd/internal/objabi.SymKind) to values of type SymKind.
+// linker中定义个SymKind更多，objabi的SymKind更简单。后者是前者的子集。
 var AbiSymKindToSymKind = [...]SymKind{
 	Sxxx,
 	STEXT,
