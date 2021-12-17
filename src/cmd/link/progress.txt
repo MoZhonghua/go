@@ -47,4 +47,6 @@ internal/amd64/obj.go
 2021-12-16
 internal/loader/loader.go
 internal/loader/symbolbuilder.go
+
+2021-12-17
 internal/ld/main.go ?

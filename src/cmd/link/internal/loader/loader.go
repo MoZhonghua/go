@@ -90,6 +90,7 @@ type oReader struct {
 	nhashed64def int      // cache goobj.Reader.NHashed64Def()
 	nhasheddef   int      // cache goobj.Reader.NHashedDef()
 	objidx       uint32   // index of this reader in the objs slice
+	file         string
 }
 
 // go object file
@@ -555,12 +556,16 @@ func (st *loadState) addSym(name string, ver int, r *oReader, li uint32, kind in
 	return oldi
 }
 
+var debugNewExtSym = false
 // newExtSym creates a new external sym with the specified
 // name/version.
 func (l *Loader) newExtSym(name string, ver int) Sym {
 	i := Sym(len(l.objSyms))
 	if l.extStart == 0 {
 		l.extStart = i
+	}
+	if debugNewExtSym {
+		fmt.Printf("  newExtSym: %v %v\n", name, ver)
 	}
 	l.growValues(int(i) + 1)
 	l.growAttrBitmaps(int(i) + 1)
@@ -1211,7 +1216,6 @@ func (l *Loader) AttrReadOnly(i Sym) bool {
 func (l *Loader) SetAttrReadOnly(i Sym, v bool) {
 	l.attrReadOnly[i] = v
 }
-
 
 // case1: Size(y)=Size(x1)+Size(x2)+...，y包含了x1和x2内容，只需要写入y，不需要写入x1和x2
 // sub字段形成一个链表，s为链表头，特别的s.outer=0
@@ -2169,7 +2173,7 @@ func (l *Loader) FuncInfo(i Sym) FuncInfo {
 // These are done in LoadSyms.
 // Does not read symbol data.
 // Returns the fingerprint of the object.
-func (l *Loader) Preload(localSymVersion int, f *bio.Reader, lib *sym.Library, unit *sym.CompilationUnit, length int64) goobj.FingerprintType {
+func (l *Loader) Preload(localSymVersion int, f *bio.Reader, lib *sym.Library, unit *sym.CompilationUnit, length int64, pn string) goobj.FingerprintType {
 	roObject, readonly, err := f.Slice(uint64(length)) // TODO: no need to map blocks that are for tools only (e.g. RefName)
 	if err != nil {
 		log.Fatal("cannot read object file:", err)
@@ -2196,6 +2200,7 @@ func (l *Loader) Preload(localSymVersion int, f *bio.Reader, lib *sym.Library, u
 		nhasheddef:   nhasheddef,
 		nhashed64def: nhashed64def,
 		objidx:       uint32(len(l.objs)),
+		file:         pn,
 	}
 
 	// Autolib
@@ -2277,8 +2282,8 @@ func (st *loadState) preloadSyms(r *oReader, kind int) {
 		}
 		if strings.HasPrefix(name, "runtime.") ||
 			(loadingRuntimePkg && strings.HasPrefix(name, "type.")) {
-				// base type，比如int, *int，这些类型sym的名字不是runtime开头的
-				// 只会在runtime pkg中定义
+			// base type，比如int, *int，这些类型sym的名字不是runtime开头的
+			// 只会在runtime pkg中定义
 			if bi := goobj.BuiltinIdx(name, v); bi != -1 {
 				// This is a definition of a builtin symbol. Record where it is.
 				l.builtinSyms[bi] = gi
@@ -2308,6 +2313,7 @@ func (l *Loader) LoadSyms(arch *sys.Arch) {
 	// Index 0 is invalid for symbols.
 	l.objSyms = make([]objSym, 1, symSize)
 
+
 	l.npkgsyms = l.NSym()
 	st := loadState{
 		l:            l,
@@ -2324,13 +2330,66 @@ func (l *Loader) LoadSyms(arch *sys.Arch) {
 		st.preloadSyms(o.r, hashedDef)
 		st.preloadSyms(o.r, nonPkgDef)
 	}
-	// 上面是xxxDef，这里是xxxRef
 	l.nhashedsyms = len(st.hashed64Syms) + len(st.hashedSyms)
+
+	// 除了DWARF相关的sym，go obj只定义这些类型的sym:
+	// STEXT: count=12800
+	// SRODATA: count=83351
+	// SNOPTRDATA: count=827
+	// SDATA: count=14105
+	// SBSS: count=461
+	// SNOPTRBSS: count=381
+
+	// 上面是xxxDef，这里是xxxRef
 	for _, o := range l.objs[goObjStart:] {
+		// 基本需要创建extSym, version=r.version=10+N
+		// 都是go.info.time.Time和gofile..$GOROOT/src/fmt/print.go
 		loadObjRefs(l, o.r, arch)
 	}
+
 	l.values = make([]int64, l.NSym(), l.NSym()+1000) // +1000 make some room for external symbols
 }
+
+func (l *Loader)Dumpsymstats() {
+	fmt.Printf("========stats of sym by kind\n")
+
+	kinds := make(map[sym.SymKind]int, 1000)
+	for i := 1; i < l.NSym(); i++ {
+		k := l.SymType(Sym(i))
+		kinds[k]++
+	}
+
+	for k := sym.Sxxx; k <= sym.SABIALIAS; k++ {
+		if kinds[k] == 0 {
+			continue
+		}
+		fmt.Printf("  %12s: count=%v\n", k.String(), kinds[k])
+	}
+
+	fmt.Printf("========stats of sym by ver\n")
+
+	minVer := 0
+	maxVer := 0
+	vers := make(map[int]int, 1000)
+	for i := 1; i < l.NSym(); i++ {
+		k := l.SymVersion(Sym(i))
+		if minVer == 0 || k < minVer {
+			minVer = k
+		}
+		if maxVer == 0 || k > maxVer {
+			maxVer = k
+		}
+		vers[k]++
+	}
+
+	for v := minVer; v <=maxVer; v++ {
+		if vers[v] == 0 {
+			continue
+		}
+		fmt.Printf("  version: %d: count=%v\n", v, vers[v])
+	}
+}
+
 
 func loadObjRefs(l *Loader, r *oReader, arch *sys.Arch) {
 	// load non-package refs

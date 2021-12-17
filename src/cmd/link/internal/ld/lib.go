@@ -338,7 +338,7 @@ func (ctxt *Link) NeedCodeSign() bool {
 }
 
 var (
-	dynlib          []string
+	dynlib          []string  // [libc.so.6, libpthread.so.0], 最终输出为.dynamic的DT_NEEDED项
 	ldflag          []string
 	havedynamic     int
 	Funcalign       int
@@ -624,7 +624,9 @@ func (ctxt *Link) loadlib() {
 	}
 
 	// Add non-package symbols and references of externally defined symbols.
-	// 读取所有go object文件内容
+	// 读取所有go object文件内容:
+	//  - 读取所有pkg的sym def, objabi SymKind => link SymKind
+	//  - 读取所有pkg的sym ref, 会有extSym
 	ctxt.loader.LoadSyms(ctxt.Arch)
 
 	// Load symbols from shared libraries, after all Go object symbols are loaded.
@@ -2032,7 +2034,7 @@ func ldobj(ctxt *Link, f *bio.Reader, lib *sym.Library, length int64, pn string,
 
 	// 此时f.Offset()指向的是goobj.Header数据, 创建了一个goobj.Reader对象，读取Autolib
 	// 追加到lib.Autolib列表中
-	fingerprint := ctxt.loader.Preload(ctxt.IncVersion(), f, lib, unit, eof-f.Offset())
+	fingerprint := ctxt.loader.Preload(ctxt.IncVersion(), f, lib, unit, eof-f.Offset(), pn)
 	if !fingerprint.IsZero() { // Assembly objects don't have fingerprints. Ignore them.
 		// Check fingerprint, to ensure the importing and imported packages
 		// have consistent view of symbol indices.
