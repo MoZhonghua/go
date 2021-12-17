@@ -14,12 +14,13 @@ func indent2(prefix string) string {
 	return s
 }
 
-func dumpsymname(prefix string, ldr *loader.Loader, name string) {
-	sym := ldr.Lookup(name, 0)
-	dumpsym(prefix, ldr, sym)
+func (ctxt *Link) Dumpsymname(prefix string, name string) {
+	sym := ctxt.loader.Lookup(name, 0)
+	ctxt.Dumpsym(prefix, sym)
 }
 
-func dumpsym(prefix string, ldr *loader.Loader, sym loader.Sym) {
+func (ctxt *Link) Dumpsym(prefix string, sym loader.Sym) {
+	ldr := ctxt.loader
 	if sym == 0 {
 		fmt.Printf("%vsym = 0\n", prefix)
 	}
@@ -29,13 +30,65 @@ func dumpsym(prefix string, ldr *loader.Loader, sym loader.Sym) {
 	siz := ldr.SymSize(sym)
 	ver := ldr.SymVersion(sym)
 
-	fmt.Printf("%v%v, val=%x, siz=%v, ty=%v, ver=%d", prefix, name, value, siz, ty, ver)
+	flags := ""
+	if !ldr.AttrReachable(sym) {
+		flags += "dead "
+	} else {
+		flags += "live "
+	}
+
+	if ldr.AttrLocal(sym) {
+		flags += "local "
+	}
+
+	if ldr.AttrSubSymbol(sym) {
+		flags += "sub "
+	}
+
+	if ldr.AttrUsedInIface(sym) {
+		flags += "use_iface "
+	}
+
+	if ldr.AttrSpecial(sym) {
+		flags += "special "
+	}
+
+	if ldr.AttrCgoExportDynamic(sym) {
+		flags += "cgo_export_dynamic "
+	}
+
+	if ldr.AttrCgoExportStatic(sym) {
+		flags += "cgo_export_static "
+	}
+
+	if ldr.AttrDuplicateOK(sym) {
+		flags += "dupok "
+	}
+
+	if ldr.AttrExternal(sym) {
+		flags += "external "
+	}
+
+	if ename := ldr.SymExtname(sym); ename != "" && ename != name {
+		flags += "extname=" + name + " "
+	}
+
+	if sub := ldr.SubSym(sym); sub != 0 {
+		flags += fmt.Sprintf("sub=%d ", sub)
+	}
+
+	if out := ldr.OuterSym(sym); out != 0 {
+		flags += fmt.Sprintf("out=%d ", out)
+	}
+
+	fmt.Printf("%v%v: val=%x, siz=%v, ty=%v, ver=%d", prefix, name, value, siz, ty, ver)
 	sec := ldr.SymSect(sym)
 	if sec != nil {
 		fmt.Printf(", sec=%v, vaddr=%x\n", sec.Name, sec.Vaddr)
 	} else {
 		fmt.Printf(", sec=nil\n")
 	}
+	fmt.Printf("%vflags: %v\n", prefix, flags)
 }
 
 func dumpreloc(prefix string, ldr *loader.Loader, r loader.Reloc, from loader.Sym) {

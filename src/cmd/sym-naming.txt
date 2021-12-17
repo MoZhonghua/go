@@ -1,0 +1,50 @@
+在go object文件中各种类型sym的名字
+
+## SRODATA
+
+// var a, b runtime.Frame
+// a == b
+type..eqfunc.runtime.Frame
+
+// sysMap(v unsafe.Pointer, n uintptr, sysStat *sysMemStat)
+runtime.sysMmap.args_stackmap
+runtime.sysMmap.arginfo0
+
+// type errorString string
+type.runtime.errorString
+
+// debugCallSystemStack = "executing on Go runtime stack"
+go.string."executing on Go runtime stack"
+
+// func BlockProfile(p []BlockProfileRecord) (n int, ok bool)
+type.func(*runtime.BlockProfileRecord) []uintptr
+
+// ?
+runtime..stmp_69
+
+// type StackRecord struct { }
+type.runtime.StackRecord
+type.*runtime.StackRecord
+type..namedata.*runtime.StackRecord.
+
+// hash sym
+runtime.gcbits.920c
+runtime.gcbits.49922449922449922409
+
+## STEXT
+// func raise(sig uint32)
+runtime.raise
+
+// func (*TypeAssertionError) RuntimeError() {}
+runtime.(*TypeAssertionError).RuntimeError
+
+// ?
+runtime/cgo(.text)
+
+## SNOPTRBSS
+
+// var starttime int64
+starttime SNOPTRBSS
+
+// ??
+runtime..stmp_0 SNOPTRBSS

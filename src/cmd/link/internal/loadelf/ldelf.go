@@ -66,7 +66,7 @@ type ElfSect struct {
 	align       uint64
 	entsize     uint64
 	base        []byte // mmap section内容
-	readOnlyMem bool // Is this section in readonly memory?
+	readOnlyMem bool   // Is this section in readonly memory?
 	sym         loader.Sym
 }
 
@@ -80,11 +80,11 @@ type ElfObj struct {
 	e         binary.ByteOrder
 	sect      []ElfSect
 	nsect     uint
-	nsymtab   int  // 不是symtab section个数，而是.symtab中符号的个数
+	nsymtab   int // 不是symtab section个数，而是.symtab中符号的个数
 	symtab    *ElfSect
 	symstr    *ElfSect
 	type_     uint32
-	machine   uint32  //基本就是对应elf.Header64中字段
+	machine   uint32 //基本就是对应elf.Header64中字段
 	version   uint32
 	entry     uint64
 	phoff     uint64
@@ -98,9 +98,8 @@ type ElfObj struct {
 	shstrndx  uint32
 }
 
-
 type ElfSym struct {
-	name  string
+	name string
 
 	// 对ELF来说每个Sym只有一个唯一的uint64值，不是指Sym本身的内容, 一般是vaddr/offset in section/const value
 	value uint64
@@ -240,6 +239,14 @@ func parseArmAttributes(e binary.ByteOrder, data []byte) (found bool, ehdrFlags 
 	return found, ehdrFlags, nil
 }
 
+// 最终生成sym ver的关系
+// - Section sym: LookupOrCreateCgoExport("pkg(.section)", object ver); ver >=10
+// - STB_LOCAL sym: l.CreateStaticSym(name); ver<0
+// - STB_GLOBAL/STB_WEAK sym: l.LookupOrCreateCgoExport(name, 0); ver=0
+//    * LookupOrCreateCgoExport()会检查是否已经通过//cgo_export_static name创建了
+//      同名sym，如果是则不新建，返回这个sym
+//    * 这里负责填充比如value，type, reloc
+
 // Load loads the ELF file pn from f.
 // Symbols are installed into the loader, and a slice of the text symbols is returned.
 //
@@ -250,9 +257,9 @@ func parseArmAttributes(e binary.ByteOrder, data []byte) (found bool, ehdrFlags 
 // TODO: find a better place for this logic.
 func Load(l *loader.Loader, arch *sys.Arch, localSymVersion int, f *bio.Reader, pkg string, length int64, pn string, initEhdrFlags uint32) (textp []loader.Sym, ehdrFlags uint32, err error) {
 	newSym := func(name string, version int) loader.Sym {
-		return l.CreateStaticSym(name)
+		return l.CreateStaticSym(name) // create extSym with ver < 0
 	}
-	lookup := l.LookupOrCreateCgoExport
+	lookup := l.LookupOrCreateCgoExport // create extSym with ver == 0 or ver >= 10
 	errorf := func(str string, args ...interface{}) ([]loader.Sym, uint32, error) {
 		return nil, 0, fmt.Errorf("loadelf: %s: %v", pn, fmt.Sprintf(str, args...))
 	}
@@ -592,6 +599,7 @@ func Load(l *loader.Loader, arch *sys.Arch, localSymVersion int, f *bio.Reader, 
 			continue
 		}
 
+		// 一般是引用的外部符号，比如libc中函数setregid()， shndx=SHN_UNDEF
 		if uint(elfsym.shndx) >= elfobj.nsect || elfsym.shndx == 0 {
 			continue
 		}
@@ -645,7 +653,7 @@ func Load(l *loader.Loader, arch *sys.Arch, localSymVersion int, f *bio.Reader, 
 		// 注意.symtab中没有说明sym的类型，只能根据section type和flag判断也就是同一个section中的所有
 		// sym都是一种类型
 		sb.SetType(sectsb.Type())
-		sectsb.AddInteriorSym(s) // s.OuterSym = sectsb
+		sectsb.AddInteriorSym(s) // 用sectsb存储section中所有sym的数据，sectsb.sub 和 s.sub形成链表
 		if !l.AttrCgoExportDynamic(s) {
 			sb.SetDynimplib("") // satisfy dynimport
 		}
@@ -818,6 +826,7 @@ func Load(l *loader.Loader, arch *sys.Arch, localSymVersion int, f *bio.Reader, 
 		sb.SortRelocs() // just in case
 	}
 
+
 	return textp, ehdrFlags, nil
 }
 
@@ -947,6 +956,7 @@ func readelfsym(newSym, lookup func(string, int) loader.Sym, l *loader.Loader, a
 				s = newSym(elfsym.name, localSymVersion)
 				l.SetAttrVisibilityHidden(s, true)
 			}
+
 
 		case elf.STB_WEAK:
 			if needSym != 0 {

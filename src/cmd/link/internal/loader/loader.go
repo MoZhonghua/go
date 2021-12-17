@@ -316,6 +316,8 @@ type Loader struct {
 
 	npkgsyms    int // number of package symbols, for accounting
 	nhashedsyms int // number of hashed symbols, for accounting
+
+	DebugNewExtSym bool
 }
 
 const (
@@ -556,7 +558,6 @@ func (st *loadState) addSym(name string, ver int, r *oReader, li uint32, kind in
 	return oldi
 }
 
-var debugNewExtSym = false
 // newExtSym creates a new external sym with the specified
 // name/version.
 func (l *Loader) newExtSym(name string, ver int) Sym {
@@ -564,7 +565,7 @@ func (l *Loader) newExtSym(name string, ver int) Sym {
 	if l.extStart == 0 {
 		l.extStart = i
 	}
-	if debugNewExtSym {
+	if l.DebugNewExtSym {
 		fmt.Printf("  newExtSym: %v %v\n", name, ver)
 	}
 	l.growValues(int(i) + 1)
@@ -615,8 +616,10 @@ func (l *Loader) LookupOrCreateCgoExport(name string, ver int) Sym {
 	if ver != 0 {
 		panic("ver must be 0 or a static version")
 	}
+
 	// Look for a cgo-exported symbol from Go.
 	if s, ok := l.CgoExports[name]; ok {
+		// 在setCgoAttr中遇到 //cgo_export_static 会增加一项
 		return s
 	}
 	// Otherwise, this must just be a symbol in the host object.
@@ -772,6 +775,20 @@ func (l *Loader) Lookup(name string, ver int) Sym {
 		return l.extStaticSyms[nameVer{name, ver}]
 	}
 	return l.symsByName[ver][name]
+}
+
+func (l *Loader) LookupOrigin(name string, ver int) (sym Sym, from string) {
+	s := l.Lookup(name, ver)
+	if s == 0 {
+		return 0, "<unknown>"
+	}
+
+	if l.IsExternal(s) {
+		return s, "<extSym>"
+	}
+
+	lo, _ := l.toLocal(s)
+	return s, lo.pkgprefix+lo.file
 }
 
 // Check that duplicate symbols have same contents.
@@ -1003,6 +1020,7 @@ func (l *Loader) SymAddr(i Sym) int64 {
 
 // AttrNotInSymbolTable returns true for symbols that should not be
 // added to the symbol table of the final generated load module.
+// 一般指内部使用的sym，不写入ELF symtab中。比如DWARF sym, pcln sym等等
 func (l *Loader) AttrNotInSymbolTable(i Sym) bool {
 	return l.attrNotInSymbolTable.Has(i)
 }
@@ -2313,7 +2331,6 @@ func (l *Loader) LoadSyms(arch *sys.Arch) {
 	// Index 0 is invalid for symbols.
 	l.objSyms = make([]objSym, 1, symSize)
 
-
 	l.npkgsyms = l.NSym()
 	st := loadState{
 		l:            l,
@@ -2344,13 +2361,14 @@ func (l *Loader) LoadSyms(arch *sys.Arch) {
 	for _, o := range l.objs[goObjStart:] {
 		// 基本需要创建extSym, version=r.version=10+N
 		// 都是go.info.time.Time和gofile..$GOROOT/src/fmt/print.go
+		// 全部都是DWARF相关数据
 		loadObjRefs(l, o.r, arch)
 	}
 
 	l.values = make([]int64, l.NSym(), l.NSym()+1000) // +1000 make some room for external symbols
 }
 
-func (l *Loader)Dumpsymstats() {
+func (l *Loader) Dumpsymstats() {
 	fmt.Printf("========stats of sym by kind\n")
 
 	kinds := make(map[sym.SymKind]int, 1000)
@@ -2382,14 +2400,13 @@ func (l *Loader)Dumpsymstats() {
 		vers[k]++
 	}
 
-	for v := minVer; v <=maxVer; v++ {
+	for v := minVer; v <= maxVer; v++ {
 		if vers[v] == 0 {
 			continue
 		}
 		fmt.Printf("  version: %d: count=%v\n", v, vers[v])
 	}
 }
-
 
 func loadObjRefs(l *Loader, r *oReader, arch *sys.Arch) {
 	// load non-package refs

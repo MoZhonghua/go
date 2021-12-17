@@ -120,6 +120,17 @@ func loadcgo(ctxt *Link, file string, pkg string, p string) {
 	ctxt.cgodata = append(ctxt.cgodata, cgodata{file, pkg, directives})
 }
 
+// cgo_import_static在LinkInternal时的处理逻辑:
+//  - 在.go中有// cgo_import_static <name>
+//  - 在.c中定义<name>，函数或者变量
+//  - compile编译后在同一个_pkg_.a中，_go_.o， _x001.o
+//    - _go_.o在文件头中会记录所有的cgo directive
+//    - _x001.o中elf symtab中有<name>项
+//  - 先加载_go_.o，处理cgo directive。创建sym，并AddCgoExport()
+//  - 加载_x001.o，binding=STB_GLOBAL，先检查loader.CgoExport表，发现已经有了，不新建sym
+//    - 用elf symtab中的数据填充sym的数据, 比如value，type, size，reloc
+//  - 其他人引用<name>都会找到这个sym
+
 // Set symbol attributes or flags based on cgo directives.
 // Any newly discovered HOSTOBJ syms are added to 'hostObjSyms'.
 func setCgoAttr(ctxt *Link, file string, pkg string, directives [][]string, hostObjSyms map[loader.Sym]struct{}) {
@@ -151,6 +162,7 @@ func setCgoAttr(ctxt *Link, file string, pkg string, directives [][]string, host
 				return
 			}
 
+			// net, cgo库都会有这个
 			if local == "_" && remote == "_" {
 				// allow #pragma dynimport _ _ "foo.so"
 				// to force a link of foo.so.

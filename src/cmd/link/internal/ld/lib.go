@@ -338,7 +338,7 @@ func (ctxt *Link) NeedCodeSign() bool {
 }
 
 var (
-	dynlib          []string  // [libc.so.6, libpthread.so.0], 最终输出为.dynamic的DT_NEEDED项
+	dynlib          []string // [libc.so.6, libpthread.so.0], 最终输出为.dynamic的DT_NEEDED项
 	ldflag          []string
 	havedynamic     int
 	Funcalign       int
@@ -644,7 +644,8 @@ func (ctxt *Link) loadlib() {
 
 	// Conditionally load host objects, or setup for external linking.
 	// 读取elf object内容
-	hostobjs(ctxt) // only for LinkInternal
+	hostobjs(ctxt)
+
 
 	// 关闭ctxt.Out，然后重新打开输出到/tmpdir/go.o，最终结果由extld来输出
 	hostlinksetup(ctxt) // only for LinkExternal
@@ -774,6 +775,9 @@ func (ctxt *Link) linksetup() {
 	// binaries, so leave it enabled on OS X (Mach-O) binaries.
 	// Also leave it enabled on Solaris which doesn't support
 	// statically linked binaries.
+
+	// 用到了net, runtime/cgo等会引用libc.so中的函数，最终生成一定是dynamic-linked exe
+	// 强制-d=true编译报错
 	if ctxt.BuildMode == BuildModeExe {
 		if havedynamic == 0 && ctxt.HeadType != objabi.Hdarwin && ctxt.HeadType != objabi.Hsolaris {
 			*FlagD = true
@@ -880,6 +884,11 @@ func (ctxt *Link) linksetup() {
 	for _, lib := range ctxt.Library {
 		intlibs = append(intlibs, isRuntimeDepPkg(lib.Pkg))
 	}
+
+	// loadelf.Load 返回返回textp列表，然后append到ctxt.Textp
+	// 因此此时已经包含的是host object中的STEXT sym:
+	//  - .text setion sym: <runtime/cgo(.text), 180>
+	//  - func sym: <_cgo_libc_setuid, 0>
 	ctxt.Textp = ctxt.loader.AssignTextSymbolOrder(ctxt.Library, intlibs, ctxt.Textp)
 }
 
@@ -1138,6 +1147,21 @@ func ldhostobj(ld func(*Link, *bio.Reader, string, int64, string), headType obja
 }
 
 // 读取elf object内容
+// 每个obj单独分配ver；obj中每个section会单独分配一个extSym，名称为pkg(.section),
+// 比如net(.text)，注意同一个pkg中多个obj会重名，但是ver不一样，不冲突
+// 每个static sym单独分配一个<0 ver，比如<runtime_init_done, -2>
+// 每个global函数ver=0
+
+// 以runtime/cgo(_x005.o为例), 分配verson=177
+/*
+name ver
+runtime/cgo(.text) 177  // section sym
+runtime/cgo(.data) 177
+runtime/cgo(.rodata.str1.1) 177  // fprintf(stderr, "pthread_create failed: %s", strerror(err));
+runtime_init_done -3   // static int runtime_init_done;
+_cgo_wait_runtime_init_done 0 // void _cgo_wait_runtime_init_done(void) {}
+*/
+
 func hostobjs(ctxt *Link) {
 	if ctxt.LinkMode != LinkInternal {
 		return
@@ -1156,6 +1180,7 @@ func hostobjs(ctxt *Link) {
 			Errorf(nil, "%s: unrecognized object file format", h.pn)
 			continue
 		}
+		// loadelf.Load
 		h.ld(ctxt, f, h.pkg, h.length, h.pn)
 		f.Close()
 	}

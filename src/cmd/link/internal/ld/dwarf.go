@@ -499,6 +499,15 @@ func (d *dwctxt) dotypedef(parent *dwarf.DWDie, gotype loader.Sym, name string, 
 	if strings.HasPrefix(name, "struct {") {
 		return nil
 	}
+	// TODO(mzh): check "noalg.struct {"
+	if strings.HasPrefix(name, "noalg.struct {") {
+		return nil
+	}
+
+	if strings.HasPrefix(name, "func(") {
+		return nil
+	}
+
 	if strings.HasPrefix(name, "chan ") {
 		return nil
 	}

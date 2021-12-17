@@ -264,13 +264,18 @@ func Main(arch *sys.Arch, theArch Arch) {
 	ctxt.linksetup()
 
 	bench.Start("dostrdata")
-	ctxt.dostrdata()
+	ctxt.dostrdata() // 处理 -X pkg.val="abc"
 	if buildcfg.Experiment.FieldTrack {
 		bench.Start("fieldtrack")
 		fieldtrack(ctxt.Arch, ctxt.loader)
 	}
 
 	bench.Start("dwarfGenerateDebugInfo")
+
+	// 这些开头的sym都是DWARF相关
+	// const InfoPrefix = "go.info."
+	// const ConstInfoPrefix = "go.constinfo."
+	// const CUInfoPrefix = "go.cuinfo."
 	dwarfGenerateDebugInfo(ctxt)
 
 	bench.Start("callgraph")
