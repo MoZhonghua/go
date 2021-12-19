@@ -289,6 +289,8 @@ func Main(arch *sys.Arch, theArch Arch) {
 
 	if ctxt.IsELF {
 		bench.Start("doelf")
+		// 创建了elf section对应的sym, 注意类型都是SELFxxSECT，这些在后面会每个sym生成一个单独同名
+		// elf section。同时填写了.dynamic的内容，基本都是relocation。
 		ctxt.doelf()
 	}
 	if ctxt.IsDarwin() {
@@ -307,34 +309,53 @@ func Main(arch *sys.Arch, theArch Arch) {
 	}
 
 	bench.Start("textbuildid")
-	ctxt.textbuildid()
+	ctxt.textbuildid() // do nothing in ELF
 	bench.Start("addexport")
 	ctxt.setArchSyms()
-	ctxt.addexport()
+	ctxt.addexport() // 生成.dynsym, DT_NEEDED, SUNDEFEXT
 	bench.Start("Gentext")
+
+	// 在.init_array中生成一项，把自己moduledata加入到链表
+	// 只有生成结果是DSO时才需要处理，普通的.a和exe不需要initfunc
+	// ../amd64/asm.go:60
 	thearch.Gentext(ctxt, ctxt.loader) // trampolines, call stubs, etc.
 
+	// net(.text) 0x401000 container sym
+	// _cgo_3c1cec0c9a4e_C2func_getaddrinfo 0x401000 sub sym
+	// _cgo_3c1cec0c9a4e_Cfunc_freeaddrinfo 0x401060 sub sym
 	bench.Start("textaddress")
 	ctxt.textaddress()
+
 	bench.Start("typelink")
+	// 遍历sym，所有有TypeLink/Itab标志的sym, 在.typelink 和 .itablink添加指针指向sym
 	ctxt.typelink()
+
 	bench.Start("buildinfo")
 	ctxt.buildinfo()
+
 	bench.Start("pclntab")
-	containers := ctxt.findContainerSyms()
+	containers := ctxt.findContainerSyms()  // 需要跳过container sym
 	pclnState := ctxt.pclntab(containers)
+
+	// 生成通过PC快速查找runtime.func{}的索引
 	bench.Start("findfunctab")
 	ctxt.findfunctab(pclnState, containers)
+
 	bench.Start("dwarfGenerateDebugSyms")
 	dwarfGenerateDebugSyms(ctxt)
+
 	bench.Start("symtab")
 	symGroupType := ctxt.symtab(pclnState)
+
 	bench.Start("dodata")
 	ctxt.dodata(symGroupType)
+
 	bench.Start("address")
 	order := ctxt.address()
+
 	bench.Start("dwarfcompress")
 	dwarfcompress(ctxt)
+
 	bench.Start("layout")
 	filesize := ctxt.layout(order)
 

@@ -1135,6 +1135,7 @@ func (l *Loader) SetAttrExternal(i Sym, v bool) {
 // AttrSpecial returns true for a symbols that do not have their
 // address (i.e. Value) computed by the usual mechanism of
 // data.go:dodata() & data.go:address().
+// Value不是sym本身的地址，而是一个整数，具体含义由sym本身决定
 func (l *Loader) AttrSpecial(i Sym) bool {
 	_, ok := l.attrSpecial[i]
 	return ok
@@ -2775,6 +2776,7 @@ func (l *Loader) AssignTextSymbolOrder(libs []*sym.Library, intlibs []bool, exts
 			if intlibs[idx] != doInternal {
 				continue
 			}
+			// 先处理普通text sym，然后处理Dupok text sym
 			lists := [2][]sym.LoaderSym{lib.Textp, lib.DupTextSyms}
 			for i, list := range lists {
 				for _, s := range list {

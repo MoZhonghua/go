@@ -454,6 +454,9 @@ func fieldtrack(arch *sys.Arch, l *loader.Loader) {
 	addstrdata(arch, l, *flagFieldTrack, buf.String())
 }
 
+// 注意在不同LinkMode的处理不同:
+//  - LinkInternal: .dynsym, DT_NEEDED
+//  - LinkExternal: SUNDEFEXT
 func (ctxt *Link) addexport() {
 	// Track undefined external symbols during external link.
 	if ctxt.LinkMode == LinkExternal {
@@ -483,7 +486,7 @@ func (ctxt *Link) addexport() {
 	}
 
 	// Add dynamic symbols.
-	for _, s := range ctxt.dynexp {
+	for _, s := range ctxt.dynexp { // cgo_export_dynamic
 		// Consistency check.
 		if !ctxt.loader.AttrReachable(s) {
 			panic("dynexp entry not reachable")

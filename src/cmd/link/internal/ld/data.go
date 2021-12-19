@@ -804,7 +804,7 @@ func windynrelocsym(ctxt *Link, rel *loader.SymbolBuilder, s loader.Sym) {
 
 		tplt := ctxt.loader.SymPlt(targ) // targ's offset in plt
 		tgot := ctxt.loader.SymGot(targ) // targ's offset in got
-		if tplt == -2 && tgot != -2 { // make dynimport JMP table for PE object files.
+		if tplt == -2 && tgot != -2 {    // make dynimport JMP table for PE object files.
 			tplt := int32(rel.Size())
 			ctxt.loader.SetPlt(targ, tplt)
 
@@ -1974,7 +1974,7 @@ func (state *dodataState) allocateDataSections(ctxt *Link) {
 	// situation.
 	// TODO(mwhudson): It would make sense to do this more widely, but it makes
 	// the system linker segfault on darwin.
-	const relroPerm = 06  // 06=rw
+	const relroPerm = 06 // 06=rw
 	const fallbackPerm = 04
 	relroSecPerm := fallbackPerm
 	genrelrosecname := func(suffix string) string {
@@ -2308,6 +2308,7 @@ func (ctxt *Link) buildinfo() {
 // assign addresses to text
 // sec.vaddr = 0x410000
 // sym.Value = 0x416800, 不是偏移量
+// 创建.text sym.Section, 为所有函数分配vaddr，记录开始结束位置到"runtime.text", "runtime.etext" sym
 func (ctxt *Link) textaddress() {
 	addsection(ctxt.loader, ctxt.Arch, &Segtext, ".text", 05)
 
@@ -2323,6 +2324,7 @@ func (ctxt *Link) textaddress() {
 	text := ctxt.xdefine("runtime.text", sym.STEXT, 0)
 	etext := ctxt.xdefine("runtime.etext", sym.STEXT, 0)
 	ldr.SetSymSect(text, sect)
+
 	if ctxt.IsAIX() && ctxt.IsExternal() {
 		// Setting runtime.text has a real symbol prevents ld to
 		// change its base address resulting in wrong offsets for
@@ -2367,10 +2369,17 @@ func (ctxt *Link) textaddress() {
 		limit = 1
 	}
 
+	// Textp已经排好顺序, loader.AssignTextSymbolOrder()
+	// ../loader/loader.go:2720
+
 	// First pass: assign addresses assuming the program is small and
 	// don't generate trampolines.
 	big := false
 	for _, s := range ctxt.Textp {
+		// elf object处理:
+		//  - net(.text) -> container text sym, 分配vaddr，同时所有的sub sym的value是在section
+		//    中的偏移量，更新为vaddr + Value(sub sym)，即sub sym的vaddr
+		//  - func sym -> sub text sym，跳过，已经处理过了
 		sect, n, va = assignAddress(ctxt, sect, n, s, va, false, big)
 		if va-start >= limit {
 			big = true

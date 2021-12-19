@@ -140,12 +140,14 @@ func (ctxt *Link) mkArchSymVec(name string, ver int, ls []loader.Sym) {
 // setArchSyms sets up the ArchSyms structure, and must be called before
 // relocations are applied.
 func (ctxt *Link) setArchSyms() {
+	// 注意前一阶段doelf()已经生成了这里用到的大部分的sym
 	ctxt.mkArchSym(".got", 0, &ctxt.GOT)
 	ctxt.mkArchSym(".plt", 0, &ctxt.PLT)
 	ctxt.mkArchSym(".got.plt", 0, &ctxt.GOTPLT)
 	ctxt.mkArchSym(".dynamic", 0, &ctxt.Dynamic)
 	ctxt.mkArchSym(".dynsym", 0, &ctxt.DynSym)
 	ctxt.mkArchSym(".dynstr", 0, &ctxt.DynStr)
+	// 这个text sym在加载runtime(_go_.o)时已经加载
 	ctxt.mkArchSym("runtime.unreachableMethod", sym.SymVerABIInternal, &ctxt.unreachableMethod)
 
 	if ctxt.IsPPC64() {
@@ -645,7 +647,6 @@ func (ctxt *Link) loadlib() {
 	// Conditionally load host objects, or setup for external linking.
 	// 读取elf object内容
 	hostobjs(ctxt)
-
 
 	// 关闭ctxt.Out，然后重新打开输出到/tmpdir/go.o，最终结果由extld来输出
 	hostlinksetup(ctxt) // only for LinkExternal
@@ -2560,6 +2561,7 @@ func (ctxt *Link) defineInternal(p string, t sym.SymKind) loader.Sym {
 	return s.Sym()
 }
 
+// 创建出来的sym有如下属性: reachable special local size=0
 func (ctxt *Link) xdefine(p string, t sym.SymKind, v int64) loader.Sym {
 	s := ctxt.defineInternal(p, t)
 	ctxt.loader.SetSymValue(s, v)

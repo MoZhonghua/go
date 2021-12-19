@@ -252,6 +252,7 @@ func atolwhex(s string) int64 {
 // linking a module that contains the runtime) the returned builder
 // will be nil.
 func PrepareAddmoduledata(ctxt *Link) (*loader.SymbolBuilder, loader.Sym) {
+	// 只有生成结果是DSO时才需要处理，普通的.a和exe不需要initfunc
 	if !ctxt.DynlinkingGo() {
 		return nil, 0
 	}

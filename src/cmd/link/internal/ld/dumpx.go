@@ -16,6 +16,10 @@ func indent2(prefix string) string {
 
 func (ctxt *Link) Dumpsymname(prefix string, name string) {
 	sym := ctxt.loader.Lookup(name, 0)
+	if sym == 0 {
+		fmt.Printf("%v%v: sym = 0\n", prefix, name)
+		return
+	}
 	ctxt.Dumpsym(prefix, sym)
 }
 
@@ -23,18 +27,20 @@ func (ctxt *Link) Dumpsym(prefix string, sym loader.Sym) {
 	ldr := ctxt.loader
 	if sym == 0 {
 		fmt.Printf("%vsym = 0\n", prefix)
+		return
 	}
 	name := ldr.SymName(sym)
 	value := ldr.SymValue(sym)
 	ty := ldr.SymType(sym)
 	siz := ldr.SymSize(sym)
 	ver := ldr.SymVersion(sym)
+	relocs := ldr.Relocs(sym)
 
 	flags := ""
 	if !ldr.AttrReachable(sym) {
 		flags += "dead "
 	} else {
-		flags += "live "
+		flags += "reachable "
 	}
 
 	if ldr.AttrLocal(sym) {
@@ -81,14 +87,21 @@ func (ctxt *Link) Dumpsym(prefix string, sym loader.Sym) {
 		flags += fmt.Sprintf("out=%d ", out)
 	}
 
-	fmt.Printf("%v%v: val=%x, siz=%v, ty=%v, ver=%d", prefix, name, value, siz, ty, ver)
+	fmt.Printf("%v%v(%d): val=0x%x, siz=%v, ty=%v, ver=%d, relocs=%d",
+		prefix, name, sym, value, siz, ty, ver, relocs.Count())
 	sec := ldr.SymSect(sym)
 	if sec != nil {
-		fmt.Printf(", sec=%v, vaddr=%x\n", sec.Name, sec.Vaddr)
+		fmt.Printf(", sec=%v, vaddr=0x%x\n", sec.Name, sec.Vaddr)
 	} else {
 		fmt.Printf(", sec=nil\n")
 	}
-	fmt.Printf("%vflags: %v\n", prefix, flags)
+	fmt.Printf("%vflags: %v\n", indent2(prefix), flags)
+
+	for i := 0; i < relocs.Count(); i++ {
+		r := relocs.At(i)
+		fmt.Printf("%vreloc[%d]: t=%v, off=%v, add=%v, tgt=%d\n",
+			indent2(prefix), i, r.Type().String(), r.Off(), r.Add(), r.Sym())
+	}
 }
 
 func dumpreloc(prefix string, ldr *loader.Loader, r loader.Reloc, from loader.Sym) {
@@ -102,7 +115,7 @@ func dumpelfshdr(prefix string, s *ElfShdr) {
 	fmt.Printf("%v%+v\n", prefix, s)
 }
 
-func dumpsegs() {
+func (ctxt *Link)Dumpsegs() {
 	var segnames = []string{
 		"Segtext",
 		"Segrodata",

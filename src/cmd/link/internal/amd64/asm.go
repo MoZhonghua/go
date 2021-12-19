@@ -45,6 +45,14 @@ func PADDR(x uint32) uint32 {
 	return x &^ 0x80000000
 }
 
+// 调用关系:
+//  - 回调ctxt.PrepareAddmoduledata()，生成
+//    * SINITARR sym，最终会放到.init section
+//    * init func sym: SINITARR sym 内容为指向这个func sym地址
+//    * runtime.addmoduledata() sym
+//  - 填充 init func 函数体，调用runtime.addmoduledata() sym
+
+// 只有生成结果是DSO时才需要处理，普通的.a和exe不需要initfunc
 func gentext(ctxt *ld.Link, ldr *loader.Loader) {
 	// addmoduledata是指向函数runtime.addmoduledata()
 	// 在.init会有一项指向initfunc，我们要做的是构造initfunc函数体

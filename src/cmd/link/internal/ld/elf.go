@@ -1381,6 +1381,7 @@ func addgonote(ctxt *Link, sectionName string, tag uint32, desc []byte) {
 	s.SetAlign(4)
 }
 
+// 创建各种section，特别是.shstrtab的内容需要填充
 func (ctxt *Link) doelf() {
 	ldr := ctxt.loader
 
@@ -1475,6 +1476,8 @@ func (ctxt *Link) doelf() {
 	}
 
 	if hasinitarr {
+		// 需要在.init_array中增加一项, load时需要调用runtime.addmoduledata()把自己moduledata加到
+		// runtime中的链表里
 		shstrtab.Addstring(".init_array")
 		shstrtab.Addstring(elfRelType + ".init_array")
 	}
@@ -1482,6 +1485,8 @@ func (ctxt *Link) doelf() {
 	if !*FlagS {
 		shstrtab.Addstring(".symtab")
 		shstrtab.Addstring(".strtab")
+		// .debug_info: 非压缩数据
+		// .zdebug_info: z前缀表示压缩后数据
 		dwarfaddshstrings(ctxt, shstrtab)
 	}
 
@@ -1502,7 +1507,8 @@ func (ctxt *Link) doelf() {
 		shstrtab.Addstring(elfRelType + ".plt")
 
 		shstrtab.Addstring(".plt")
-		shstrtab.Addstring(".gnu.version")
+		// https://refspecs.linuxfoundation.org/LSB_5.0.0/LSB-Core-generic/LSB-Core-generic.html#SYMVERSION
+		shstrtab.Addstring(".gnu.version")  // 和.symtab一一对应，每项是一个int值，指向.gnu.version_r中aux id
 		shstrtab.Addstring(".gnu.version_r")
 
 		/* dynamic symbol table - first entry all zeros */
@@ -1524,7 +1530,7 @@ func (ctxt *Link) doelf() {
 		}
 
 		/* relocation table */
-		s := ldr.CreateSymForUpdate(elfRelType, 0)
+		s := ldr.CreateSymForUpdate(elfRelType, 0) // .rela
 		s.SetType(sym.SELFROSECT)
 
 		/* global offset table */
@@ -1571,7 +1577,8 @@ func (ctxt *Link) doelf() {
 			gotplt = got
 		}
 
-		// ../amd64/asm.go:563
+		// ../amd64/asm.go:610
+		// 写入PLT0项，实现lazy-relocation
 		thearch.Elfsetupplt(ctxt, plt, gotplt, dynamic.Sym())
 
 		/*
