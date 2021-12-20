@@ -260,7 +260,7 @@ const (
 // AddBuildFlags adds the flags common to the build, clean, get,
 // install, list, run, and test commands.
 func AddBuildFlags(cmd *base.Command, mask BuildFlagMask) {
-	base.AddBuildFlagsNX(&cmd.Flag)
+	base.AddBuildFlagsNX(&cmd.Flag) // -n 和 -x
 	cmd.Flag.BoolVar(&cfg.BuildA, "a", false, "")
 	cmd.Flag.IntVar(&cfg.BuildP, "p", cfg.BuildP, "")
 	if mask&OmitVFlag == 0 {

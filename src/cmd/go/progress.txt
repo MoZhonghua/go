@@ -1,2 +1,5 @@
 2021-12-20
-main.go
+./internal/bug/bug.go
+./internal/clean/clean.go
+./internal/doc/doc.go ?
+main.go ?
