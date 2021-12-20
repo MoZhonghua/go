@@ -70,7 +70,7 @@ func PrintCurrentG() {
 }
 
 func DebugTLS() {
-	m1 := m{};
+	m1 := m{}
 
 	m1Addr := uintptr(unsafe.Pointer(&m1))
 	tls0Addr := uintptr(unsafe.Pointer(&m1.tls[0]))
@@ -78,12 +78,50 @@ func DebugTLS() {
 	println("&m1 =", &m1)
 	println("&tls[0] =", &m1.tls[0])
 
-	println("tls[0] pos =", tls0Addr - m1Addr)
-	println("tls[0] + 0xfffffffffffffff8 =", hex(tls0Addr + 0xfffffffffffffff8))
+	println("tls[0] pos =", tls0Addr-m1Addr)
+	println("tls[0] + 0xfffffffffffffff8 =", hex(tls0Addr+0xfffffffffffffff8))
 }
-
 
 func PrintBuildInfo() {
 	println("runtime.buildVersion =", buildVersion)
 	println("runtime.modinfo =", modinfo)
+}
+
+type markdebugdata struct {
+	g       unsafe.Pointer
+	g0      unsafe.Pointer
+	gsignal unsafe.Pointer
+	obj     uintptr
+}
+
+func (d *markdebugdata) needlog(gp *g) bool {
+	if d.g != nil && d.g == unsafe.Pointer(gp) {
+		return true
+	}
+
+	if d.g0 != nil && d.g0 == unsafe.Pointer(gp) {
+		return true
+	}
+
+	if d.gsignal != nil && d.gsignal == unsafe.Pointer(gp) {
+		return true
+	}
+
+	return false
+}
+
+var markdebug markdebugdata
+
+func SetMarkDebug(obj uintptr) {
+	g := getg()
+	markdebug.g = unsafe.Pointer(g)
+	if g.m != nil {
+		markdebug.g0 = unsafe.Pointer(g.m.g0)
+		markdebug.gsignal = unsafe.Pointer(g.m.gsignal)
+	}
+	markdebug.obj = obj
+}
+
+func Getg() unsafe.Pointer {
+	return unsafe.Pointer(getg())
 }

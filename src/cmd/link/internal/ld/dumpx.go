@@ -7,26 +7,33 @@ import (
 )
 
 func indent2(prefix string) string {
+	prefixSpaceLen := 0
+	for i := 0; i < len(prefix); i++ {
+		if prefix[i] != ' ' {
+			break
+		}
+		prefixSpaceLen += 1
+	}
 	s := ""
-	for i := 0; i < len(prefix)+2; i++ {
+	for i := 0; i < prefixSpaceLen+4; i++ {
 		s += " "
 	}
 	return s
 }
 
 func (ctxt *Link) Dumpsymname(prefix string, name string) {
-	sym := ctxt.loader.Lookup(name, 0)
-	if sym == 0 {
-		fmt.Printf("%v%v: sym = 0\n", prefix, name)
+	if ctxt.loader == nil {
+		fmt.Printf("%vsym = %v\n", prefix, name)
 		return
 	}
+	sym := ctxt.loader.Lookup(name, 0)
 	ctxt.Dumpsym(prefix, sym)
 }
 
 func (ctxt *Link) Dumpsym(prefix string, sym loader.Sym) {
 	ldr := ctxt.loader
-	if sym == 0 {
-		fmt.Printf("%vsym = 0\n", prefix)
+	if ldr == nil || sym == 0 || int(sym) >= ldr.NSym() {
+		fmt.Printf("%vsym = %d\n", prefix, sym)
 		return
 	}
 	name := ldr.SymName(sym)
@@ -75,6 +82,10 @@ func (ctxt *Link) Dumpsym(prefix string, sym loader.Sym) {
 		flags += "external "
 	}
 
+	if ldr.AttrNotInSymbolTable(sym) {
+		flags += "nosymtab "
+	}
+
 	if ename := ldr.SymExtname(sym); ename != "" && ename != name {
 		flags += "extname=" + name + " "
 	}
@@ -115,7 +126,8 @@ func dumpelfshdr(prefix string, s *ElfShdr) {
 	fmt.Printf("%v%+v\n", prefix, s)
 }
 
-func (ctxt *Link)Dumpsegs() {
+func (ctxt *Link) Dumpsegs(header string) {
+	fmt.Printf("==================%v==============\n", header)
 	var segnames = []string{
 		"Segtext",
 		"Segrodata",
@@ -131,12 +143,12 @@ func (ctxt *Link)Dumpsegs() {
 		&Segdata,
 		&Segdwarf,
 	} {
-		fmt.Printf("Segment %v: nsections = %d; fileoff = %x; filelen = %x\n",
+		fmt.Printf("Segment %v: nsections = %d; fileoff = 0x%x; filelen = 0x%x\n",
 			segnames[i], len(seg.Sections), seg.Fileoff, seg.Filelen)
 
 		for _, sec := range seg.Sections {
 			off := sec.Vaddr - seg.Vaddr + seg.Fileoff
-			fmt.Printf("  section %v: len = %x vaddr = %x; fileoff = %x\n", sec.Name, sec.Length, sec.Vaddr, off)
+			fmt.Printf("  section %v: len = 0x%x vaddr = 0x%x; fileoff = 0x%x\n", sec.Name, sec.Length, sec.Vaddr, off)
 		}
 	}
 }

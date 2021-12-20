@@ -215,6 +215,11 @@ func Main(arch *sys.Arch, theArch Arch) {
 		}
 	}
 
+	benchmark.Dumpsym = ctxt.Dumpsym
+	benchmark.Dumpsymname = ctxt.Dumpsymname
+	// benchmark.DebugSym = 160629
+	// benchmark.DebugSymname = "runtime.types"
+
 	// amd64.Init() 返回sys.Arch和ld.Arch对象，设置了字段和回调函数
 	bench.Start("libinit")
 	libinit(ctxt) // creates outfile
@@ -357,6 +362,7 @@ func Main(arch *sys.Arch, theArch Arch) {
 	dwarfcompress(ctxt)
 
 	bench.Start("layout")
+	// 计算segment在文件中的偏移量
 	filesize := ctxt.layout(order)
 
 	// Write out the output file.
@@ -375,6 +381,9 @@ func Main(arch *sys.Arch, theArch Arch) {
 	// asmb will redirect symbols to the output file mmap, and relocations
 	// will be applied directly there.
 	bench.Start("Asmb")
+	// 写入各个segment(text, rodata, rela.rodata, data, dwarf)的数据到文件
+	// 过程中会进行link-relocation，此时所有的sym.Value已经设置好了
+	// 不是从文件偏移量0开始写，而是从4K(0x1000)位置开始，ELF文件头在asmb2()中写入
 	asmb(ctxt)
 
 	exitIfErrors()
@@ -387,11 +396,15 @@ func Main(arch *sys.Arch, theArch Arch) {
 	}
 
 	bench.Start("Asmb2")
+	// 写入ELF头
 	asmb2(ctxt)
 
+	// 注意如果是LinkExternal，输出文件实际是go.o, 由gcc链接生成最终exe
 	bench.Start("Munmap")
+
 	ctxt.Out.Close() // Close handles Munmapping if necessary.
 
+	// 如果是LinkExternal，调用gcc来完成link工作
 	bench.Start("hostlink")
 	ctxt.hostlink()
 	if ctxt.Debugvlog != 0 {

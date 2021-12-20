@@ -1136,6 +1136,7 @@ func elfshalloc(sect *sym.Section) *ElfShdr {
 	return sh
 }
 
+// 把sym.Section的字段转换为elf sectio字段
 // bits: SHT_PROGBITS/SHT_NOBITS
 //  - SHT_PROGBITS在文件中有数据, .text, .rodata, .data, .noptrdata
 //  - SHT_NOBITS在文件中没有有数据, .bss, .noptrbss
@@ -1806,7 +1807,8 @@ func asmbElf(ctxt *Link) {
 	startva := *FlagTextAddr - int64(HEADR) // 0x400000
 
 	// resoff 即是ELF文件头预留位置，第一个section(.text)从这个位置开始写
-	resoff := elfreserve
+	// 下面额外增加的section是从resoff往前分配空间，因此resoff会不断减少
+	resoff := elfreserve  // 4096
 
 	var pph *ElfPhdr
 	var pnote *ElfPhdr
@@ -1841,15 +1843,17 @@ func asmbElf(ctxt *Link) {
 			sh.Flags = uint64(elf.SHF_ALLOC)
 		}
 
+		// 只生成go.o，然后由gcc完成链接。此时我们不需要生成program header，只需要section header即可
 		goto elfobj
 	}
 
+	// 和objdump -p顺序一致
 	/* program header info */
 	pph = newElfPhdr()
 
 	pph.Type = elf.PT_PHDR
 	pph.Flags = elf.PF_R
-	pph.Off = uint64(eh.Ehsize)
+	pph.Off = uint64(eh.Ehsize) // 一定是第一个PH, 仅挨着Ehdr，因此off=64
 	pph.Vaddr = uint64(*FlagTextAddr) - uint64(HEADR) + pph.Off
 	pph.Paddr = uint64(*FlagTextAddr) - uint64(HEADR) + pph.Off
 	pph.Align = uint64(*FlagRound)
@@ -1863,7 +1867,7 @@ func asmbElf(ctxt *Link) {
 		Segtext.Vaddr -= uint64(o)
 		Segtext.Length += uint64(o)
 		o = int64(Segtext.Fileoff - pph.Off)
-		Segtext.Fileoff -= uint64(o)
+		Segtext.Fileoff -= uint64(o)  // Segtext.Fileoff=64
 		Segtext.Filelen += uint64(o)
 	}
 
@@ -1958,9 +1962,12 @@ func asmbElf(ctxt *Link) {
 		phsh(pnote, sh)
 	}
 
-	// Additions to the reserved area must be above this line.
+	// -buildmode=pie, 前面生成3个PH: PT_PHDR, PT_INTERP, PT_NOTE
 
+	// Additions to the reserved area must be above this line. off=64, vaddr=0x400040, align=4096
+	// 写入ELF时需要把vaddr对齐，变成0和0x400000 fixElfPhdr()
 	elfphload(&Segtext)
+
 	if len(Segrodata.Sections) > 0 {
 		elfphload(&Segrodata)
 	}
@@ -2303,10 +2310,11 @@ elfobj:
 	ctxt.Out.SeekSet(0)
 	a := int64(0)
 	a += int64(elfwritehdr(ctxt.Out))
-	a += int64(elfwritephdrs(ctxt.Out))
+	a += int64(elfwritephdrs(ctxt.Out)) // 会对phdr.vaddr向下对齐align
 	a += int64(elfwriteshdrs(ctxt.Out))
 	if !*FlagD {
 		// .interp section
+		// 注意.interp是紧挨着4K往前，不是在a这个位置，里面做了seek(sh.Off)
 		a += int64(elfwriteinterp(ctxt.Out))
 	}
 	if ctxt.IsMIPS() {

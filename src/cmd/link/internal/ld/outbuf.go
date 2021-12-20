@@ -72,6 +72,10 @@ type OutBuf struct {
 	isView bool    // true if created from View()
 }
 
+func (out *OutBuf) Name() string {
+	return out.name
+}
+
 func (out *OutBuf) Open(name string) error {
 	if out.f != nil {
 		return errors.New("cannot open more than one file")

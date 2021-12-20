@@ -16,10 +16,26 @@ import (
 	"path/filepath"
 )
 
+// _func后有两个指针/偏移量数组
+//  - [npcdata]uint32，pc data在pctab中的偏移量(moduledata.pctab字段)
+//  - [nfuncdata]unsafe.Pointer，实际的funcdata数据地址(funcdata在.rodata中)
+
+/* 生成runtime.moduledata中这些字段数据
+type moduledata struct {
+	pcHeader     *pcHeader
+	funcnametab  []byte
+	cutab        []uint32
+	filetab      []byte
+	pctab        []byte
+	pclntable    []byte
+	ftab         []functab
+	findfunctab  uintptr
+*/
+
 // pclntab多个数据:
-//  - _func
-//  - funcdata table
-//  - pc value table
+//  - funcdata table: .rodata中
+//  - pc value table: ?
+//  - _func: .gopclntab, 这里生成
 // pclntab holds the state needed for pclntab generation.
 type pclntab struct {
 	// The size of the func object in the runtime.
@@ -34,13 +50,17 @@ type pclntab struct {
 	// 和DWARF的.debug_line是独立，存放的是golang自己定义的funcdata和pc value table
 	// runtime.pclntab's symbols
 	carrier     loader.Sym
-	pclntab     loader.Sym
-	pcheader    loader.Sym
-	funcnametab loader.Sym
-	findfunctab loader.Sym
-	cutab       loader.Sym
-	filetab     loader.Sym
-	pctab       loader.Sym
+	pclntab     loader.Sym // []{entry, offset} 和 []runtime._func, _func包括追加的pc value table和func data table offset
+	pcheader    loader.Sym // runtime/symtab.go pcheader 对象
+	funcnametab loader.Sym // strtab，所有函数名列表
+	findfunctab loader.Sym // pc->runtime._func 索引
+	cutab       loader.Sym // []uint32; <cu_file_idx>到filetab中偏移量，同一个CU连续存放
+	filetab     loader.Sym // strtab，文件名列表
+
+	// 所有函数的pc value table打包在一起, 这些在compile中生成，这里只是打包到一起
+	// 同时把这些sym的Value设置为在pctab中的偏移量
+	// pcfile, pcsp, pcinline, pcline, pc-stackmapindex, pc-unsafepoints
+	pctab loader.Sym
 
 	// The number of functions + number of TEXT sections - 1. This is such an
 	// unexpected value because platforms that have more than one TEXT section
@@ -62,6 +82,7 @@ func (state *pclntab) addGeneratedSym(ctxt *Link, name string, size int64, f gen
 	state.size += size
 	s := ctxt.createGeneratorSymbol(name, 0, sym.SPCLNTAB, size, f)
 	ctxt.loader.SetAttrReachable(s, true) // 设置bitmap 对应的s的比特位
+	// 注意是只设置了Outer(s) = state.carrier, 因此AttrSubSym(s)=false
 	ctxt.loader.SetCarrierSym(s, state.carrier)
 	ctxt.loader.SetAttrNotInSymbolTable(s, true)
 	return s
@@ -87,7 +108,7 @@ func makePclntab(ctxt *Link, container loader.Bitmap) (*pclntab, []*sym.Compilat
 	funcs := []loader.Sym{}
 
 	for _, s := range ctxt.Textp {
-		// 不是container的sym采用生成pcln
+		// container sym是net(.text)这样的section container sym, 不用生成pcln
 		if !emitPcln(ctxt, s, container) {
 			continue
 		}
@@ -258,6 +279,7 @@ func (state *pclntab) generatePCHeader(ctxt *Link) {
 
 		// Write header.
 		// Keep in sync with runtime/symtab.go:pcHeader.
+		// ../../../../runtime/symtab.go:375
 		header.SetUint32(ctxt.Arch, 0, 0xfffffffa)
 		header.SetUint8(ctxt.Arch, 6, uint8(ctxt.Arch.MinLC))
 		header.SetUint8(ctxt.Arch, 7, uint8(ctxt.Arch.PtrSize))
@@ -395,7 +417,8 @@ func (state *pclntab) generateFilenameTabs(ctxt *Link, compUnits []*sym.Compilat
 	// CU->global table needs to be.
 	var fileSize int64
 
-	// 遍历所有函数用到filename
+	// 遍历所有函数用到filename，不是直接遍历所有CU所有文件，因为有些文件名
+	// deadcode可能没使用
 	walkFilenames(ctxt, funcs, func(cu *sym.CompilationUnit, i goobj.CUFileIndex) {
 		// Note we use the raw filename for lookup, but use the expanded filename
 		// when we save the size.
@@ -589,8 +612,11 @@ func (state *pclntab) generateFunctab(ctxt *Link, funcs []loader.Sym, inlSyms ma
 		}
 
 		// Write the data.
+		// 写入[]struct{entry, funcoff}
 		writePcToFunc(ctxt, sb, funcs, startLocations, setAddr, (*loader.SymbolBuilder).SetUint)
+		// 写入_func和_func后的[npcdata]unit32
 		writeFuncs(ctxt, sb, funcs, inlSyms, startLocations, cuOffsets, nameOffsets)
+		// 写入_func后的[nfuncdata]unsafe.Pointer
 		state.writeFuncData(ctxt, sb, funcs, inlSyms, startLocations, setAddr, (*loader.SymbolBuilder).SetUint)
 	}
 
@@ -637,8 +663,7 @@ func (state *pclntab) generateFunctab(ctxt *Link, funcs []loader.Sym, inlSyms ma
 func funcData(fi loader.FuncInfo, inlSym loader.Sym, fdSyms []loader.Sym, fdOffs []int64) ([]loader.Sym, []int64) {
 	fdSyms, fdOffs = fdSyms[:0], fdOffs[:0]
 	if fi.Valid() {
-		numOffsets := int(fi.NumFuncdataoff()) // NumFuncdataoff指fundata offset个数，不是偏移量，命名问题
-		// 这里的offset指的是在funcdata sym中的偏移量，因此都是0
+		numOffsets := int(fi.NumFuncdataoff())
 		for i := 0; i < numOffsets; i++ {
 			fdOffs = append(fdOffs, fi.Funcdataoff(i))
 		}
@@ -694,7 +719,7 @@ func (state pclntab) calculateFunctabSize(ctxt *Link, funcs []loader.Sym) (int64
 	return size, startLocations
 }
 
-// 写入 runtime.module.ftab
+// 写入 runtime.module.ftab; []struct{entry, funcoff}
 // writePcToFunc writes the PC->func lookup table.
 // This function walks the pc->func lookup table, executing callbacks
 // to generate relocations and writing the values for the table.
@@ -736,7 +761,7 @@ func writePcToFunc(ctxt *Link, sb *loader.SymbolBuilder, funcs []loader.Sym, sta
 	setAddr(sb, ctxt.Arch, int64(funcIndex)*2*int64(ctxt.Arch.PtrSize), prevFunc, ldr.SymSize(prevFunc))
 }
 
-// 看起来只是写了_func 后面的[nfuncdata]unsafe.Pointer，实际的funcdata数据在哪里?
+// 写入的是_func后的[nfuncdata]unsafe.Pointer数组
 // writeFuncData writes the funcdata tables.
 //
 // This function executes a callback for each funcdata needed in
@@ -759,7 +784,6 @@ func (state *pclntab) writeFuncData(ctxt *Link, sb *loader.SymbolBuilder, funcs 
 		fi.Preload()
 		// funcdata, must be pointer-aligned and we're only int32-aligned.
 		// Missing funcdata will be 0 (nil pointer).
-		// TODO(mzh) 全0的funcdataoff是否可以删掉?
 		funcdata, funcdataoff := funcData(fi, inlSyms[s], funcdata, funcdataoff)
 		if len(funcdata) > 0 {
 			off := int64(startLocations[i] + state.funcSize + numPCData(fi)*4)
@@ -773,6 +797,7 @@ func (state *pclntab) writeFuncData(ctxt *Link, sb *loader.SymbolBuilder, funcs 
 				// ldr.SymName(funcdata[j])
 				//  - gclocals.1a65e721a2cc
 				//  - main.inner.arginfo1
+				//  - main.test1.stkobj
 				// TODO: Does this need deduping?
 				setAddr(sb, ctxt.Arch, dataoff, funcdata[j], funcdataoff[j])
 			}
@@ -820,7 +845,8 @@ func writeFuncs(ctxt *Link, sb *loader.SymbolBuilder, funcs []loader.Sym, inlSym
 
 		// pcdata
 		if fi.Valid() {
-			// 偏移量，因此可以直接写入，不用relocation
+			// generatePctab()把所有pc value table打包到pctab，且更新sym.Value为在pctab中的偏移量，
+			// 因此可以直接写入，不用relocation
 			off = uint32(sb.SetUint32(ctxt.Arch, int64(off), uint32(ldr.SymValue(fi.Pcsp()))))
 			off = uint32(sb.SetUint32(ctxt.Arch, int64(off), uint32(ldr.SymValue(fi.Pcfile()))))
 			off = uint32(sb.SetUint32(ctxt.Arch, int64(off), uint32(ldr.SymValue(fi.Pcline()))))
@@ -911,21 +937,21 @@ func (ctxt *Link) pclntab(container loader.Bitmap) *pclntab {
 	//        end PC [thearch.ptrsize bytes]
 	//        func structures, pcdata offsets, func data.
 
-	// 注意funcdata本身数据不在这里，有compiler生成，在.rodata中
+	// 注意funcdata本身数据不在这里，由compiler生成，在.rodata中
 
 	state, compUnits, funcs := makePclntab(ctxt, container)
 
 	ldr := ctxt.loader
 	state.carrier = ldr.LookupOrCreateSym("runtime.pclntab", 0)
-	ldr.MakeSymbolUpdater(state.carrier).SetType(sym.SPCLNTAB)
+	ldr.MakeSymbolUpdater(state.carrier).SetType(sym.SPCLNTAB) // 输出到.gopclntab
 	ldr.SetAttrReachable(state.carrier, true)
 	setCarrierSym(sym.SPCLNTAB, state.carrier)
 
 	state.generatePCHeader(ctxt)
 	nameOffsets := state.generateFuncnametab(ctxt, funcs)
 	cuOffsets := state.generateFilenameTabs(ctxt, compUnits, funcs)
+	// 把所有pc value table打包到pctab，然后每个pc value table sym的Value设置为在pctab中的偏移量
 	state.generatePctab(ctxt, funcs)
-	// 生成了了FUNCDATA_InlTree对应的external sym，什么时候写入.rodata?
 	inlSyms := makeInlSyms(ctxt, funcs, nameOffsets)
 	state.generateFunctab(ctxt, funcs, inlSyms, cuOffsets, nameOffsets)
 

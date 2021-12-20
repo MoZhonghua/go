@@ -1582,6 +1582,19 @@ func (ctxt *Link) hostlink() {
 		argv = append(argv, compressDWARF)
 	}
 
+	/*
+		"gcc" "-m64" "-Wl,-z,relro" "-pie" "-o" "/tmp/go-build493168190/b001/exe/a.out" "-rdynamic" "-Wl,
+		--compress-debug-sections=zlib-gnu" "/tmp/x1/go.o" "/tmp/x1/000000.o" "/tmp/x1/000001.o"
+		"/tmp/x1/000002.o" "/tmp/x1/000003.o" "/tmp/x1/000004.o" "/tmp/x1/000005.o" "/tmp/x1/000006.o"
+		"/tmp/x1/000007.o" "/tmp/x1/000008.o" "/tmp/x1/000009.o" "/tmp/x1/000010.o" "/tmp/x1/000011.o"
+		"/tmp/x1/000012.o" "/tmp/x1/000013.o" "/tmp/x1/000014.o" "/tmp/x1/000015.o" "/tmp/x1/000016.o"
+		"/tmp/x1/000017.o" "/tmp/x1/000018.o" "/tmp/x1/000019.o" "/tmp/x1/000020.o" "/tmp/x1/000021.o" "-g"
+		"-O2" "-lpng" "-g" "-O2" "-lpthread" "-g" "-O2"
+	*/
+
+	// 输入文件:
+	// - go.o: 所有_pkg_.a中的go object链接后形成的elf object
+	// - %06d.o: 所有_pkg_.a中的elf object复制出来后的文件
 	argv = append(argv, filepath.Join(*flagTmpdir, "go.o"))
 	argv = append(argv, hostobjCopy()...)
 	if ctxt.HeadType == objabi.Haix {
@@ -1654,6 +1667,7 @@ func (ctxt *Link) hostlink() {
 		}
 	}
 
+	// -lpthread -g -O2: 是cgo directive中定义
 	for _, p := range ldflag {
 		argv = append(argv, p)
 		checkStatic(p)
@@ -1710,6 +1724,12 @@ func (ctxt *Link) hostlink() {
 		}
 		ctxt.Logf("\n")
 	}
+
+	ctxt.Logf("host link:")
+	for _, v := range argv {
+		ctxt.Logf(" %q", v)
+	}
+	ctxt.Logf("\n")
 
 	out, err := exec.Command(argv[0], argv[1:]...).CombinedOutput()
 	if err != nil {

@@ -538,7 +538,8 @@ func (ctxt *Link) symtab(pcln *pclntab) []sym.SymKind {
 	// Define these so that they'll get put into the symbol table.
 	// data.c:/^address will provide the actual values.
 	//  都定义为local symbol, size=0, value=0，后面需要更新value为对应对象地址
-	ctxt.xdefine("runtime.rodata", sym.SRODATA, 0)
+	// 注意没有runtime.text和runtime.etext，在之前的textaddress()已经设置
+	ctxt.xdefine("runtime.rodata", sym.SRODATA, 0) // 此处为Value=0, data.go:2771 更新为.rodata的起始vaddr
 	ctxt.xdefine("runtime.erodata", sym.SRODATA, 0)
 	ctxt.xdefine("runtime.types", sym.SRODATA, 0)
 	ctxt.xdefine("runtime.etypes", sym.SRODATA, 0)
@@ -555,7 +556,7 @@ func (ctxt *Link) symtab(pcln *pclntab) []sym.SymKind {
 	ctxt.xdefine("runtime.esymtab", sym.SRODATA, 0)
 
 	// garbage collection symbols
-	s := ldr.CreateSymForUpdate("runtime.gcdata", 0)
+	s := ldr.CreateSymForUpdate("runtime.gcdata", 0) // dodata() 中填充
 	s.SetType(sym.SRODATA)
 	s.SetSize(0)
 	ctxt.xdefine("runtime.egcdata", sym.SRODATA, 0)
@@ -646,7 +647,6 @@ func (ctxt *Link) symtab(pcln *pclntab) []sym.SymKind {
 				}
 			} else {
 				symGroupType[s] = sym.STYPE
-				// TODO(mzh): check with wrong variable
 				if symtype != 0 {
 					ldr.SetCarrierSym(s, symtype)
 				}

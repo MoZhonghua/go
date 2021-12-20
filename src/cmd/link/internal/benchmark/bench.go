@@ -10,6 +10,7 @@
 package benchmark
 
 import (
+	"cmd/link/internal/loader"
 	"fmt"
 	"io"
 	"os"
@@ -33,6 +34,13 @@ type Metrics struct {
 	filebase  string
 	pprofFile *os.File
 }
+
+var (
+	Dumpsym      func(prefix string, sym loader.Sym)
+	Dumpsymname  func(prefix string, name string)
+	DebugSym     loader.Sym
+	DebugSymname string
+)
 
 type mark struct {
 	name              string
@@ -109,6 +117,13 @@ func (m *Metrics) Report(w io.Writer) {
 // Starts marks the beginning of a new measurement phase.
 // Once a metric is started, it continues until either a Report is issued, or another Start is called.
 func (m *Metrics) Start(name string) {
+	if DebugSym != 0 {
+		Dumpsym(name+": ", DebugSym)
+	}
+	if DebugSymname != "" {
+		Dumpsymname(name+": ", DebugSymname)
+	}
+
 	if m == nil {
 		return
 	}

@@ -1524,6 +1524,8 @@ func (state *dodataState) setSymType(s loader.Sym, kind sym.SymKind) {
 	}
 }
 
+// 对每个SymKind分组所有的data sym排序, 创建sym.Section, 为所有data sym SetSymSect()
+// 注意此时section.Vaddr还是相对于Segdata的偏移量, 后面的address()会更新为全局vaddr
 func (ctxt *Link) dodata(symGroupType []sym.SymKind) {
 
 	// Give zeros sized symbols space if necessary.
@@ -1581,7 +1583,7 @@ func (ctxt *Link) dodata(symGroupType []sym.SymKind) {
 	// Sort symbols.
 	var wg sync.WaitGroup
 	for symn := range state.data {
-		symn := sym.SymKind(symn) // 这里symn变量可以同名覆盖!
+		symn := sym.SymKind(symn)
 		wg.Add(1)
 		go func() {
 			state.data[symn], state.dataMaxAlign[symn] = state.dodataSect(ctxt, symn, state.data[symn])
@@ -2576,6 +2578,9 @@ func splitTextSections(ctxt *Link) bool {
 // Keep in sync with wasm_exec.js.
 const wasmMinDataAddr = 4096 + 4096
 
+// 更新各种对象的vaddr
+// - 把所有section的vaddr更新为全局vaddr(之前是在segment中偏移量)
+// - 把所有data sym的vaddr更新为全局vaddr(之前是在section中偏移量)
 // address assigns virtual addresses to all segments and sections and
 // returns all segments in file order.
 func (ctxt *Link) address() []*sym.Segment {
@@ -2711,7 +2716,7 @@ func (ctxt *Link) address() []*sym.Segment {
 		rodata  = ldr.SymSect(ldr.LookupOrCreateSym("runtime.rodata", 0))
 		symtab  = ldr.SymSect(ldr.LookupOrCreateSym("runtime.symtab", 0))
 		pclntab = ldr.SymSect(ldr.LookupOrCreateSym("runtime.pclntab", 0))
-		types   = ldr.SymSect(ldr.LookupOrCreateSym("runtime.types", 0))
+		types   = ldr.SymSect(ldr.LookupOrCreateSym("runtime.types", 0)) // 注意返回的是所属Section，不是sym本身
 	)
 
 	for _, s := range ctxt.datap {

@@ -35,6 +35,31 @@ type FuncInfo struct {
 	InlTree []InlTreeNode
 }
 
+/*
+args uint32
+locals uint32
+funcID uint8
+funcFlag uint8
+pad [2]uint8
+
+pcsp SymRef
+pcfile SymRef
+pcline SymRef
+pcinline SymRef
+
+n_pcdata uint32
+pcdata []SymRef
+
+n_funcdataoff uint32
+funcdataoff []uint32
+
+n_fileindex uint32
+fileindex []CUFileIndex // uint32
+
+n_inlinetree uint32
+inlinetree []InlTree
+
+*/
 func (a *FuncInfo) Write(w *bytes.Buffer) {
 	writeUint8 := func(x uint8) {
 		w.WriteByte(x)
@@ -84,9 +109,12 @@ func (a *FuncInfo) Write(w *bytes.Buffer) {
 // corresponding "off" field stores the byte offset of the start of
 // the items in question.
 type FuncInfoLengths struct {
+	// pcdata entry => SymRef
+	// funcdata entry => uint32
+	//   funcdata本身数据是在aux中, 这里uint32指在aux中sym的偏移量，通常为0
+	//   因为通常是每个funcdata一个sym，不是打包在一起
 	NumPcdata      uint32
-	PcdataOff      uint32
-	// TODO(mzh): rename to NumFuncdata
+	PcdataOff      uint32  // XxxOff都是指在FuncInfo数据中偏移量
 	NumFuncdataoff uint32  // 指funcdata offset个数, Funcdataoff => offset of one funcdata
 	FuncdataoffOff uint32
 	NumFile        uint32
