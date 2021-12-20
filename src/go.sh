@@ -7,7 +7,7 @@ function buildgo() {
 	export GOROOT=/home/mozhonghua/go/src/github.com/golang/go
 
 	cp ../bin/{go.old,go}
-	go build -a -o ../bin/go2 ./cmd/go/
+	go build -o ../bin/go2 ./cmd/go/
 	mv -f ../bin/{go2,go}
 
 	echo "------build go ok-------------"
