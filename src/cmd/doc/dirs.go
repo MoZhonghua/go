@@ -45,7 +45,6 @@ func dirsInit(extra ...Dir) {
 	dirs.hist = append(dirs.hist, extra...)
 	dirs.scan = make(chan Dir)
 
-	fmt.Printf("init: dirs.hist: %v\n", dirs.hist)
 	go dirs.walk(codeRoots())
 }
 
@@ -156,9 +155,6 @@ var testGOPATH = false // force GOPATH use for testing
 func codeRoots() []Dir {
 	codeRootsCache.once.Do(func() {
 		codeRootsCache.roots = findCodeRoots()
-		for _, r := range codeRootsCache.roots {
-			fmt.Printf("code root: %+v\n", r)
-		}
 	})
 	return codeRootsCache.roots
 }
@@ -170,6 +166,19 @@ var codeRootsCache struct {
 
 var usingModules bool
 
+// 三种情况, 假设执行go doc时所在的pkg的根目录为<pkg_root>
+//  - 没有使用mod, go env GOMOD为空(使用module的情况下为go.mod的路径)
+//     * $GOROOT/src
+//     * $GOPATH/src
+//  - 使用mod, 且不使用vendor (GOFLAGS=-mod=mod或者没有<pkg_root>/vendor目录)
+//     * $GOROOT/src
+//     * $GOROOT/src/cmd
+//     * <pkg_root>
+//  - 使用mod, 且使用vendor (GOFLAGS=-mod=vendor, 或者有<pkg_root>/vendor目录且go >= 1.14)
+//     * <pkg_root>/vendor
+//     * $GOROOT/src
+//     * $GOROOT/src/cmd
+//     * <pkg_root>
 func findCodeRoots() []Dir {
 	var list []Dir
 	if !testGOPATH {
@@ -220,6 +229,10 @@ func findCodeRoots() []Dir {
 		if mainMod.Path != "std" {
 			list = append(list, Dir{importPath: mainMod.Path, dir: mainMod.Dir, inModule: true})
 		}
+		// <pkg_root>/vendor
+		// $GOROOT/src
+		// $GOROOT/src/cmd
+		// <pkg_root>
 		return list
 	}
 
@@ -227,6 +240,7 @@ func findCodeRoots() []Dir {
 	cmd.Stderr = os.Stderr
 	out, _ := cmd.Output()
 	for _, line := range strings.Split(string(out), "\n") {
+		// 只有pkg_root有dir字段，依赖的pkg的dir都为空
 		i := strings.Index(line, "\t")
 		if i < 0 {
 			continue
@@ -235,6 +249,10 @@ func findCodeRoots() []Dir {
 		if dir != "" {
 			list = append(list, Dir{importPath: path, dir: dir, inModule: true})
 		}
+
+		// $GOROOT/src
+		// $GOROOT/src/cmd
+		// <pkg_root>
 	}
 
 	return list
@@ -265,6 +283,7 @@ func vendorEnabled() (*moduleJSON, bool, error) {
 	}
 	if modFlag != "" {
 		// Don't override an explicit '-mod=' argument.
+		fmt.Printf("modFlag = %v\n", modFlag)
 		return mainMod, modFlag == "vendor", nil
 	}
 	if mainMod == nil || !go114 {
@@ -290,6 +309,12 @@ func getMainModuleAnd114() (*moduleJSON, bool, error) {
 {{.GoVersion}}
 {{range context.ReleaseTags}}{{if eq . "go1.14"}}{{.}}{{end}}{{end}}
 `
+	/*
+	   playground/gotest
+	   /home/mozhonghua/go/src/playground/gotest
+	   1.17
+	   go1.14
+	*/
 	cmd := exec.Command("go", "list", "-m", "-f", format)
 	cmd.Stderr = os.Stderr
 	stdout, err := cmd.Output()
