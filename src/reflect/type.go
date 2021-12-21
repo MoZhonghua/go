@@ -911,11 +911,6 @@ func (t *rtype) Method(i int) (m Method) {
 	for _, ret := range ft.out() {
 		out = append(out, ret)
 	}
-	println("rtype.Method i =", i)
-	println("  len(in) =", len(in))
-	println("  len(out) =", len(out))
-	println("  tfn =", t.textOff(p.tfn))
-	println("  ifn =", t.textOff(p.ifn))
 	mt := FuncOf(in, out, ft.IsVariadic())
 	m.Type = mt
 	tfn := t.textOff(p.tfn)
