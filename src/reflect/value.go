@@ -417,10 +417,8 @@ var callGC bool // for testing; see TestCallMethodJump
 const debugReflectCall = false
 
 func (v Value) call(op string, in []Value) []Value {
-	println("Value.call")
 	// Get function pointer, type.
 	t := (*funcType)(unsafe.Pointer(v.typ))
-	println("  v.typ.Name =", t.String())
 	var (
 		fn       unsafe.Pointer
 		rcvr     Value

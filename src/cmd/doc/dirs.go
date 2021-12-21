@@ -44,6 +44,8 @@ func dirsInit(extra ...Dir) {
 	dirs.hist = make([]Dir, 0, 1000)
 	dirs.hist = append(dirs.hist, extra...)
 	dirs.scan = make(chan Dir)
+
+	fmt.Printf("init: dirs.hist: %v\n", dirs.hist)
 	go dirs.walk(codeRoots())
 }
 
@@ -154,6 +156,9 @@ var testGOPATH = false // force GOPATH use for testing
 func codeRoots() []Dir {
 	codeRootsCache.once.Do(func() {
 		codeRootsCache.roots = findCodeRoots()
+		for _, r := range codeRootsCache.roots {
+			fmt.Printf("code root: %+v\n", r)
+		}
 	})
 	return codeRootsCache.roots
 }
@@ -191,6 +196,7 @@ func findCodeRoots() []Dir {
 
 	if !usingModules {
 		list = append(list, Dir{dir: filepath.Join(buildCtx.GOROOT, "src")})
+		// GOPATH可以是多个由:分隔的路径
 		for _, root := range splitGopath() {
 			list = append(list, Dir{dir: filepath.Join(root, "src")})
 		}
