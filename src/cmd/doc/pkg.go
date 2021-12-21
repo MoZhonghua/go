@@ -126,6 +126,10 @@ func (pkg *Package) Fatalf(format string, args ...interface{}) {
 	panic(PackageError(fmt.Sprintf(format, args...)))
 }
 
+// userPath是指用户参数中当做pkg的部分，比如go doc template.Template
+// buildPackage=html/template
+// userPath=template
+
 // parsePackage turns the build package we found into a parsed package
 // we can then use to generate documentation.
 func parsePackage(writer io.Writer, pkg *build.Package, userPath string) *Package {
@@ -179,6 +183,7 @@ func parsePackage(writer io.Writer, pkg *build.Package, userPath string) *Packag
 		docPkg.Vars = append(docPkg.Vars, typ.Vars...)
 		docPkg.Funcs = append(docPkg.Funcs, typ.Funcs...)
 		if isExported(typ.Name) {
+			// 每个类型的consts/vars/funs和type绑定输出，在输出package doc时需要排除这些项
 			for _, value := range typ.Consts {
 				typedValue[value] = true
 			}
@@ -468,6 +473,7 @@ func (pkg *Package) allDoc() {
 		// Constants and variables come in groups, and valueDoc prints
 		// all the items in the group. We only need to find one exported symbol.
 		for _, name := range value.Names {
+			// 排除和exported type绑定的consts，比如time.Weekday类型的const Sunday ...
 			if isExported(name) && !pkg.typedValue[value] {
 				printHdr("CONSTANTS")
 				pkg.valueDoc(value, printed)

@@ -382,6 +382,8 @@ const (
 	// Import returns an error if it finds a comment it cannot understand
 	// or finds conflicting comments in multiple source files.
 	// See golang.org/s/go14customimport for more information.
+	// 比如abc这个包的源代码中: package abc // import "xyz/abc"
+	// 其他人引用abc时，必须通过import "xyz/abc"来导入，否则报错
 	ImportComment
 
 	// By default, Import searches vendor directories

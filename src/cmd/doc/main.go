@@ -37,6 +37,10 @@
 // For complete documentation, run "go help doc".
 package main
 
+// 特别注意这里的两个Import，一个是Import, 另一个是ImportDir
+//  - build.Import("x", "/abs/y"): 等价于在路径"/abs/y"下的一个.go文件中有import "x"语句
+//  - build.ImportDir("/abs/x"): 等价于如果要导入"/abs/x"下的包，应该怎么写import语句
+
 import (
 	"bytes"
 	"flag"
@@ -48,6 +52,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -58,6 +63,7 @@ var (
 	showCmd    bool // -cmd flag
 	showSrc    bool // -src flag
 	short      bool // -short flag
+	debug      bool // -d flag
 )
 
 // usage is a replacement usage function for the flags package.
@@ -79,7 +85,9 @@ func usage() {
 func main() {
 	log.SetFlags(0)
 	log.SetPrefix("doc: ")
+	// 在处理参数之前，计算出扫描的根目录列表
 	dirsInit()
+
 	err := do(os.Stdout, flag.CommandLine, os.Args[1:])
 	if err != nil {
 		log.Fatal(err)
@@ -97,11 +105,26 @@ func do(writer io.Writer, flagSet *flag.FlagSet, args []string) (err error) {
 	flagSet.BoolVar(&showCmd, "cmd", false, "show symbols with package docs even if package is a command")
 	flagSet.BoolVar(&showSrc, "src", false, "show source code for symbol")
 	flagSet.BoolVar(&short, "short", false, "one-line representation for each symbol")
+	flagSet.BoolVar(&debug, "d", false, "debug output")
 	flagSet.Parse(args)
+
+	if debug {
+		mainMod, vendorEnabled, _ := vendorEnabled()
+		fmt.Printf("mainMod=%+v\n", mainMod)
+		fmt.Printf("vendorEnabled=%v\n", vendorEnabled)
+		fmt.Printf("usingModules=%v\n", usingModules)
+		for _, r := range codeRoots() {
+			fmt.Printf("root: %v\n", r.dir)
+		}
+	}
+
 	var paths []string
 	var symbol, method string
 	// Loop until something is printed.
 	dirs.Reset()
+
+	// 遍历所有可能的pacakge: 名字符合参数且可以build.Import或者build.ImportDir的package
+	// 然后根据参数输出all/pkg/sym/method doc，如果有输出，则完成。否则尝试下一个package
 	for i := 0; ; i++ {
 		buildPackage, userPath, sym, more := parseArgs(flagSet.Args())
 		if i > 0 && !more { // Ignore the "more" bit on the first iteration.
@@ -110,8 +133,13 @@ func do(writer io.Writer, flagSet *flag.FlagSet, args []string) (err error) {
 		if buildPackage == nil {
 			return fmt.Errorf("no such package: %s", userPath)
 		}
-		symbol, method = parseSymbol(sym)
+		symbol, method = parseSymbol(sym) // sym可能为空，此时是匹配所有
+
+		// userPath是指用户参数中当做pkg的部分，比如go doc template.Template
+		// buildPackage.Dir=html/template
+		// userPath=template
 		pkg := parsePackage(writer, buildPackage, userPath)
+
 		paths = append(paths, pkg.prettyPath())
 
 		defer func() {
@@ -142,16 +170,26 @@ func do(writer io.Writer, flagSet *flag.FlagSet, args []string) (err error) {
 
 		switch {
 		case symbol == "":
+			// go doc json
+			// <documentation>
+			// ....
+			// package xzy
+			// 输出xyz的全局文档<documentation>，同时打印所有exported类型、变量、函数(不带文档)
 			pkg.packageDoc() // The package exists, so we got some output.
 			return
 		case method == "":
+			// go doc json.Number
+			// 输出Number类型文档，同时列出所有成员函数列表
 			if pkg.symbolDoc(symbol) {
 				return
 			}
 		default:
+			// go doc json.Number.Int64
+			// 输出func (n Number) Int64()文档
 			if pkg.methodDoc(symbol, method) {
 				return
 			}
+			// go doc url.URL.Path
 			if pkg.fieldDoc(symbol, method) {
 				return
 			}
@@ -177,6 +215,20 @@ func failMessage(paths []string, symbol, method string) error {
 	}
 	return fmt.Errorf("no method or field %s.%s in package%s", symbol, method, &b)
 }
+
+// 如果有pkg，比如:
+//  - go doc pkg Foo
+//  - go doc pkg.Foo
+//  - go doc pkg.Foo.Bar
+// * Import("pkg", PWD)，如果成功则用这个pkg，注意此时总是more=false
+// * BFS所有根目录，如果找到<dir>/pkg这样目录，ImportDir("<dir>/pkg")，如果成功则返回这个
+//   pkg注意此时总是more=true
+
+// 如果没有pkg:
+// - go doc Foo: ImportDir(".")
+// - go doc: ImportDir("<PWD>")
+
+// 如果参数中没有"/", 则最后兜底的是ImportDir("<PWD>"), 否则直接报错
 
 // parseArgs analyzes the arguments (if any) and returns the package
 // it represents, the part of the argument the user used to identify
@@ -205,24 +257,29 @@ func parseArgs(args []string) (pkg *build.Package, path, symbol string, more boo
 	if isDotSlash(arg) {
 		arg = filepath.Join(wd, arg)
 	}
+
 	switch len(args) {
 	default:
 		usage()
 	case 1:
 		// Done below.
 	case 2:
+		// go doc xyz Foo
 		// Package must be findable and importable.
-		pkg, err := build.Import(args[0], wd, build.ImportComment)
+		pkg, err := Import(args[0], wd, build.ImportComment)
 		if err == nil {
 			return pkg, args[0], args[1], false
 		}
 		for {
+			// arg = xyz
+			// 从所有扫描的路径中查找/xyz结尾的路径, findable
 			packagePath, ok := findNextPackage(arg)
 			if !ok {
 				break
 			}
-			if pkg, err := build.ImportDir(packagePath, build.ImportComment); err == nil {
-				return pkg, arg, args[1], true
+			// 尝试Import路径, importable
+			if pkg, err := ImportDir(packagePath, build.ImportComment); err == nil {
+				return pkg, arg, args[1], true // more=true，可能有多个
 			}
 		}
 		return nil, args[0], args[1], false
@@ -235,12 +292,12 @@ func parseArgs(args []string) (pkg *build.Package, path, symbol string, more boo
 	// package paths as their prefix.
 	var importErr error
 	if filepath.IsAbs(arg) {
-		pkg, importErr = build.ImportDir(arg, build.ImportComment)
+		pkg, importErr = ImportDir(arg, build.ImportComment)
 		if importErr == nil {
 			return pkg, arg, "", false
 		}
 	} else {
-		pkg, importErr = build.Import(arg, wd, build.ImportComment)
+		pkg, importErr = Import(arg, wd, build.ImportComment)
 		if importErr == nil {
 			return pkg, arg, "", false
 		}
@@ -250,7 +307,8 @@ func parseArgs(args []string) (pkg *build.Package, path, symbol string, more boo
 	// Kills the problem caused by case-insensitive file systems
 	// matching an upper case name as a package name.
 	if !strings.ContainsAny(arg, `/\`) && token.IsExported(arg) {
-		pkg, err := build.ImportDir(".", build.ImportComment)
+		// go doc Foo
+		pkg, err := ImportDir(".", build.ImportComment)
 		if err == nil {
 			return pkg, "", arg, false
 		}
@@ -266,17 +324,21 @@ func parseArgs(args []string) (pkg *build.Package, path, symbol string, more boo
 	var period int
 	// slash+1: if there's no slash, the value is -1 and start is 0; otherwise
 	// start is the byte after the slash.
+
 	for start := slash + 1; start < len(arg); start = period + 1 {
+		// go doc xyz.Foo
+		// go doc abc/xyz.Foo
+		// go doc json.Number.Int64
 		period = strings.Index(arg[start:], ".")
 		symbol := ""
 		if period < 0 {
 			period = len(arg)
 		} else {
 			period += start
-			symbol = arg[period+1:]
+			symbol = arg[period+1:] // symbol=Foo
 		}
 		// Have we identified a package already?
-		pkg, err := build.Import(arg[0:period], wd, build.ImportComment)
+		pkg, err := Import(arg[0:period], wd, build.ImportComment)
 		if err == nil {
 			return pkg, arg[0:period], symbol, false
 		}
@@ -288,7 +350,7 @@ func parseArgs(args []string) (pkg *build.Package, path, symbol string, more boo
 			if !ok {
 				break
 			}
-			if pkg, err = build.ImportDir(path, build.ImportComment); err == nil {
+			if pkg, err = ImportDir(path, build.ImportComment); err == nil {
 				return pkg, arg[0:period], symbol, true
 			}
 		}
@@ -309,6 +371,7 @@ func parseArgs(args []string) (pkg *build.Package, path, symbol string, more boo
 			log.Fatalf("no such package %s: %s", arg[:period], importErrStr)
 		}
 	}
+
 	// Guess it's a symbol in the current directory.
 	return importDir(wd), "", arg, false
 }
@@ -340,7 +403,7 @@ func isDotSlash(arg string) bool {
 
 // importDir is just an error-catching wrapper for build.ImportDir.
 func importDir(dir string) *build.Package {
-	pkg, err := build.ImportDir(dir, build.ImportComment)
+	pkg, err := ImportDir(dir, build.ImportComment)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -405,4 +468,26 @@ var buildCtx = build.Default
 // splitGopath splits $GOPATH into a list of roots.
 func splitGopath() []string {
 	return filepath.SplitList(buildCtx.GOPATH)
+}
+
+// Import is shorthand for Default.Import.
+func Import(path, srcDir string, mode build.ImportMode) (*build.Package, error) {
+	pkg, err := build.Import(path, srcDir, mode)
+	if debug {
+		_, file, line, _ := runtime.Caller(1)
+		base := filepath.Base(file)
+		fmt.Printf("try build.Import: pkg=%v, src=%v; ok=%v (%v:%v)\n", path, srcDir, err == nil, base, line)
+	}
+	return pkg, err
+}
+
+// ImportDir is shorthand for Default.ImportDir.
+func ImportDir(dir string, mode build.ImportMode) (*build.Package, error) {
+	pkg, err := build.ImportDir(dir, mode)
+	if debug {
+		_, file, line, _ := runtime.Caller(1)
+		base := filepath.Base(file)
+		fmt.Printf("try build.ImportDir: %v; ok=%v (%v:%v)\n", dir, err == nil, base, line)
+	}
+	return pkg, err
 }
