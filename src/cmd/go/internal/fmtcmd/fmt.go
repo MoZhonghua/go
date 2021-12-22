@@ -107,7 +107,6 @@ func gofmtPath() string {
 		return gofmtPath
 	}
 
-	gofmtPath = filepath.Join(cfg.GOROOT, "bin", gofmt)
 	if _, err := os.Stat(gofmtPath); err == nil {
 		return gofmtPath
 	}

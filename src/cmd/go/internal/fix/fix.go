@@ -58,6 +58,9 @@ func runFix(ctx context.Context, cmd *base.Command, args []string) {
 		// the command only applies to this package,
 		// not to packages in subdirectories.
 		files := base.RelPaths(pkg.InternalAllGoFiles())
+		fmt.Printf("run fix: %v\n", str.StringList(cfg.BuildToolexec, base.Tool("fix"), files))
+		fmt.Printf("%v\n", base.Tool("fix"))
+		fmt.Printf("%v\n", cfg.BuildToolexec)
 		base.Run(str.StringList(cfg.BuildToolexec, base.Tool("fix"), files))
 	}
 }

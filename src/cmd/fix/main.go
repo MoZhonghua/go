@@ -23,6 +23,10 @@ import (
 	"cmd/internal/diff"
 )
 
+// 两种调用方式
+// - go fix: 不支持fix自定义参数，比如-r
+// - go tool fix
+
 var (
 	fset     = token.NewFileSet()
 	exitCode = 0

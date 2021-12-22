@@ -1,0 +1,37 @@
+# https://go.dev/ref/mod#mod-commands
+
+## module-awere mode 和 GOPATH mode
+GO111MODULE环境变量不同值含义:
+- on 或者 没设置: module-aware mode
+- off: GOPATH mode
+- auto: 如果当前目录或者父目录有go.mod则module-aware mode, 否则GOPATH mode
+
+可以通过go env GOMOD输出来确定:
+- 非空值: module-aware mode
+   * <dir>/go.mod
+   * /dev/null: 处于module-aware mode, 但是没有找到go.mod
+- 空值: GOPATH mode
+
+## -mod 参数， 仅在module-aware mode下生效
+
+-mod=mod
+忽略vendor目录，更新go.mod
+
+-mod=readonly
+忽略vendor目录，如果需要更新go.mod则报错
+
+-mod=vendor
+使用vendor目录, 不会更新go.mod
+In this mode, the go command will not use the network or the module cache.
+
+默认值
+If the vendor directory is present in the main module’s root directory, it will be used
+automatically if the go version in the main module’s go.mod file is 1.14 or higher.
+
+注意这里的version是指go.mod中的version，不是go命令本身的version
+
+When vendoring is enabled, build commands like go build and go test load packages from the vendor
+directory instead of accessing the network or the local module cache. The go list -m command only
+prints information about modules listed in go.mod. go mod commands such as go mod download and go
+mod tidy do not work differently when vendoring is enabled and will still download modules and
+access the module cache. go get also does not work differently when vendoring is enabled.

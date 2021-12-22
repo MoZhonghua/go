@@ -200,6 +200,8 @@ func runEnv(ctx context.Context, cmd *base.Command, args []string) {
 		base.Fatalf("go env: cannot use -u with -w")
 	}
 
+	// go env -W CC=gcc
+	// 写入到go env GOENV指定的文件中
 	// Handle 'go env -w' and 'go env -u' before calling buildcfg.Check,
 	// so they can be used to recover from an invalid configuration.
 	if *envW {
@@ -207,7 +209,8 @@ func runEnv(ctx context.Context, cmd *base.Command, args []string) {
 		return
 	}
 
-	if *envU {
+	// go env -u CC
+	if *envU {  // unset
 		runEnvU(args)
 		return
 	}

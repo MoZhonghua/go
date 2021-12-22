@@ -1,1 +1,0 @@
-当go版本 >= 1.14 且有module根目录下有vendor目录，则自动添加-mod=vendor参数

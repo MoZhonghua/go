@@ -2,8 +2,16 @@
 ./internal/bug/bug.go
 ./internal/clean/clean.go
 
-2021-12-20
-./internal/doc/doc.go ?
-../doc/main.go ?
-../doc/dirs.go ?
+2021-12-21
+./internal/doc/doc.go
+../doc/main.go
+../doc/dirs.go
+../doc/pkg.go
+internal/envcmd/env.go
+internal/fix/fix.go
+internal/fmtcmd/fmt.go
+../fix/main.go
+
+2021-12-22
+../gofmt/doc.go ?
 main.go ?
