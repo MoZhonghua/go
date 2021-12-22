@@ -79,7 +79,7 @@ func vetFlags(args []string) (passToVet, packageNames []string) {
 		}
 	}
 	out := new(bytes.Buffer)
-	vetcmd := exec.Command(tool, "-flags")
+	vetcmd := exec.Command(tool, "-flags")  // 必须输出json，描述支持的参数, []analysisFlags
 	vetcmd.Stdout = out
 	if err := vetcmd.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "go vet: can't execute %s -flags: %v\n", tool, err)
@@ -103,7 +103,7 @@ func vetFlags(args []string) (passToVet, packageNames []string) {
 	// also defined as build flags. This works fine, so we omit duplicates here.
 	// However some, like -x, are known to the build but not to vet.
 	isVetFlag := make(map[string]bool, len(analysisFlags))
-	cf := CmdVet.Flag
+	cf := CmdVet.Flag // 注意虽然这里是值复制，但是实际也修改了CmdVet.Flag
 	for _, f := range analysisFlags {
 		isVetFlag[f.Name] = true
 		if cf.Lookup(f.Name) == nil {
@@ -127,6 +127,7 @@ func vetFlags(args []string) (passToVet, packageNames []string) {
 
 	explicitFlags := make([]string, 0, len(args))
 	for len(args) > 0 {
+		// 可以消耗多个element，比如-x abc
 		f, remainingArgs, err := cmdflag.ParseOne(&CmdVet.Flag, args)
 
 		if errors.Is(err, flag.ErrHelp) {
@@ -171,6 +172,10 @@ func vetFlags(args []string) (passToVet, packageNames []string) {
 			passToVet = append(passToVet, fmt.Sprintf("-%s=%s", f.Name, f.Value))
 		}
 	})
+
+	// 最终传给vettool -flags 表示支持的参数, 两个来源:
+	//  - GOFLAGS 中指定的参数
+	//  - 命令行指定的参数，这个优先级高，同名的话覆盖GOFLAGS指定参数
 	passToVet = append(passToVet, explicitFlags...)
 	return passToVet, packageNames
 }

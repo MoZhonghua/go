@@ -44,14 +44,14 @@ import (
 
 func init() {
 	base.Go.Commands = []*base.Command{
-		bug.CmdBug,
+		bug.CmdBug, // Done
 		work.CmdBuild,
-		clean.CmdClean,
-		doc.CmdDoc,
-		envcmd.CmdEnv,
-		fix.CmdFix,
-		fmtcmd.CmdFmt,
-		generate.CmdGenerate,
+		clean.CmdClean, // Done
+		doc.CmdDoc,     // Done
+		envcmd.CmdEnv,  // Done
+		fix.CmdFix,     // Done
+		fmtcmd.CmdFmt,  // Done
+		generate.CmdGenerate, // Done
 		modget.CmdGet,
 		work.CmdInstall,
 		list.CmdList,
@@ -59,7 +59,7 @@ func init() {
 		run.CmdRun,
 		test.CmdTest,
 		tool.CmdTool,
-		version.CmdVersion,
+		version.CmdVersion, // Done
 		vet.CmdVet,
 
 		help.HelpBuildConstraint,

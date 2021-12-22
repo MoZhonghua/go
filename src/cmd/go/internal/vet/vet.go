@@ -17,6 +17,45 @@ import (
 	"cmd/go/internal/work"
 )
 
+// 关键在于需要go生成一个vet.cfg，里面有很多编译信息
+// go vet -work -x .
+// 生成vet.cfg，然后调用 $GOROOT/pkg/tool/linux_amd64/vet [-vetflags] vet.cfg
+/*
+{
+    "ID": "cmd/doc",
+        "Compiler": "gc",
+        "Dir": "/home/mozhonghua/go/src/github.com/golang/go/src/cmd/doc",
+        "ImportPath": "cmd/doc",
+        "GoFiles": [
+            "/home/mozhonghua/go/src/github.com/golang/go/src/cmd/doc/dirs.go",
+        ],
+        "NonGoFiles": [],
+        "IgnoredFiles": [],
+        "ImportMap": {
+            "bufio": "bufio",
+            "bytes": "bytes",
+        },
+        "PackageFile": {
+            "bufio": "/home/mozhonghua/go/src/github.com/golang/go/pkg/linux_amd64/bufio.a",
+            "bytes": "/home/mozhonghua/go/src/github.com/golang/go/pkg/linux_amd64/bytes.a",
+        },
+        "Standard": {
+            "bufio": true,
+            "bytes": true,
+            "cmd/vendor/golang.org/x/mod/semver": true,
+            "flag": true,
+        },
+        "PackageVetx": {
+            "bufio": "/home/mozhonghua/.cache/go-build/e3/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855-d",
+            "bytes": "/home/mozhonghua/.cache/go-build/e3/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855-d",
+            "cmd/vendor/golang.org/x/mod/semver": "/home/mozhonghua/.cache/go-build/e3/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855-d",
+        },
+        "VetxOnly": false,
+        "VetxOutput": "/tmp/go-build2495251565/b001/vet.out",
+        "SucceedOnTypecheckFailure": false
+}
+*/
+
 // Break init loop.
 func init() {
 	CmdVet.Run = runVet

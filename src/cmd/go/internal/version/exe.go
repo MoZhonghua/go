@@ -102,9 +102,51 @@ func (x *elfExe) ReadData(addr, size uint64) ([]byte, error) {
 	return nil, fmt.Errorf("address not mapped")
 }
 
+/*
+Section Headers:
+  [Nr] Name              Type            Address          Off    Size   ES Flg Lk Inf Al
+  [ 0]                   NULL            0000000000000000 000000 000000 00      0   0  0
+  [ 1] .text             PROGBITS        0000000000401000 001000 054c28 00  AX  0   0 32
+  [ 2] .rodata           PROGBITS        0000000000456000 056000 022741 00   A  0   0 32
+  [ 3] .shstrtab         STRTAB          0000000000000000 078760 00017a 00      0   0  1
+  [ 4] .typelink         PROGBITS        00000000004788e0 0788e0 0002c0 00   A  0   0 32
+  [ 5] .itablink         PROGBITS        0000000000478ba0 078ba0 000008 00   A  0   0  8
+  [ 6] .gosymtab         PROGBITS        0000000000478ba8 078ba8 000000 00   A  0   0  1
+  [ 7] .gopclntab        PROGBITS        0000000000478bc0 078bc0 040440 00   A  0   0 32
+  [ 8] .go.buildinfo     PROGBITS        00000000004b9000 0b9000 000020 00  WA  0   0 16
+  [ 9] .noptrdata        PROGBITS        00000000004b9020 0b9020 001180 00  WA  0   0 32
+  [10] .data             PROGBITS        00000000004ba1a0 0ba1a0 0021f0 00  WA  0   0 32
+  [11] .bss              NOBITS          00000000004bc3a0 0bc3a0 02eb48 00  WA  0   0 32
+  [12] .noptrbss         NOBITS          00000000004eaf00 0eaf00 005320 00  WA  0   0 32
+  [13] .zdebug_abbrev    PROGBITS        00000000004f1000 0bd000 000119 00      0   0  1
+  [14] .zdebug_line      PROGBITS        00000000004f1119 0bd119 0136f2 00      0   0  1
+  [15] .zdebug_frame     PROGBITS        000000000050480b 0d080b 003be2 00      0   0  1
+  [16] .debug_gdb_scripts PROGBITS        00000000005083ed 0d43ed 000049 00      0   0  1
+  [17] .zdebug_info      PROGBITS        0000000000508436 0d4436 02150f 00      0   0  1
+  [18] .zdebug_loc       PROGBITS        0000000000529945 0f5945 0116eb 00      0   0  1
+  [19] .zdebug_ranges    PROGBITS        000000000053b030 107030 006906 00      0   0  1
+  [20] .note.go.buildid  NOTE            0000000000400f9c 000f9c 000064 00   A  0   0  4
+  [21] .symtab           SYMTAB          0000000000000000 10d938 0079b0 18     22  89  8
+  [22] .strtab           STRTAB          0000000000000000 1152e8 006f69 00      0   0  1
+Key to Flags:
+  W (write), A (alloc), X (execute)
+
+Program Headers:
+  Type           Offset   VirtAddr           PhysAddr           FileSiz  MemSiz   Flg Align
+  PHDR           0x000040 0x0000000000400040 0x0000000000400040 0x000188 0x000188 R   0x1000
+  NOTE           0x000f9c 0x0000000000400f9c 0x0000000000400f9c 0x000064 0x000064 R   0x4
+  LOAD           0x000000 0x0000000000400000 0x0000000000400000 0x055c28 0x055c28 R E 0x1000
+  LOAD           0x056000 0x0000000000456000 0x0000000000456000 0x063000 0x063000 R   0x1000
+  LOAD           0x0b9000 0x00000000004b9000 0x00000000004b9000 0x0033a0 0x037220 RW  0x1000
+  GNU_STACK      0x000000 0x0000000000000000 0x0000000000000000 0x000000 0x000000 RW  0x8
+  LOOS+0x5041580 0x000000 0x0000000000000000 0x0000000000000000 0x000000 0x000000     0x8
+*/
 func (x *elfExe) DataStart() uint64 {
+	// ../../../link/internal/ld/data.go:2270
+	// 固定为32字节，包含两个指向runtime.buildVersion和runtime.modinfo的指针
+	// 注意指针值为link-relocation后的值，也就是vaddr，不是文件offset
 	for _, s := range x.f.Sections {
-		if s.Name == ".go.buildinfo" {
+		if s.Name == ".go.buildinfo" { // 总是在Segdata第一个section
 			return s.Addr
 		}
 	}

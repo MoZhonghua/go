@@ -13,5 +13,5 @@ internal/fmtcmd/fmt.go
 ../fix/main.go
 
 2021-12-22
-../gofmt/doc.go ?
+../gofmt/gofmt.go
 main.go ?

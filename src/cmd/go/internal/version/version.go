@@ -173,6 +173,14 @@ func findVers(x exe) (vers, mod string) {
 	if err != nil {
 		return
 	}
+
+	// ../../../link/internal/ld/data.go:2285
+	// "\xff Go buildinf:"  14 bytes
+	// sys.PtrSize          1 byte
+	// Is BigEndian         1 byte
+	// &runtime.buildVersion   4/8 bytes
+	// &runtime.modinfo        4/8 bytes
+	// pad 0                   8/0 bytes
 	for ; !bytes.HasPrefix(data, buildInfoMagic); data = data[32:] {
 		if len(data) < 32 {
 			return

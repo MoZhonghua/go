@@ -2264,6 +2264,12 @@ func (ctxt *Link) textbuildid() {
 }
 
 // 固定32字节, 单独的section: .go.buildinfo
+// "\xff Go buildinf:"  14 bytes
+// sys.PtrSize          1 byte
+// Is BigEndian         1 byte
+// &runtime.buildVersion   4/8 bytes
+// &runtime.modinfo        4/8 bytes
+// pad 0                   8/0 bytes
 func (ctxt *Link) buildinfo() {
 	if ctxt.linkShared || ctxt.BuildMode == BuildModePlugin {
 		// -linkshared and -buildmode=plugin get confused
