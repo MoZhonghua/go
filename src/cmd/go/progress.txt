@@ -23,4 +23,8 @@ internal/base/base.go
 internal/cache/cache.go
 internal/cfg/cfg.go
 internal/cmdflag/flag.go
+internal/fsys/fsys.go
+internal/imports/build.go ?
+internal/get/get.go ?
+../../go/build/build.go ?
 main.go

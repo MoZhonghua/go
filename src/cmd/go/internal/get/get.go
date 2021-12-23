@@ -25,6 +25,16 @@ import (
 	"golang.org/x/mod/module"
 )
 
+// 有两个Command的Name()="get"
+//  - GOPATH mode
+//  - module-aware mode: ../modget/get.go:55
+// go get时会先计算mode，然后根据mode选择对应的Command
+
+// go env GOMOD来判断mode，只要不是输出""就是GOPATH mode
+
+// 额外增加了两个help topic: gopath-get, module-get，这样用户不管处于什么
+// mode都可以同时看到两个get命令的文档
+
 var CmdGet = &base.Command{
 	UsageLine: "go get [-d] [-f] [-t] [-u] [-v] [-fix] [build flags] [packages]",
 	Short:     "download and install packages and dependencies",

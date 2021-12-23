@@ -14,6 +14,9 @@ import (
 
 var slashslash = []byte("//")
 
+// 在文件最开始可以有//形式注释和空行, build指令只能出现在这里面
+// 也就是说build指令不能出现在任意为注释和空行之后
+
 // ShouldBuild reports whether it is okay to use this file,
 // The rule is that in the file's leading run of // comments
 // and blank lines, which must be followed by a blank line
@@ -32,7 +35,6 @@ var slashslash = []byte("//")
 // the purpose of satisfying build tags, in order to estimate
 // (conservatively) whether a file could ever possibly be used
 // in any build.
-//
 func ShouldBuild(content []byte, tags map[string]bool) bool {
 	// Pass 1. Identify leading run of // comments and blank lines,
 	// which must be followed by a blank line.

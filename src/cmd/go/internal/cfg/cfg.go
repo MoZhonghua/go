@@ -9,6 +9,8 @@ package cfg
 import (
 	"bytes"
 	"fmt"
+
+	// 注意是引用的 src/go/build, 不是 cmd/go/internal/build
 	"go/build"
 	"internal/buildcfg"
 	"internal/cfg"

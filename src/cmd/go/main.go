@@ -58,7 +58,7 @@ func init() {
 		modcmd.CmdMod,
 		run.CmdRun,
 		test.CmdTest,
-		tool.CmdTool,
+		tool.CmdTool,       // Done
 		version.CmdVersion, // Done
 		vet.CmdVet,         // Done
 
