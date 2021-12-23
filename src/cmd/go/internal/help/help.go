@@ -50,9 +50,12 @@ func Help(w io.Writer, args []string) {
 		return
 	}
 
+	// 顶层Command是, 但是不能显式指定go help go报错
 	cmd := base.Go
 Args:
 	for i, arg := range args {
+		// go help mod vendor
+		// 最终匹配的是go.Commands["mod"]["venodr"]
 		for _, sub := range cmd.Commands {
 			if sub.Name() == arg {
 				cmd = sub
@@ -60,6 +63,7 @@ Args:
 			}
 		}
 
+		// 到这里说明中间匹配失败 go help mod xxx, 而到go help mod 都是成功的
 		// helpSuccess is the help command using as many args as possible that would succeed.
 		helpSuccess := "go help"
 		if i > 0 {
@@ -70,6 +74,7 @@ Args:
 		base.Exit()
 	}
 
+	// 注意有子命令和没有子命令用不同的模板输出
 	if len(cmd.Commands) > 0 {
 		PrintUsage(os.Stdout, cmd)
 	} else {

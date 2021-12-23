@@ -14,4 +14,13 @@ internal/fmtcmd/fmt.go
 
 2021-12-22
 ../gofmt/gofmt.go
-main.go ?
+internal/auth/auth.go
+internal/auth/netrc.go
+internal/help/help.go
+internal/base/base.go
+
+2021-12-23
+internal/cache/cache.go
+internal/cfg/cfg.go
+internal/cmdflag/flag.go
+main.go

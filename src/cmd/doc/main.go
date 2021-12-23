@@ -37,7 +37,7 @@
 // For complete documentation, run "go help doc".
 package main
 
-// 特别注意这里的两个Import，一个是Import, 另一个是ImportDir
+// 特别注意这里的两个Import，一个是Import, 另一个是ImportDir, 用的是go/build包
 //  - build.Import("x", "/abs/y"): 等价于在路径"/abs/y"下的一个.go文件中有import "x"语句
 //  - build.ImportDir("/abs/x"): 等价于如果要导入"/abs/x"下的包，应该怎么写import语句
 

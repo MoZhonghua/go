@@ -22,6 +22,10 @@ import (
 	"cmd/go/internal/lockedfile"
 )
 
+// "xxx-a": action entry file
+// "xxx-d": output file
+// ActionID -> OutputID
+
 // An ActionID is a cache action key, the hash of a complete description of a
 // repeatable computation (command line, environment variables,
 // input file contents, executable contents).
@@ -58,7 +62,7 @@ func Open(dir string) (*Cache, error) {
 	}
 	for i := 0; i < 256; i++ {
 		name := filepath.Join(dir, fmt.Sprintf("%02x", i))
-		if err := os.MkdirAll(name, 0777); err != nil {
+		if err := os.MkdirAll(name, 0777); err != nil { // umask=0022
 			return nil, err
 		}
 	}
@@ -69,6 +73,7 @@ func Open(dir string) (*Cache, error) {
 	return c, nil
 }
 
+// $HOME/.cache/go-build/00/00c29f61d9ee6ce40bd69bea279b6568609a9bcef646b69fed7e34b2ea329e9e-d
 // fileName returns the name of the file corresponding to the given id.
 func (c *Cache) fileName(id [HashSize]byte, key string) string {
 	return filepath.Join(c.dir, fmt.Sprintf("%02x", id[0]), fmt.Sprintf("%x", id)+"-"+key)
@@ -154,6 +159,8 @@ func (c *Cache) get(id ActionID) (Entry, error) {
 	missing := func(reason error) (Entry, error) {
 		return Entry{}, &entryNotFoundError{Err: reason}
 	}
+	// "a"表示是一个action entry file, 固定只有一行
+	// v1 <action_id> <output_id> <size> <nanotime>
 	f, err := os.Open(c.fileName(id, "a"))
 	if err != nil {
 		return missing(err)
@@ -247,7 +254,7 @@ func (c *Cache) GetBytes(id ActionID) ([]byte, Entry, error) {
 
 // OutputFile returns the name of the cache file storing output with the given OutputID.
 func (c *Cache) OutputFile(out OutputID) string {
-	file := c.fileName(out, "d")
+	file := c.fileName(out, "d") // -d是output file
 	c.used(file)
 	return file
 }
@@ -422,6 +429,7 @@ func (c *Cache) PutNoVerify(id ActionID, file io.ReadSeeker) (OutputID, int64, e
 	return c.put(id, file, false)
 }
 
+// 先复制output到xxxx-d, 然后在写入xxxx-a
 func (c *Cache) put(id ActionID, file io.ReadSeeker, allowVerify bool) (OutputID, int64, error) {
 	// Compute output ID.
 	h := sha256.New()
@@ -484,6 +492,7 @@ func (c *Cache) copyFile(file io.ReadSeeker, out OutputID, size int64) error {
 		// File now exists with correct size.
 		// Only one possible zero-length file, so contents are OK too.
 		// Early return here makes sure there's a "last byte" for code below.
+		// 0字节文件的hash值一定是固定值
 		return nil
 	}
 

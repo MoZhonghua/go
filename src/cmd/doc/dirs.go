@@ -283,7 +283,6 @@ func vendorEnabled() (*moduleJSON, bool, error) {
 	}
 	if modFlag != "" {
 		// Don't override an explicit '-mod=' argument.
-		fmt.Printf("modFlag = %v\n", modFlag)
 		return mainMod, modFlag == "vendor", nil
 	}
 	if mainMod == nil || !go114 {

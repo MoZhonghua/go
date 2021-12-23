@@ -24,28 +24,28 @@ import (
 
 // These are general "build flags" used by build and other commands.
 var (
-	BuildA                 bool   // -a flag
+	BuildA                 bool   // -a flag, rebuild all
 	BuildBuildmode         string // -buildmode flag
 	BuildContext           = defaultContext()
 	BuildMod               string                  // -mod flag
 	BuildModExplicit       bool                    // whether -mod was set explicitly
 	BuildModReason         string                  // reason -mod was set, if set by default
-	BuildI                 bool                    // -i flag
+	BuildI                 bool                    // -i flag, install dependencies, deprecated
 	BuildLinkshared        bool                    // -linkshared flag
 	BuildMSan              bool                    // -msan flag
-	BuildN                 bool                    // -n flag
+	BuildN                 bool                    // -n flag, dryrun
 	BuildO                 string                  // -o flag
-	BuildP                 = runtime.GOMAXPROCS(0) // -p flag
+	BuildP                 = runtime.GOMAXPROCS(0) // -p flag, parallel programs
 	BuildPkgdir            string                  // -pkgdir flag
 	BuildRace              bool                    // -race flag
-	BuildToolexec          []string                // -toolexec flag
-	BuildToolchainName     string
+	BuildToolexec          []string                // -toolexec flag, 使用这个值来调用命令，可以做用来拦截记录
+	BuildToolchainName     string //gc 或者 gccgo, 在 ../work/build.go:234 设置
 	BuildToolchainCompiler func() string
 	BuildToolchainLinker   func() string
-	BuildTrimpath          bool // -trimpath flag
-	BuildV                 bool // -v flag
-	BuildWork              bool // -work flag
-	BuildX                 bool // -x flag
+	BuildTrimpath          bool // -trimpath flag, 最终输出的exe中的各种文件名删除这个前缀
+	BuildV                 bool // -v flag, 编译过程中输出每个packge的名字
+	BuildWork              bool // -work flag, 输出工作目录路径且边以后不删除
+	BuildX                 bool // -x flag, print the commands
 
 	ModCacheRW bool   // -modcacherw flag
 	ModFile    string // -modfile flag
@@ -56,6 +56,14 @@ var (
 	DebugTrace       string // -debug-trace flag
 )
 
+// 各种配置的来源:
+//   - toolchain的默认配置，在go tool dist自动生成的zxxx.go文件中, 比如这里的 zdefaultcc.go
+//   - cmd/link通过 -X variable=value 设置的值, 比如runtime.defaultGOROOT
+//   - 在go env GOENV文件中设置的值
+//   - 用户配置的环境变量
+//   - 根据当前executable路径计算出来的值，findGOROOT()
+//   - 根据其他值计算出来的值
+// 这些值都是toolchain自己使用，正常go程序不会用
 func defaultContext() build.Context {
 	ctxt := build.Default
 	ctxt.JoinPath = filepath.Join // back door to say "do not use go command"
@@ -185,6 +193,7 @@ func EnvFile() (string, error) {
 	return filepath.Join(dir, "go/env"), nil
 }
 
+// 读取go env GOENV文件内容并缓存
 func initEnvCache() {
 	envCache.m = make(map[string]string)
 	file, _ := EnvFile()
@@ -328,6 +337,8 @@ func findGOROOT() string {
 		// depend on the executable's location.
 		return def
 	}
+
+	// 注意优先使用相对go本身路径计算出来的值
 	exe, err := os.Executable()
 	if err == nil {
 		exe, err = filepath.Abs(exe)

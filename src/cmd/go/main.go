@@ -46,22 +46,25 @@ func init() {
 	base.Go.Commands = []*base.Command{
 		bug.CmdBug, // Done
 		work.CmdBuild,
-		clean.CmdClean, // Done
-		doc.CmdDoc,     // Done
-		envcmd.CmdEnv,  // Done
-		fix.CmdFix,     // Done
-		fmtcmd.CmdFmt,  // Done
+		clean.CmdClean,       // Done
+		doc.CmdDoc,           // Done
+		envcmd.CmdEnv,        // Done
+		fix.CmdFix,           // Done
+		fmtcmd.CmdFmt,        // Done
 		generate.CmdGenerate, // Done
 		modget.CmdGet,
 		work.CmdInstall,
-		list.CmdList,
+		list.CmdList, // ?
 		modcmd.CmdMod,
 		run.CmdRun,
 		test.CmdTest,
 		tool.CmdTool,
 		version.CmdVersion, // Done
-		vet.CmdVet,
+		vet.CmdVet,         // Done
 
+		// 注意这以下的Command.Run = nil, 也就是本身不能运行, 出现在两个地方
+		//  - go help: "Additional help topics" 会列出所有!Runnable()的Command
+		//  - go help <topic>: 输出Command中的Usage/Long/Short文档
 		help.HelpBuildConstraint,
 		help.HelpBuildmode,
 		help.HelpC,
@@ -151,6 +154,11 @@ BigCmdLoop:
 			if cmd.Name() != args[0] {
 				continue
 			}
+
+			// len(Commands)>0的命令不能单独执行，只能执行子命令
+			// go mod: mod有子命令，因此是无效命令，等价于go help mod
+			// go mod xx: mod有子命令，xx不是有效子命令，输出错误: go mod xx: unknown command
+			// go mod vendor: 有效命令
 			if len(cmd.Commands) > 0 {
 				bigCmd = cmd
 				args = args[1:]
@@ -159,6 +167,8 @@ BigCmdLoop:
 					base.SetExitStatus(2)
 					base.Exit()
 				}
+				// 匹配过程中遇到help，等价于把help挪到第一个参数来调用
+				// go xxx help yyy => go help xxx yyy
 				if args[0] == "help" {
 					// Accept 'go mod help' and 'go mod help foo' for 'go help mod' and 'go help mod foo'.
 					help.Help(os.Stdout, append(strings.Split(cfg.CmdName, " "), args[1:]...))
@@ -204,6 +214,7 @@ func invoke(cmd *base.Command, args []string) {
 	}
 
 	cmd.Flag.Usage = func() { cmd.Usage() }
+	// 统一处理flag还是command自己处理
 	if cmd.CustomFlags {
 		args = args[1:]
 	} else {

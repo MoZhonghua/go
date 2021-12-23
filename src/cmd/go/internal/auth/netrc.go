@@ -4,6 +4,12 @@
 
 package auth
 
+/*
+machine example.com
+login daniel
+password qwerty
+*/
+
 import (
 	"os"
 	"path/filepath"

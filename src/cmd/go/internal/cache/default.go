@@ -36,13 +36,16 @@ See golang.org to learn more about Go.
 // initDefaultCache does the work of finding the default cache
 // the first time Default is called.
 func initDefaultCache() {
-	dir := DefaultDir()
+	dir := DefaultDir() // $HOME/.cache/go-build
 	if dir == "off" {
 		if defaultDirErr != nil {
 			base.Fatalf("build cache is required, but could not be located: %v", defaultDirErr)
 		}
+		// 如果设置了GOCACHE=off，不应该调用initDefaultCache()
 		base.Fatalf("build cache is disabled by GOCACHE=off, but required as of Go 1.12")
 	}
+	// 注意实际创建的是0755，受到umask影响, umask=0022
+	// 0777 &^ 0222 => 0755
 	if err := os.MkdirAll(dir, 0777); err != nil {
 		base.Fatalf("failed to initialize build cache at %s: %s\n", dir, err)
 	}
@@ -73,6 +76,7 @@ func DefaultDir() string {
 	// otherwise distinguish between an explicit "off" and a UserCacheDir error.
 
 	defaultDirOnce.Do(func() {
+		// GOCACHE没有默认值，如果用户没有设置，这里返回""
 		defaultDir = cfg.Getenv("GOCACHE")
 		if filepath.IsAbs(defaultDir) || defaultDir == "off" {
 			return
@@ -84,7 +88,7 @@ func DefaultDir() string {
 		}
 
 		// Compute default location.
-		dir, err := os.UserCacheDir()
+		dir, err := os.UserCacheDir() // 正常逻辑都是走这里
 		if err != nil {
 			defaultDir = "off"
 			defaultDirErr = fmt.Errorf("GOCACHE is not defined and %v", err)

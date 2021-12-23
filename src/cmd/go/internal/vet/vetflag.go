@@ -131,6 +131,7 @@ func vetFlags(args []string) (passToVet, packageNames []string) {
 		f, remainingArgs, err := cmdflag.ParseOne(&CmdVet.Flag, args)
 
 		if errors.Is(err, flag.ErrHelp) {
+			// --help会进入这里
 			exitWithUsage()
 		}
 

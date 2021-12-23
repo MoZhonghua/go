@@ -27,6 +27,33 @@ import (
 	"cmd/go/internal/work"
 )
 
+// -compiled会设置CompiledGoFiles []string
+// 注意normal.go没有import C，其他两个go文件都是有import C
+// CompiledGoFiles中.cache/xxx都是go tool cgo生成的.go文件
+/*
+	"GoFiles": [
+		"normal.go"
+	],
+	"CgoFiles": [
+		"call.go",
+		"main.go"
+	],
+	"CompiledGoFiles": [
+		"normal.go",
+		"/home/mozhonghua/.cache/go-build/72/72966f514f249da9d3688aa26e41023e21668dc6a295329a47c0a0ff568f97dd-d",
+		"/home/mozhonghua/.cache/go-build/c4/c47b618e80f88a6d0f0d5871107d7388ca40c6219416fa661ca2b104fe7c6ffe-d",
+		"/home/mozhonghua/.cache/go-build/b2/b2734c50d8c611eef12b3a04550408e733d8595d2414cb342548e24c364b705f-d",
+		"/home/mozhonghua/.cache/go-build/bf/bfcb81bb03a349905e62050dc42d55ca126b8c7095a57601bfa89dc8e6b6c506-d"
+	],
+	"CFiles": [
+		"hello.c"
+	],
+	"HFiles": [
+		"cgotest.h",
+		"hello.h"
+	],
+*/
+
 var CmdList = &base.Command{
 	// Note: -f -json -m are listed explicitly because they are the most common list flags.
 	// Do not send CLs removing them because they're covered by [list flags].

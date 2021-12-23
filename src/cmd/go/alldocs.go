@@ -2964,3 +2964,5 @@
 //
 //
 package main
+
+// go doc documentation 会生成这个文件

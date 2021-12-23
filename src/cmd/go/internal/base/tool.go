@@ -16,6 +16,7 @@ import (
 
 // Configuration for finding tool binaries.
 var (
+	// go命令自己的GOOS+GOARCH，和编译目标的GOOS+GOARCH可以不一样
 	ToolGOOS      = runtime.GOOS
 	ToolGOARCH    = runtime.GOARCH
 	ToolIsWindows = ToolGOOS == "windows"

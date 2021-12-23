@@ -62,6 +62,8 @@ func InitGOFLAGS() {
 		if i := strings.Index(name, "="); i >= 0 {
 			name = name[:i]
 		}
+		// 这里只检查有效，不设置
+		// !!注意是检查所有命令的flag，不是当前匹配的命令
 		if !hasFlag(Go, name) {
 			if hideErrors {
 				continue

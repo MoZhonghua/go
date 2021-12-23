@@ -66,6 +66,8 @@ func ParseOne(fs *flag.FlagSet, args []string) (f *flag.Flag, remainingArgs []st
 	case "-?", "-h", "-help":
 		return nil, args, flag.ErrHelp
 	}
+
+	// 不是-x这样的flag
 	if len(arg) < 2 || arg[0] != '-' || arg[1] == '-' || arg[1] == '=' {
 		return nil, args, NonFlagError{RawArg: raw}
 	}

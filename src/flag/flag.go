@@ -81,6 +81,8 @@ import (
 
 // ErrHelp is the error returned if the -help or -h flag is invoked
 // but no such flag is defined.
+// 遇到这个错误时会把命令转换为等价的go help命令
+// go xxx <ErrHelp> yyy => go help xxx yyy
 var ErrHelp = errors.New("flag: help requested")
 
 // errParse is returned by Set if a flag's value fails to parse, such as with an invalid integer for Int.

@@ -250,12 +250,20 @@ func GOROOT() string {
 // This is accessed by "go version <binary>".
 var buildVersion string
 
+// 注意仅输出和默认配置不同的GOEXPERIMENT
+// export GOEXPERIMENT=none
+// go build -o /tmp/main .
+// go version /tmp/main
+// go1.17.2 X:noregabiwrappers,noregabig,noregabireflect,noregabidefer,noregabiargs
+
 // Version returns the Go tree's version string.
 // It is either the commit hash and date at the time of the build or,
 // when possible, a release tag like "go1.3".
 func Version() string {
 	return buildVersion
 }
+
+// 这里是当前进程自己的GOOS+GOARCH
 
 // GOOS is the running program's operating system target:
 // one of darwin, freebsd, linux, and so on.

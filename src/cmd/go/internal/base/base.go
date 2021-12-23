@@ -29,10 +29,10 @@ type Command struct {
 
 	// UsageLine is the one-line usage message.
 	// The words between "go" and the first flag or argument in the line are taken to be the command name.
-	UsageLine string
+	UsageLine string  // 在文档中usage: 后面就是这个字段值
 
 	// Short is the short description shown in the 'go help' output.
-	Short string
+	Short string  // 在输出有子命令Command文档时，每个子命令后就是这个字段值
 
 	// Long is the long message shown in the 'go help <this-command>' output.
 	Long string
