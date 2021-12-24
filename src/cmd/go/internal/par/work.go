@@ -44,6 +44,9 @@ func (w *Work) Add(item interface{}) {
 	w.mu.Unlock()
 }
 
+// 特别的是执行过程中可以通过w.Add()来额外生成item。一般调用模式是在Do()之后只能由现有的item来生产新
+// 的item，不再从外部新增item。这里类似于一个distributed termination detection.
+
 // Do runs f in parallel on items from the work set,
 // with at most n invocations of f running at a time.
 // It returns when everything added to the work set has been processed.
@@ -61,7 +64,7 @@ func (w *Work) Do(n int, f func(item interface{})) {
 
 	w.running = n
 	w.f = f
-	w.wait.L = &w.mu
+	w.wait.L = &w.mu  // 注意Cond的使用方法
 
 	for i := 0; i < n-1; i++ {
 		go w.runner()
@@ -124,7 +127,7 @@ func (c *Cache) Do(key interface{}, f func() interface{}) interface{} {
 	e := entryIface.(*cacheEntry)
 	if atomic.LoadUint32(&e.done) == 0 {
 		e.mu.Lock()
-		if atomic.LoadUint32(&e.done) == 0 {
+		if atomic.LoadUint32(&e.done) == 0 { // 再次检查，因为已经加锁，其他人不会同时调用f()
 			e.result = f()
 			atomic.StoreUint32(&e.done, 1)
 		}

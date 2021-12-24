@@ -10,7 +10,7 @@ import "fmt"
 // active work items is limited, and excess items are queued sequentially.
 type Queue struct {
 	maxActive int
-	st        chan queueState
+	st        chan queueState // 用chan来实现对queueState的exclusive access
 }
 
 type queueState struct {

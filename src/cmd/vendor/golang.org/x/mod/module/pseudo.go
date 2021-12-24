@@ -2,6 +2,12 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+// 根据commit生成的pseudo-version应该符合如下几个属性:
+//  - 如果在之前的commit有tag，那么排序后这个p-version应该在tag之后
+//    * 可以确定满足
+//  - 用户在这个commit之后打tag，排序后这个p-version应该在新tag之前
+//    * best-effort
+
 // Pseudo-versions
 //
 // Code authors are expected to tag the revisions they want users to use,
@@ -31,7 +37,6 @@
 //
 // If the most recent tagged version before the target commit is vX.Y.Z-pre or vX.Y.Z-pre+incompatible,
 // then the pseudo-version uses form (4) or (5), making it a slightly later prerelease.
-
 package module
 
 import (
@@ -44,6 +49,7 @@ import (
 	"golang.org/x/mod/semver"
 )
 
+// lazyregexp就是真正使用的时候才会regexp.Compile, 其他没区别
 var pseudoVersionRE = lazyregexp.New(`^v[0-9]+\.(0\.0-|\d+\.\d+-([^+]*\.)?0\.)\d{14}-[A-Za-z0-9]+(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$`)
 
 const PseudoVersionTimestampFormat = "20060102150405"
@@ -52,6 +58,7 @@ const PseudoVersionTimestampFormat = "20060102150405"
 // preexisting older tagged version ("" or "v1.2.3" or "v1.2.3-pre"), revision time,
 // and revision identifier (usually a 12-byte commit hash prefix).
 func PseudoVersion(major, older string, t time.Time, rev string) string {
+	fmt.Printf("PseudoVersion: major=%v older=%v rev=%v\n", major, older, rev)
 	if major == "" {
 		major = "v0"
 	}
@@ -234,6 +241,9 @@ func parsePseudoVersion(v string) (base, timestamp, rev, build string, err error
 			Err:     errPseudoSyntax,
 		}
 	}
+	// v0.0.0-pre.0.20190626180622-d3722dc409a8+incompatible
+	// build: +incompatible
+	// prerelease: -pre.0.20190626180622-d3722dc409a8
 	build = semver.Build(v)
 	v = strings.TrimSuffix(v, build)
 	j := strings.LastIndex(v, "-")
@@ -246,5 +256,10 @@ func parsePseudoVersion(v string) (base, timestamp, rev, build string, err error
 		base = v[:i] // "vX.0.0"
 		timestamp = v[i+1:]
 	}
+
+	// base: v0.0.0-pre.0
+	// timestamp: 20190626180622
+	// rev: d3722dc409a8
+	// build: +incompatible
 	return base, timestamp, rev, build, nil
 }

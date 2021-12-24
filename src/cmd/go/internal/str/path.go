@@ -19,6 +19,9 @@ func HasPathPrefix(s, prefix string) bool {
 		return true
 	}
 	if len(s) > len(prefix) {
+		// prefix: /abc/
+		// s: /abc/xyz
+		// 只有这两种情况才会有可能成立，而且可以直接比较字符串，不用拆分后比较
 		if prefix[len(prefix)-1] == '/' || s[len(prefix)] == '/' {
 			return s[:len(prefix)] == prefix
 		}

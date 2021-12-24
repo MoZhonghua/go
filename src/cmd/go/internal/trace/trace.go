@@ -15,6 +15,9 @@ import (
 	"time"
 )
 
+// 通过<tid, name>来唯一标志span? 同名的必须在上一个Done()之后才能开始?
+// span之间通过显式的flow来关联
+
 // Constants used in event fields.
 // See https://docs.google.com/document/d/1CvAClvFfyA5R-PhYUmn5OOQtYMH4h6I0nSsKchNAySU
 // for more details.
@@ -67,6 +70,8 @@ func StartGoroutine(ctx context.Context) context.Context {
 	}
 	return context.WithValue(ctx, traceKey{}, traceContext{tc.t, tc.t.getNextTID()})
 }
+
+// 注意from -> to 表示 to 依赖 from
 
 // Flow marks a flow indicating that the 'to' span depends on the 'from' span.
 // Flow should be called while the 'to' span is in progress.

@@ -24,7 +24,26 @@ internal/cache/cache.go
 internal/cfg/cfg.go
 internal/cmdflag/flag.go
 internal/fsys/fsys.go
-internal/imports/build.go ?
+internal/imports/build.go
+internal/lockedfile/lockedfile.go
+internal/par/work.go
+internal/robustio/robustio.go
+internal/search/search.go
+internal/str/str.go
+internal/trace/trace.go
+internal/txtar/archive.go
+internal/web/http.go
+
+2021-12-24
+vendor/golang.org/x/mod/module/module.go
+vendor/golang.org/x/mod/semver/semver.go
+vendor/golang.org/x/mod/modfile/read.go ?
+
+internal/mvs/mvs.go ?
+internal/vcs/vcs.go ?
+
+internal/load/path.go ?
 internal/get/get.go ?
+internal/list/list.go ?
 ../../go/build/build.go ?
 main.go

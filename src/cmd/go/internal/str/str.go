@@ -55,12 +55,14 @@ Slow:
 		for {
 			r0 := r
 			r = unicode.SimpleFold(r0)
+			// 第一次wrap时的r一定是整个环中最小的
 			if r <= r0 {
 				break
 			}
 		}
 		// Exception to allow fast path above: A-Z => a-z
 		if 'A' <= r && r <= 'Z' {
+			// 'a' > 'A'，不是cycle中的最小值，要和上面的fastpath匹配
 			r += 'a' - 'A'
 		}
 		buf.WriteRune(r)
@@ -97,7 +99,7 @@ func Contains(x []string, s string) bool {
 }
 
 // Uniq removes consecutive duplicate strings from ss.
-func Uniq(ss *[]string) {
+func Uniq(ss *[]string) { // 注意重复字符串必须连续出现才能去重
 	if len(*ss) <= 1 {
 		return
 	}

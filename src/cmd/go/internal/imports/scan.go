@@ -15,6 +15,7 @@ import (
 	"cmd/go/internal/fsys"
 )
 
+// 返回imports 和 testimports
 func ScanDir(dir string, tags map[string]bool) ([]string, []string, error) {
 	infos, err := fsys.ReadDir(dir)
 	if err != nil {
@@ -37,6 +38,7 @@ func ScanDir(dir string, tags map[string]bool) ([]string, []string, error) {
 			files = append(files, filepath.Join(dir, name))
 		}
 	}
+	// files只是匹配了文件名，还没处理里面的// +build 和 //go:build
 	return scanFiles(files, tags, false)
 }
 
@@ -44,6 +46,7 @@ func ScanFiles(files []string, tags map[string]bool) ([]string, []string, error)
 	return scanFiles(files, tags, true)
 }
 
+// explicitFiles=true: 忽略build directive，读取所有文件中的import
 func scanFiles(files []string, tags map[string]bool, explicitFiles bool) ([]string, []string, error) {
 	imports := make(map[string]bool)
 	testImports := make(map[string]bool)
@@ -68,6 +71,7 @@ Files:
 		// Why? Because we always have, and it's not worth breaking
 		// that behavior now.
 		for _, path := range list {
+			// 如果没有cgo tag， 跳过import C的文件，即使explicitFiles=true
 			if path == `"C"` && !tags["cgo"] && !tags["*"] {
 				continue Files
 			}

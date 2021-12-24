@@ -258,9 +258,9 @@ func modPathOK(r rune) bool {
 	return false
 }
 
-// modPathOK reports whether r can appear in a package import path element.
+// importPathOK reports whether r can appear in a package import path element.
 //
-// Import paths are intermediate between module paths and file paths: we allow
+// Import paths are intermediate between module paths and file paths: we
 // disallow characters that would be confusing or ambiguous as arguments to
 // 'go get' (such as '@' and ' ' ), but allow certain characters that are
 // otherwise-unambiguous on the command line and historically used for some
@@ -531,6 +531,11 @@ var badWindowsNames = []string{
 	"LPT9",
 }
 
+
+// 注意在path中的只能是major version，也就是只能是vNN，中间不能有"."
+// gopkg.in/golang.org/xyz.v1 => golang.org/xyz + .v1
+// golang.org/xyz/v2 => golang.org/xyz + /v2
+
 // SplitPathVersion returns prefix and major version such that prefix+pathMajor == path
 // and version is either empty or "/vN" for N >= 2.
 // As a special case, gopkg.in paths are recognized directly;
@@ -551,6 +556,7 @@ func SplitPathVersion(path string) (prefix, pathMajor string, ok bool) {
 		}
 		i--
 	}
+	// example.com/pkg/v2.3, i指向2.3的位置
 	if i <= 1 || i == len(path) || path[i-1] != 'v' || path[i-2] != '/' {
 		return path, "", true
 	}
@@ -562,6 +568,7 @@ func SplitPathVersion(path string) (prefix, pathMajor string, ok bool) {
 }
 
 // splitGopkgIn is like SplitPathVersion but only for gopkg.in paths.
+// gopkg.in/abc.v123 => prefix=gopkg.in, pathMajor=.v123
 func splitGopkgIn(path string) (prefix, pathMajor string, ok bool) {
 	if !strings.HasPrefix(path, "gopkg.in/") {
 		return path, "", false
@@ -570,10 +577,11 @@ func splitGopkgIn(path string) (prefix, pathMajor string, ok bool) {
 	if strings.HasSuffix(path, "-unstable") {
 		i -= len("-unstable")
 	}
+	// i指向第一个数字位置
 	for i > 0 && ('0' <= path[i-1] && path[i-1] <= '9') {
 		i--
 	}
-	if i <= 1 || path[i-1] != 'v' || path[i-2] != '.' {
+	if i <= 1 || path[i-1] != 'v' || path[i-2] != '.' {  // .vNNN
 		// All gopkg.in paths must end in vN for some N.
 		return path, "", false
 	}
@@ -594,6 +602,7 @@ func MatchPathMajor(v, pathMajor string) bool {
 
 // CheckPathMajor returns a non-nil error if the semantic version v
 // does not match the path major version pathMajor.
+// pathMajor指出现在import path中主版本号，gopkg.in的为".vNNN", 普通的为"/vNNN"
 func CheckPathMajor(v, pathMajor string) error {
 	// TODO(jayconrod): return errors or panic for invalid inputs. This function
 	// (and others) was covered by integration tests for cmd/go, and surrounding
@@ -624,6 +633,8 @@ func CheckPathMajor(v, pathMajor string) error {
 	}
 }
 
+// .vNNN => vNNN
+// /vNNN => vNNN
 // PathMajorPrefix returns the major-version tag prefix implied by pathMajor.
 // An empty PathMajorPrefix allows either v0 or v1.
 //
@@ -641,7 +652,7 @@ func PathMajorPrefix(pathMajor string) string {
 		pathMajor = strings.TrimSuffix(pathMajor, "-unstable")
 	}
 	m := pathMajor[1:]
-	if m != semver.Major(m) {
+	if m != semver.Major(m) { // vNNN
 		panic("pathMajor suffix " + pathMajor + "passed to PathMajorPrefix is not a valid major version")
 	}
 	return m

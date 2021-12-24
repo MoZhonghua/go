@@ -24,6 +24,14 @@ package semver
 
 import "sort"
 
+// 基本格式为:
+// version-prerelease+build
+
+// v0.0.0-pre.0.20190626180622-d3722dc409a8+incompatible
+//   version: v0.0.0
+//   prerelease: -pre.0.20190626180622-d3722dc409a8
+//   build: +incompatible
+
 // parsed returns the parsed form of a semantic version string.
 type parsed struct {
 	major      string
@@ -251,6 +259,7 @@ func parseInt(v string) (t, rest string, ok bool) {
 	return v[:i], v[i:], true
 }
 
+// prerelease必须是-开头，由"."分隔的多个非空字段
 func parsePrerelease(v string) (t, rest string, ok bool) {
 	// "A pre-release version MAY be denoted by appending a hyphen and
 	// a series of dot separated identifiers immediately following the patch version.
@@ -266,6 +275,8 @@ func parsePrerelease(v string) (t, rest string, ok bool) {
 			return
 		}
 		if v[i] == '.' {
+			// 空字符串start==i
+			// 全数字但是长度>1且第一个字符串为0: isBadNum
 			if start == i || isBadNum(v[start:i]) {
 				return
 			}
@@ -312,6 +323,7 @@ func isBadNum(v string) bool {
 	for i < len(v) && '0' <= v[i] && v[i] <= '9' {
 		i++
 	}
+	// 全数字且长度>1且第一个字符串为0
 	return i == len(v) && i > 1 && v[0] == '0'
 }
 
@@ -341,6 +353,7 @@ func compareInt(x, y string) int {
 }
 
 func comparePrerelease(x, y string) int {
+	// !!注意有-prerelease是在没有的前面，和prerelease含义匹配
 	// "When major, minor, and patch are equal, a pre-release version has
 	// lower precedence than a normal version.
 	// Example: 1.0.0-alpha < 1.0.0.

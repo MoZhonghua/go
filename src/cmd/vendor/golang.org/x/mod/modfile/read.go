@@ -35,6 +35,7 @@ func (p Position) add(s string) Position {
 	return p
 }
 
+// 三种Line, CommentBlock和LineBlock，其中LineBlock下面有多个Line，没有更复杂的结构
 // An Expr represents an input element.
 type Expr interface {
 	// Span returns the start and end position of the expression,
@@ -54,6 +55,11 @@ type Comment struct {
 	Suffix bool   // an end of line (not whole line) comment
 }
 
+/*
+// <before_comment>
+statement // <suffix_comment>
+// <after_comment>?
+*/
 // Comments collects the comments associated with an expression.
 type Comments struct {
 	Before []Comment // whole-line comments before this expression

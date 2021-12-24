@@ -25,6 +25,12 @@ import (
 // The zero value is "secure".
 type SecurityMode int
 
+// URL路径有三种情况：
+//  - https://example.com/xyz
+//  - http://example.com/xyz
+//  - example.com/xyz
+// 主要是对最后一种情况如何处理
+
 const (
 	SecureOnly      SecurityMode = iota // Reject plain HTTP; validate HTTPS.
 	DefaultSecurity                     // Allow plain HTTP if explicit; validate HTTPS.

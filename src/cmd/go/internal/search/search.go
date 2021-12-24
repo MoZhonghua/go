@@ -18,6 +18,13 @@ import (
 	"strings"
 )
 
+// 仅用在GOPATH mode下
+
+// 根据pattern来匹配具体的package，比如..., time都是pattern
+// 两种特殊pattern:
+//  - ...: 实际可以看作*，即匹配所有值
+//  - meta package: cmd, std, all
+
 // A Match represents the result of matching a single package pattern.
 type Match struct {
 	pattern string   // the pattern itself
@@ -52,6 +59,8 @@ func (m *Match) IsLiteral() bool {
 	return !strings.Contains(m.pattern, "...") && !m.IsMeta()
 }
 
+// 理解为指向本地文件系统中的路径，而不是package path
+// 比如 ./xyz, ../xyz,  /home/xx/xyz, ./...
 // Local reports whether the pattern must be resolved from a specific root or
 // directory, such as a filesystem path or a single module.
 func (m *Match) IsLocal() bool {
@@ -87,6 +96,14 @@ func (e *MatchError) Unwrap() error {
 	return e.Err
 }
 
+// 基本算法就是遍历GOROOT和GOPATH下的所有目录，对于每个目录，去掉对应的GOROOT/src和GOPATH/src前缀做
+// 为package path，然后和pattern匹配
+
+// 对于meta-package有特别处理，最终结果为:
+//  - std: GOROOT/src下除了GOROOT/src/cmd以外的所有目录
+//  - cmd: GOROOT/src/cmd下所有目录
+//  - all: GOROOT/src和GOPATH/src下所有目录
+
 // MatchPackages sets m.Pkgs to a non-nil slice containing all the packages that
 // can be found under the $GOPATH directories and $GOROOT that match the
 // pattern. The pattern must be either "all" (all packages), "std" (standard
@@ -97,16 +114,27 @@ func (e *MatchError) Unwrap() error {
 func (m *Match) MatchPackages() {
 	m.Pkgs = []string{}
 	if m.IsLocal() {
+		// 在MatchDirs中处理
+		// ./xyz  ../xyz   /xyz/abc
 		m.AddError(fmt.Errorf("internal error: MatchPackages: %s is not a valid package pattern", m.pattern))
 		return
 	}
 
 	if m.IsLiteral() {
+		// github.com/abc/xyz
 		m.Pkgs = []string{m.pattern}
 		return
 	}
 
+	// github.com/xyz/...
+	// cmd, std, all
+
 	match := func(string) bool { return true }
+
+	// 子树有没有可能匹配，比如github.com/abc/xyz，则
+	//  - GOPATH/src/golang.org/: 不可能匹配，不用检查下级目录
+	//  - GOPATH/src/github.com/: 可能匹配，检查下级目录
+	//  - GOPATH/src/github.com/cde: 不可能匹配，不检查下级目录
 	treeCanMatch := func(string) bool { return true }
 	if !m.IsMeta() {
 		match = MatchPattern(m.pattern)
@@ -120,10 +148,14 @@ func (m *Match) MatchPackages() {
 		have["runtime/cgo"] = true // ignore during walk
 	}
 
-	for _, src := range cfg.BuildContext.SrcDirs() {
+	for _, src := range cfg.BuildContext.SrcDirs() { // $GOROOT 和 $GOPATH
+		// 这两个meta-package只处理这两个目录
+		// std => $GOROOT/src
+		// cmd => $GOROOT/cmd/src
 		if (m.pattern == "std" || m.pattern == "cmd") && src != cfg.GOROOTsrc {
 			continue
 		}
+
 		src = filepath.Clean(src) + string(filepath.Separator)
 		root := src
 		if m.pattern == "cmd" {
@@ -150,7 +182,7 @@ func (m *Match) MatchPackages() {
 				// If the name is cmd, it's the root of the command tree.
 				want = false
 			}
-			if !treeCanMatch(name) {
+			if !treeCanMatch(name) { // meta package时这个函数总是返回true
 				want = false
 			}
 
@@ -207,6 +239,19 @@ var modRoot string
 func SetModRoot(dir string) {
 	modRoot = dir
 }
+
+// 注意不会展开为绝对路径
+//  . => .
+//  ./... => ., ./abc, ./abc/xyz
+// .. => ..
+// ../... => .., ../abc
+
+// 算法和上面类似，只是walktree的起始路径由参数给定，比如./xyz/...，就是从./开始，然后遍历目录，匹配
+// 时需要把目录路径改写为pattern的形式， 也就是要检查 ./xyz/abc 和 ./xyz/...是否匹配
+
+// module-aware mode特别处理就是指检查属于当前module下目录，特别的:
+// - ../ 不能超出module的根目录
+// - 子目录如果有go.mod说明是另外一个module，也跳过
 
 // MatchDirs sets m.Dirs to a non-nil slice containing all directories that
 // potentially match a local pattern. The pattern must begin with an absolute
@@ -344,6 +389,11 @@ func TreeCanMatchPattern(pattern string) func(name string) bool {
 	}
 }
 
+// vendor会特别处理，即...不能匹配vendor，除非pattern里本身有vendor，比如:
+// xyz/... => 不能匹配xyz/vendor目录下的package
+// xyz/vendor/... => 能匹配xyz/vendor目录下的package
+// 如果vendor目录下有.go，也就是vendor本身是一个package，此时当做一个普通package处理，不特别处理
+
 // MatchPattern(pattern)(name) reports whether
 // name matches pattern. Pattern is a limited glob
 // pattern in which '...' means 'any string' and there
@@ -373,9 +423,11 @@ func MatchPattern(pattern string) func(name string) bool {
 	const vendorChar = "\x00"
 
 	if strings.Contains(pattern, vendorChar) {
+		// pattern有这个特殊字符时永远不匹配
 		return func(name string) bool { return false }
 	}
 
+	// . => \., 特别的... => \.\.\.
 	re := regexp.QuoteMeta(pattern)
 	re = replaceVendor(re, vendorChar)
 	switch {
@@ -404,6 +456,7 @@ func replaceVendor(x, repl string) string {
 	if !strings.Contains(x, "vendor") {
 		return x
 	}
+	// 要拆分为field之后再替换，不能直接strings.ReplaceAll，比如 abc/vendorxyz不应该替换
 	elem := strings.Split(x, "/")
 	for i := 0; i < len(elem)-1; i++ {
 		if elem[i] == "vendor" {
@@ -540,6 +593,10 @@ func hasFilepathPrefix(s, prefix string) bool {
 		return s[len(prefix)] == filepath.Separator && s[:len(prefix)] == prefix
 	}
 }
+
+// 命名规则:
+//  - 标准库的package path的第一个元素一定没有".": fmt, runtime
+//  - 用户库的package path的第一个元素应该有".": github.com/xyz/abc
 
 // IsStandardImportPath reports whether $GOROOT/src/path should be considered
 // part of the standard distribution. For historical reasons we allow people to add

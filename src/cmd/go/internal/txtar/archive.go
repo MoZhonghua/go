@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+// 注意是针对文本文件的
+
 // Package txtar implements a trivial text-based file archive format.
 //
 // The goals for the format are:

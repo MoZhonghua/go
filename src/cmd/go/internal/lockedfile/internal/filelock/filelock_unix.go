@@ -21,6 +21,7 @@ const (
 
 func lock(f File, lt lockType) (err error) {
 	for {
+		// 如果其他人加了锁，会一直阻塞
 		err = syscall.Flock(int(f.Fd()), int(lt))
 		if err != syscall.EINTR {
 			break

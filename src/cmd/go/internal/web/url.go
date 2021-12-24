@@ -16,6 +16,13 @@ import (
 
 var errNotAbsolute = errors.New("path is not absolute")
 
+
+// file://localhost/abc/xyz.txt: Host=localhost, Path=/abc/xyz.txt
+// file:///abc/xyz.txt: Host="", Path=/abc/xyz.txt, 两个//和下一个/之间做为host，可以为空
+
+// 两个限制:
+//  - Host必须为空或者localhost, windows特例支持远程Host，比如\\hosta\xyz
+//  - Path必须是绝对路径
 func urlToFilePath(u *url.URL) (string, error) {
 	if u.Scheme != "file" {
 		return "", errors.New("non-file URL")

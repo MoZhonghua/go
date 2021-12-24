@@ -28,6 +28,11 @@ import (
 	"cmd/internal/browser"
 )
 
+// GOINSECURE会做如下处理:
+//  - 路径不带http/https时，会先尝试https，然后尝试http
+//  - 访问https不检查证书是否有效
+//  - 访问http时允许传credential
+
 // impatientInsecureHTTPClient is used with GOINSECURE,
 // when we're connecting to https servers that might not be there
 // or might be using self-signed certificates.
@@ -157,6 +162,9 @@ func get(security SecurityMode, url *urlpkg.URL) (*Response, error) {
 			return nil, fmt.Errorf("unsupported scheme: %s", url.Redacted())
 		}
 
+		// 两种可能到这里
+		//  - url.Scheme == "", 上面尝试https失败, 只有Insecure时可以fallback
+		//  - url.Scheme == "http"
 		insecure := new(urlpkg.URL)
 		*insecure = *url
 		insecure.Scheme = "http"
@@ -208,6 +216,7 @@ func get(security SecurityMode, url *urlpkg.URL) (*Response, error) {
 	return r, nil
 }
 
+// file://localhost/abc/xyz.txt
 func getFile(u *urlpkg.URL) (*Response, error) {
 	path, err := urlToFilePath(u)
 	if err != nil {
