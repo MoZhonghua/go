@@ -58,7 +58,6 @@ const PseudoVersionTimestampFormat = "20060102150405"
 // preexisting older tagged version ("" or "v1.2.3" or "v1.2.3-pre"), revision time,
 // and revision identifier (usually a 12-byte commit hash prefix).
 func PseudoVersion(major, older string, t time.Time, rev string) string {
-	fmt.Printf("PseudoVersion: major=%v older=%v rev=%v\n", major, older, rev)
 	if major == "" {
 		major = "v0"
 	}

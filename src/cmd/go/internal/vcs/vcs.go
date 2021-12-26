@@ -29,17 +29,27 @@ import (
 	"golang.org/x/mod/module"
 )
 
+// go get -x gitlab.qiyi.domain/tv/pkg@18b7701337f4
+//
+// 先从'http://gitlab.qiyi.domain/tv/pkg?go-get=1'读取VCS信息，然后git clone到
+// home/mozhonghua/go/pkg/mod/cache/vcs/abcdhash目录下
+
+// module-aware mode默认总是从proxy.golang.org下载，然后从sum.golang.org校验, 不会走到这里
+// 只有非公共repo的需要走这里的流程。可以设置export GOPROXY=direct来强制从原始repo地址下载
+
 // A vcsCmd describes how to use a version control system
 // like Mercurial, Git, or Subversion.
 type Cmd struct {
 	Name string
 	Cmd  string // name of binary to invoke command
 
+	// 一个任务可能需要执行多个命令, 比如git clone之后需要更新submodule
 	CreateCmd   []string // commands to download a fresh copy of a repository
 	DownloadCmd []string // commands to download updates into an existing repository
 
-	TagCmd         []tagCmd // commands to list tags
-	TagLookupCmd   []tagCmd // commands to lookup tags before running tagSyncCmd
+	TagCmd       []tagCmd // commands to list tags
+	TagLookupCmd []tagCmd // commands to lookup tags before running tagSyncCmd
+	// Sync指在本地checkout指定的tag
 	TagSyncCmd     []string // commands to sync to specific tag
 	TagSyncDefault []string // commands to sync to default tag
 
@@ -154,6 +164,7 @@ var vcsGit = &Cmd{
 	Name: "Git",
 	Cmd:  "git",
 
+	// -go-internal-cd是特殊命令，指先cd到{dir}然后再用后面的参数调用命令
 	CreateCmd:   []string{"clone -- {repo} {dir}", "-go-internal-cd {dir} submodule update --init --recursive"},
 	DownloadCmd: []string{"pull --ff-only", "submodule update --init --recursive"},
 
@@ -163,6 +174,9 @@ var vcsGit = &Cmd{
 		{"show-ref", `(?:tags|origin)/(\S+)$`},
 	},
 	TagLookupCmd: []tagCmd{
+		// https://pkg.go.dev/regexp/syntax
+		// (?:re)         non-capturing group
+		// \S             not whitespace (== [^\t\n\f\r ])
 		{"show-ref tags/{tag} origin/{tag}", `((?:tags|origin)/\S+)$`},
 	},
 	TagSyncCmd: []string{"checkout {tag}", "submodule update --init --recursive"},
@@ -189,6 +203,7 @@ var vcsGit = &Cmd{
 var scpSyntaxRe = lazyregexp.New(`^([a-zA-Z0-9_]+)@([a-zA-Z0-9._-]+):(.*)$`)
 
 func gitRemoteRepo(vcsGit *Cmd, rootDir string) (remoteRepo string, err error) {
+	// git config remote.origin.url
 	cmd := "config remote.origin.url"
 	errParse := errors.New("unable to parse output of git " + cmd)
 	errRemoteOriginNotFound := errors.New("remote origin not found")
@@ -491,6 +506,15 @@ func (v *Cmd) Tags(dir string) ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
+		// (?flags)       set flags within current group; non-capturing
+		// Flag syntax is xyz (set) or -xyz (clear) or xy-z (set xy, clear z). The flags are:
+		// i              case-insensitive (default false)
+		// m              multi-line mode: ^ and $ match begin/end line in addition to begin/end text (default false)
+		// s              let . match \n (default false)
+		// U              ungreedy: swap meaning of x* and x*?, x+ and x+?, etc (default false)
+		// 每个tags一行，要$匹配每行结尾，因此:
+		//  * ?m => multi-line mode
+		//  * ?-s => 不要跨行匹配
 		re := regexp.MustCompile(`(?m-s)` + tc.pattern)
 		for _, m := range re.FindAllStringSubmatch(string(out), -1) {
 			tags = append(tags, m[1])
@@ -552,6 +576,7 @@ type vcsPath struct {
 // version control system and code repository to use.
 // On return, root is the import path
 // corresponding to the root of the repository.
+// 仅用在GOPATH mode
 func FromDir(dir, srcRoot string) (vcs *Cmd, root string, err error) {
 	// Clean and double-check that dir is in (a subdirectory of) srcRoot.
 	dir = filepath.Clean(dir)
@@ -564,6 +589,7 @@ func FromDir(dir, srcRoot string) (vcs *Cmd, root string, err error) {
 	var rootRet string
 
 	origDir := dir
+	// 从dir不断向上直到srcRoot，看看有没有.git等目录
 	for len(dir) > len(srcRoot) {
 		for _, vcs := range vcsList {
 			if _, err := os.Stat(filepath.Join(dir, "."+vcs.Cmd)); err == nil {
@@ -604,15 +630,19 @@ func FromDir(dir, srcRoot string) (vcs *Cmd, root string, err error) {
 	return nil, "", fmt.Errorf("directory %q is not using a known version control system", origDir)
 }
 
+// GOVCS=github.com:git, evil.com:off, *:git|hg
 // A govcsRule is a single GOVCS rule like private:hg|svn.
 type govcsRule struct {
-	pattern string
-	allowed []string
+	pattern string   // pattern=*
+	allowed []string // allowed=["git", "hg"]
 }
 
 // A govcsConfig is a full GOVCS configuration.
 type govcsConfig []govcsRule
 
+// *:git|hg =>
+//   pattern=*
+//   allowed=["git", "hg"]
 func parseGOVCS(s string) (govcsConfig, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -656,20 +686,23 @@ func parseGOVCS(s string) (govcsConfig, error) {
 	return cfg, nil
 }
 
+// go help private
 func (c *govcsConfig) allow(path string, private bool, vcs string) bool {
 	for _, rule := range *c {
 		match := false
 		switch rule.pattern {
-		case "private":
+		case "private": // 特殊pattern，匹配所有的private path，和path值无关
 			match = private
 		case "public":
 			match = !private
 		default:
 			// Note: rule.pattern is known to be comma-free,
 			// so MatchPrefixPatterns is only matching a single pattern for us.
+			// 注意这里的pattern最终是path.Match()，也就是说不是用...来表示*，而是直接用*,?等
 			match = module.MatchPrefixPatterns(rule.pattern, path)
 		}
 		if !match {
+			// 不是直接返回，而是继续匹配下一个rule
 			continue
 		}
 		for _, allow := range rule.allowed {
@@ -681,6 +714,7 @@ func (c *govcsConfig) allow(path string, private bool, vcs string) bool {
 	}
 
 	// By default, nothing is allowed.
+	// 所有规则都检查了，全部不匹配或者匹配的rule中的allow列表没有vcs
 	return false
 }
 
@@ -797,6 +831,12 @@ const (
 
 // RepoRootForImportPath analyzes importPath to determine the
 // version control system, and code repository to use.
+// 依次尝试:
+//  - repoRootFromVCSPaths(good): 匹配已知前缀，比如github.com或者明确有.git后缀的路径
+//  - repoRootForImportDynamic: 不是已知前缀或者有.git后缀，尝试读取meta tag: google.golang.org/grpc?go-get=1
+//  - repoRootFromVCSPaths(after/vcsPathsAfterDynamic): 处理其他的已知前缀，launchpad.net
+// after和good区别在于，after执行时已经尝试读取go-get=1 meta，用户有机会通过meta重定向到其他repo，而
+// good写死repo地址，不能重定向
 func RepoRootForImportPath(importPath string, mod ModuleMode, security web.SecurityMode) (*RepoRoot, error) {
 	rr, err := repoRootFromVCSPaths(importPath, security, vcsPaths)
 	if err == errUnknownSite {
@@ -819,6 +859,8 @@ func RepoRootForImportPath(importPath string, mod ModuleMode, security web.Secur
 		rr = nil
 		err = importErrorf(importPath, "cannot expand ... in %q", importPath)
 	}
+	// github.com/google/uuid =>
+	// {Repo:https://github.com/grpc/grpc-go Root:google.golang.org/grpc IsCustom:true VCS:Git}
 	return rr, err
 }
 
@@ -892,9 +934,12 @@ func repoRootFromVCSPaths(importPath string, security web.SecurityMode, vcsPaths
 		if !srv.schemelessRepo {
 			repoURL = match["repo"]
 		} else {
+			// xyz.com/abc/def.git 这种的没有指定scheme，尝试用git的第一个scheme，或者
+			// 如果有PingCmd且只用安全scheme，则用第一个ping的通的安全scheme
 			scheme := vcs.Scheme[0] // default to first scheme
 			repo := match["repo"]
 			if vcs.PingCmd != "" {
+				// 比如git ls-remote http://gitlab.qiyi.domain/tv/pkg
 				// If we know how to test schemes, scan to find one.
 				for _, s := range vcs.Scheme {
 					if security == web.SecureOnly && !vcs.isSecureScheme(s) {
@@ -942,6 +987,8 @@ func urlForImportPath(importPath string) (*urlpkg.URL, error) {
 //
 // This handles custom import paths like "name.tld/pkg/foo" or just "name.tld".
 func repoRootForImportDynamic(importPath string, mod ModuleMode, security web.SecurityMode) (*RepoRoot, error) {
+	// google.golang.org/grpc => google.golang.org/grpc?go-get=1
+	// 注意此时的url没有scheme，会先尝试https，然后根据security决定是否可以fallback to http
 	url, err := urlForImportPath(importPath)
 	if err != nil {
 		return nil, err
@@ -956,6 +1003,8 @@ func repoRootForImportDynamic(importPath string, mod ModuleMode, security web.Se
 	}
 	body := resp.Body
 	defer body.Close()
+	// curl 'https://google.golang.org/grpc?go-get=1'
+	// <meta name="go-import" content="google.golang.org/grpc git https://github.com/grpc/grpc-go">
 	imports, err := parseMetaGoImports(body, mod)
 	if len(imports) == 0 {
 		if respErr := resp.Err(); respErr != nil {
@@ -985,6 +1034,7 @@ func repoRootForImportDynamic(importPath string, mod ModuleMode, security web.Se
 	// non-evil student). Instead, first verify the root and see
 	// if it matches Bob's claim.
 	if mmi.Prefix != importPath {
+		// mmi.Prefix是从importPath同名的地址读取的, 发现和importPath不一致
 		if cfg.BuildV {
 			log.Printf("get %q: verifying non-authoritative meta tag", importPath)
 		}
@@ -1063,6 +1113,7 @@ func metaImportsForPrefix(importPrefix string, mod ModuleMode, security web.Secu
 		return res, nil
 	}
 
+	// importPrefix做为call key，同一个key的调用是串行，这样包成一个importPrefix只会走一次网络
 	resi, _, _ := fetchGroup.Do(importPrefix, func() (resi interface{}, err error) {
 		fetchCacheMu.Lock()
 		if res, ok := fetchCache[importPrefix]; ok {
@@ -1109,6 +1160,8 @@ type fetchResult struct {
 
 // metaImport represents the parsed <meta name="go-import"
 // content="prefix vcs reporoot" /> tags from HTML files.
+// <meta name="go-import" content="foo/bar git https://github.com/rsc/foo/bar">
+// Prefix=foo/bar, VCS=git, RepoRoot=https://github.com/rsc/foo/bar
 type metaImport struct {
 	Prefix, VCS, RepoRoot string
 }
@@ -1137,6 +1190,7 @@ func matchGoImport(imports []metaImport, importPath string) (metaImport, error) 
 	errImportMismatch := ImportMismatchError{importPath: importPath}
 	for i, im := range imports {
 		if !str.HasPathPrefix(importPath, im.Prefix) {
+			// 允许不匹配，只有全部都不匹配时才会报错，这里只是记录下来，方便后面返回错误信息
 			errImportMismatch.mismatches = append(errImportMismatch.mismatches, im.Prefix)
 			continue
 		}
@@ -1146,6 +1200,7 @@ func matchGoImport(imports []metaImport, importPath string) (metaImport, error) 
 				// All the mod entries precede all the non-mod entries.
 				// We have a mod entry and don't care about the rest,
 				// matching or not.
+				// 注意这样就不会检查多次匹配
 				break
 			}
 			return metaImport{}, fmt.Errorf("multiple meta tags match import path %q", importPath)
@@ -1179,6 +1234,7 @@ var vcsPaths = []*vcsPath{
 	// GitHub
 	{
 		pathPrefix: "github.com",
+		// (?P<name>re)   named & numbered capturing group (submatch)
 		regexp:     lazyregexp.New(`^(?P<root>github\.com/[A-Za-z0-9_.\-]+/[A-Za-z0-9_.\-]+)(/[A-Za-z0-9_.\-]+)*$`),
 		vcs:        "git",
 		repo:       "https://{root}",
@@ -1229,6 +1285,7 @@ var vcsPaths = []*vcsPath{
 	// General syntax for any server.
 	// Must be last.
 	{
+		// 注意regexp中的named group: root, repo, vcs，分别对应
 		regexp:         lazyregexp.New(`(?P<root>(?P<repo>([a-z0-9.\-]+\.)+[a-z0-9.\-]+(:[0-9]+)?(/~?[A-Za-z0-9_.\-]+)+?)\.(?P<vcs>bzr|fossil|git|hg|svn))(/~?[A-Za-z0-9_.\-]+)*$`),
 		schemelessRepo: true,
 	},
@@ -1278,7 +1335,7 @@ func bitbucketVCS(match map[string]string) error {
 		Path:     expand(match, "/2.0/repositories/{bitname}"),
 		RawQuery: "fields=scm",
 	}
-	data, err := web.GetBytes(url)
+	data, err := web.GetBytes(url) // 默认安全级别
 	if err != nil {
 		if httpErr, ok := err.(*web.HTTPError); ok && httpErr.StatusCode == 403 {
 			// this may be a private repository. If so, attempt to determine which

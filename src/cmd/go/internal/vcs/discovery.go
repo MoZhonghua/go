@@ -28,6 +28,11 @@ func charsetReader(charset string, input io.Reader) (io.Reader, error) {
 
 // parseMetaGoImports returns meta imports from the HTML in r.
 // Parsing ends at the end of the <head> section or the beginning of the <body>.
+// 返回的是HTML文件，本质是XML
+/*
+curl -v 'http://gitlab.qiyi.domain/tv/pkg?go-get=1'
+<html><head><meta name="go-import" content="gitlab.qiyi.domain/tv/pkg git http://gitlab.qiyi.domain/tv/pkg.git" /></head></html>
+*/
 func parseMetaGoImports(r io.Reader, mod ModuleMode) ([]metaImport, error) {
 	d := xml.NewDecoder(r)
 	d.CharsetReader = charsetReader

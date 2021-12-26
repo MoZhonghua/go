@@ -42,7 +42,7 @@ vendor/golang.org/x/mod/zip/zip.go
 vendor/golang.org/x/mod/sumdb/cache.go
 
 2021-12-26
-internal/mvs/mvs.go ?
+internal/mvs/mvs.go
 internal/vcs/vcs.go ?
 internal/load/path.go ?
 internal/get/get.go ?
