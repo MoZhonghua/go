@@ -104,6 +104,9 @@ type Client struct {
 
 // NewClient returns a new Client using the given Client.
 func NewClient(ops ClientOps) *Client {
+	// GOSUMDB="sum.golang.org"
+	// 这个只有sum数据，可以用来校验下载后的module内容，实际module的下载不是这里负责
+	// 会缓存到go.sum文件中
 	return &Client{
 		ops: ops,
 	}
@@ -260,16 +263,20 @@ func (c *Client) Lookup(path, vers string) (lines []string, err error) {
 		return nil, err
 	}
 
+	// 这里的escape指大写字符改写为 !小写字符，比如"aBa" => "a!ba", 为了兼容case-insensitive文件系统
 	// Prepare encoded cache filename / URL.
 	epath, err := module.EscapePath(path)
 	if err != nil {
 		return nil, err
 	}
+	// 什么时候只要"/go.mod"?
 	evers, err := module.EscapeVersion(strings.TrimSuffix(vers, "/go.mod"))
 	if err != nil {
 		return nil, err
 	}
 	remotePath := "/lookup/" + epath + "@" + evers
+	// c.name是verifier.Name(), 一般是提供服务的域名
+	// example: sum.golang.org/lookup/golang.org/x/mod@v0.5.1
 	file := c.name + remotePath
 
 	// Fetch the data.
@@ -284,7 +291,7 @@ func (c *Client) Lookup(path, vers string) (lines []string, err error) {
 	result := c.record.Do(file, func() interface{} {
 		// Try the on-disk cache, or else get from web.
 		writeCache := false
-		data, err := c.ops.ReadCache(file)
+		data, err := c.ops.ReadCache(file) // 从go.sum文件中读取
 		if err != nil {
 			data, err = c.ops.ReadRemote(remotePath)
 			if err != nil {
@@ -292,8 +299,23 @@ func (c *Client) Lookup(path, vers string) (lines []string, err error) {
 			}
 			writeCache = true
 		}
+		/*
+			3109
+			golang.org/x/mod v0.5.1 h1:OJxoQ/rynoF0dcCdI7cLPktw/hR2cueqYfjm43oqK38=
+			golang.org/x/mod v0.5.1/go.mod h1:5OXOZSfqPIIbmVBIIKWRFfZjPR0E5r58TLhUjH0a2Ro=
+
+			go.sum database tree
+			8521678
+			7+uodzlHi5Sv+XZ44AtQDwDukMB10k1eeki/pyFrz3o=
+
+			— sum.golang.org Az3grkHZgv4EBuZ++sRbQC/YKbaJzwDDw3h9/fkm1yQS3WZv6tRcBFRuPhyrPHvG8sg6Bf6e5T2aDl0BQfnYBH26dAE=
+		*/
 
 		// Validate the record before using it for anything.
+		// id = 3109: log id
+		// text: 到第一个空行前，即golang.org/x/sync开头的两行, 这个log的数据
+		// treeMsg: go.sum database tree和之后的数据, 当前tree最新id和最顶层hash
+
 		id, text, treeMsg, err := tlog.ParseRecord(data)
 		if err != nil {
 			return cached{nil, err}
@@ -322,6 +344,9 @@ func (c *Client) Lookup(path, vers string) (lines []string, err error) {
 	prefix := path + " " + vers + " "
 	var hashes []string
 	for _, line := range strings.Split(string(result.data), "\n") {
+		// prefix最后的空格保证只会匹配其中一行
+		// golang.org/x/mod v0.5.1 h1:OJxoQ/rynoF0dcCdI7cLPktw/hR2cueqYfjm43oqK38=
+		// golang.org/x/mod v0.5.1/go.mod h1:5OXOZSfqPIIbmVBIIKWRFfZjPR0E5r58TLhUjH0a2Ro=
 		if strings.HasPrefix(line, prefix) {
 			hashes = append(hashes, line)
 		}
@@ -406,10 +431,20 @@ func (c *Client) mergeLatestMem(msg []byte) (when int, err error) {
 		return msgPast, nil
 	}
 
+	/*
+		go.sum database tree
+		8521678
+		7+uodzlHi5Sv+XZ44AtQDwDukMB10k1eeki/pyFrz3o=
+
+		— sum.golang.org Az3grkHZgv4EBuZ++sRbQC/YKbaJzwDDw3h9/fkm1yQS3WZv6tRcBFRuPhyrPHvG8sg6Bf6e5T2aDl0BQfnYBH26dAE=
+	*/
+	// 校验signature
 	note, err := note.Open(msg, c.verifiers)
 	if err != nil {
 		return 0, fmt.Errorf("reading tree note: %v\nnote:\n%s", err, msg)
 	}
+	// N=8521678
+	// Hash=7+uodzlHi5Sv+XZ44AtQDwDukMB10k1eeki/pyFrz3o=
 	tree, err := tlog.ParseTree([]byte(note.Text))
 	if err != nil {
 		return 0, fmt.Errorf("reading tree: %v\ntree:\n%s", err, note.Text)
@@ -426,6 +461,7 @@ func (c *Client) mergeLatestMem(msg []byte) (when int, err error) {
 	for {
 		// If the tree head looks old, check that it is on our timeline.
 		if tree.N <= latest.N {
+			// 看到的tree.N更小，和现有的检查一下
 			if err := c.checkTrees(tree, msg, latest, latestMsg); err != nil {
 				return 0, err
 			}
@@ -436,6 +472,7 @@ func (c *Client) mergeLatestMem(msg []byte) (when int, err error) {
 		}
 
 		// The tree head looks new. Check that we are on its timeline and try to move our timeline forward.
+		// 看到的tree.N更大，检查一下，如果检查通过则更新
 		if err := c.checkTrees(latest, latestMsg, tree, msg); err != nil {
 			return 0, err
 		}

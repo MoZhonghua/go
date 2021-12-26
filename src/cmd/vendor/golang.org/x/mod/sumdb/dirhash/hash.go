@@ -93,6 +93,7 @@ func DirFiles(dir, prefix string) ([]string, error) {
 		}
 		rel := file
 		if dir != "." {
+			// 上面对dir=Clean(dir)，因此这里可以直接截取
 			rel = file[len(dir)+1:]
 		}
 		f := filepath.Join(prefix, rel)

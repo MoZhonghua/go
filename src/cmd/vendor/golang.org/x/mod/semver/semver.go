@@ -59,10 +59,11 @@ func Canonical(v string) string {
 	if !ok {
 		return ""
 	}
-	if p.build != "" {
+	if p.build != "" {  // 去掉+build部分
 		return v[:len(v)-len(p.build)]
 	}
 	if p.short != "" {
+		// short指缺失的.minor.patch部分, 补齐
 		return v + p.short
 	}
 	return v

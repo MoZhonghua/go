@@ -117,7 +117,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.Write(msg)
 		w.Write(signed)
 
-	case r.URL.Path == "/latest":
+	case r.URL.Path == "/latest":   // <N, hash, sig>
 		data, err := s.ops.Signed(ctx)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)

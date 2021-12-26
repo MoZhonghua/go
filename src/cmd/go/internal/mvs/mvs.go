@@ -103,7 +103,7 @@ func buildList(target module.Version, reqs Reqs, upgrade func(module.Version) (m
 	var (
 		mu       sync.Mutex
 		g        = NewGraph(cmp, []module.Version{target})
-		upgrades = map[module.Version]module.Version{}
+		upgrades = map[module.Version]module.Version{} // 仅用来生成错误信息
 		errs     = map[module.Version]error{} // (non-nil errors only)
 	)
 
@@ -111,7 +111,7 @@ func buildList(target module.Version, reqs Reqs, upgrade func(module.Version) (m
 	// does high-latency network operations.
 	var work par.Work
 	work.Add(target)
-	work.Do(10, func(item interface{}) {
+	work.Do(10, func(item interface{}) { // 相同的module.Version只会处理一次
 		m := item.(module.Version)
 
 		var required []module.Version
@@ -122,6 +122,10 @@ func buildList(target module.Version, reqs Reqs, upgrade func(module.Version) (m
 
 		u := m
 		if upgrade != nil {
+			// 升级只有两种情况:
+			//   - 所有的module都升级(除了target)
+			//   - 指定的path升级
+			// 关键是给定<path, version>后由外部决定升级到的版本，而不是MVS本身来计算
 			upgradeTo, upErr := upgrade(m)
 			if upErr == nil {
 				u = upgradeTo
@@ -136,6 +140,8 @@ func buildList(target module.Version, reqs Reqs, upgrade func(module.Version) (m
 		}
 		if u != m {
 			upgrades[m] = u
+			// m->u
+			// 注意把升级后的版本u加入到了m的req列表中
 			required = append([]module.Version{u}, required...)
 		}
 		g.Require(m, required)
@@ -181,6 +187,7 @@ func buildList(target module.Version, reqs Reqs, upgrade func(module.Version) (m
 // Req returns the minimal requirement list for the target module,
 // with the constraint that all module paths listed in base must
 // appear in the returned list.
+// 这个实际仅仅在生成go.mod时需要，其他情况下都是要处理完整的graph
 func Req(target module.Version, base []string, reqs Reqs) ([]module.Version, error) {
 	list, err := BuildList(target, reqs)
 	if err != nil {
@@ -249,6 +256,7 @@ func Req(target module.Version, base []string, reqs Reqs) ([]module.Version, err
 		}
 		m := module.Version{Path: path, Version: max[path]}
 		min = append(min, m)
+		// 把base中的都标记为直接依赖, 并地柜标记
 		walk(m)
 		haveBase[path] = true
 	}
@@ -261,6 +269,7 @@ func Req(target module.Version, base []string, reqs Reqs) ([]module.Version, err
 		}
 		if !have[m] {
 			min = append(min, m)
+			// 标记了非直接依赖之后，递归标记
 			walk(m)
 		}
 	}
@@ -284,6 +293,7 @@ func UpgradeAll(target module.Version, reqs UpgradeReqs) ([]module.Version, erro
 
 // Upgrade returns a build list for the target module
 // in which the given additional modules are upgraded.
+// 升级指定module，实现方法是伪造target的req列表，把指定的module加入到req列表中
 func Upgrade(target module.Version, reqs UpgradeReqs, upgrade ...module.Version) ([]module.Version, error) {
 	list, err := reqs.Required(target)
 	if err != nil {
@@ -298,10 +308,13 @@ func Upgrade(target module.Version, reqs UpgradeReqs, upgrade ...module.Version)
 
 	upgradeTo := make(map[string]string, len(upgrade))
 	for _, u := range upgrade {
+		// 要求升级的module不是target的直接依赖项
 		if !pathInList[u.Path] {
+			// 注意不在已有req列表中的版本设置为none
 			list = append(list, module.Version{Path: u.Path, Version: "none"})
 		}
 		if prev, dup := upgradeTo[u.Path]; dup {
+			// Max(v, "none") = v
 			upgradeTo[u.Path] = reqs.Max(prev, u.Version)
 		} else {
 			upgradeTo[u.Path] = u.Version
@@ -309,6 +322,7 @@ func Upgrade(target module.Version, reqs UpgradeReqs, upgrade ...module.Version)
 	}
 
 	return buildList(target, &override{target, list, reqs}, func(m module.Version) (module.Version, error) {
+		// 这里才是返回指定的版本
 		if v, ok := upgradeTo[m.Path]; ok {
 			return module.Version{Path: m.Path, Version: v}, nil
 		}
@@ -323,6 +337,10 @@ func Upgrade(target module.Version, reqs UpgradeReqs, upgrade ...module.Version)
 // The versions to be downgraded may be unreachable from reqs.Latest and
 // reqs.Previous, but the methods of reqs must otherwise handle such versions
 // correctly.
+// 假设需要降级到X:5, 计算出当前buildlist，然后递归检查每一项的reqs，如果发现依赖X:v>5，则
+// 降级当前项，直到依赖的X:v<=5或者不依赖X
+// 注意这个过程中会重复访问很多节点，记录下来避免重复检查, 比如A2 -> B1 -> X6, A1 -> B1 -X6
+// 第一次标记A1和B1非法，第二次到B1时就可以标记A1非法，不用再递归到X6
 func Downgrade(target module.Version, reqs DowngradeReqs, downgrade ...module.Version) ([]module.Version, error) {
 	// Per https://research.swtch.com/vgo-mvs#algorithm_4:
 	// “To avoid an unnecessary downgrade to E 1.1, we must also add a new
@@ -342,6 +360,10 @@ func Downgrade(target module.Version, reqs DowngradeReqs, downgrade ...module.Ve
 		max[r.Path] = r.Version
 	}
 	for _, d := range downgrade {
+		// max[d.path]三种情况:
+		//  - d.path不在downgrade列表中，就是buildlist中的版本
+		//  - d.path在downgrade列表中，且buildlist中的版本更低，用这个版本
+		//  - d.path在downgrade列表中，且buildlist中的版本更高，用downgrade指定的版本
 		if v, ok := max[d.Path]; !ok || reqs.Max(v, d.Version) != d.Version {
 			max[d.Path] = d.Version
 		}
@@ -349,7 +371,7 @@ func Downgrade(target module.Version, reqs DowngradeReqs, downgrade ...module.Ve
 
 	var (
 		added    = make(map[module.Version]bool)
-		rdeps    = make(map[module.Version][]module.Version)
+		rdeps    = make(map[module.Version][]module.Version) // 反向依赖关系
 		excluded = make(map[module.Version]bool)
 	)
 	var exclude func(module.Version)
@@ -369,6 +391,7 @@ func Downgrade(target module.Version, reqs DowngradeReqs, downgrade ...module.Ve
 		}
 		added[m] = true
 		if v, ok := max[m.Path]; ok && reqs.Max(m.Version, v) != v {
+			// 新加入的m版本高于限制，需要exclude自己和所有依赖m的版本
 			// m would upgrade an existing dependency — it is not a strict downgrade,
 			// and because it was already present as a dependency, it could affect the
 			// behavior of other relevant packages.
@@ -391,8 +414,11 @@ func Downgrade(target module.Version, reqs DowngradeReqs, downgrade ...module.Ve
 			return
 		}
 		for _, r := range list {
+			// 注意是递归检查
 			add(r)
 			if excluded[r] {
+				// 如果m依赖的r超过限制，则直接exclude m，而不是把m加入的r.rdeps列表
+				// r.rdeps仅会处理一次且已经被处理，实际上我们已经知道r无效，这样处理更快
 				exclude(m)
 				return
 			}
@@ -403,7 +429,9 @@ func Downgrade(target module.Version, reqs DowngradeReqs, downgrade ...module.Ve
 	downgraded := make([]module.Version, 0, len(list)+1)
 	downgraded = append(downgraded, target)
 List:
-	for _, r := range list {
+	for _, r := range list { // list是buildlist返回的全graph
+		// 注意add(r)是递归操作，会把r的依赖项都加入，如果有任意依赖项m版本超过范围
+		// 则r->m路径上的所有版本都会标记为excluded
 		add(r)
 		for excluded[r] {
 			p, err := reqs.Previous(r)
@@ -420,6 +448,8 @@ List:
 			// Insert it into the right place in the iteration.
 			// If v is excluded, p should be returned again by reqs.Previous on the next iteration.
 			if v := max[r.Path]; reqs.Max(v, r.Version) != v && reqs.Max(p.Version, v) != p.Version {
+				// p.Version < max_limit(Path) < r.Version
+				// 如果是正常版本号， 应该是p.Version=max_limit(Path)
 				p.Version = v
 			}
 			if p.Version == "none" {
@@ -428,6 +458,7 @@ List:
 			add(p)
 			r = p
 		}
+		// r是降级后合法的版本
 		downgraded = append(downgraded, r)
 	}
 
@@ -446,6 +477,9 @@ List:
 	// list with the actual versions of the downgraded modules as selected by MVS,
 	// instead of our initial downgrades.
 	// (See the downhiddenartifact and downhiddencross test cases).
+	// A6 直接降级的时候是 A4, 也就是Previous(A6)=A4，其中A5是pseduo-version
+	// 同时降级B9->B8后，B8依赖A5，此时downgrade列表为(A4, B8)，但是由于B8依赖A5
+	// 最终选择的A的版本为A5，实际buildlist应该是(A5, B8)，因此需要重新计算一次。
 	actual, err := BuildList(target, &override{
 		target: target,
 		list:   downgraded,
@@ -466,6 +500,7 @@ List:
 		}
 	}
 
+	// 为什么再算一次??
 	return BuildList(target, &override{
 		target: target,
 		list:   downgraded,

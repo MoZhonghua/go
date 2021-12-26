@@ -68,7 +68,7 @@
 // A signed note consists of a text ending in newline (U+000A),
 // followed by a blank line (only a newline),
 // followed by one or more signature lines of this form:
-// em dash (U+2014), space (U+0020),
+// em dash (U+2014: 长破折号), space (U+0020),
 // server name, space, base64-encoded signature, newline.
 //
 // Signed notes must be valid UTF-8 and must not contain any
@@ -195,7 +195,7 @@ import (
 )
 
 // A Verifier verifies messages signed with a specific key.
-type Verifier interface {
+type Verifier interface { // <name, pub_key>
 	// Name returns the server name associated with the key.
 	Name() string
 
@@ -207,7 +207,7 @@ type Verifier interface {
 }
 
 // A Signer signs messages using a specific key.
-type Signer interface {
+type Signer interface { // <name, priv_key>
 	// Name returns the server name associated with the key.
 	Name() string
 
@@ -245,6 +245,7 @@ func isValidName(name string) bool {
 }
 
 // NewVerifier construct a new Verifier from an encoded verifier key.
+// PeterNeumann + c74f20a3 + ARpc2QcUPDhMQegwxbzhKqiBfsVkmqq/LDE4izWy10TW
 func NewVerifier(vkey string) (Verifier, error) {
 	name, vkey := chop(vkey, "+")
 	hash16, key64 := chop(vkey, "+")
@@ -468,7 +469,7 @@ type Signature struct {
 	// Name and Hash give the name and key hash
 	// for the key that generated the signature.
 	Name string
-	Hash uint32
+	Hash uint32 // 是pub key对应的hash
 
 	// Base64 records the base64-encoded signature bytes.
 	Base64 string

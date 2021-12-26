@@ -38,6 +38,7 @@ func NewGraph(cmp func(v1, v2 string) int, roots []module.Version) *Graph {
 
 	for _, m := range roots {
 		g.isRoot[m] = true
+		// roots里可能有同一个path的多个版本
 		if g.cmp(g.Selected(m.Path), m.Version) < 0 {
 			g.selected[m.Path] = m.Version
 		}
@@ -45,6 +46,9 @@ func NewGraph(cmp func(v1, v2 string) int, roots []module.Version) *Graph {
 
 	return g
 }
+
+
+// 这里就是push，由调用者调用，而不是Graph从调用者那里拉去依赖关系
 
 // Require adds the information that module m requires all modules in reqs.
 // The reqs slice must not be modified after it is passed to Require.
@@ -59,6 +63,7 @@ func (g *Graph) Require(m module.Version, reqs []module.Version) {
 	// are actually reachable from the roots (and therefore should affect the
 	// selected versions of the modules they name).
 	if _, reachable := g.isRoot[m]; !reachable {
+		// 注意这里检查的是dep是否在map中，而不是value
 		panic(fmt.Sprintf("%v is not reachable from any root", m))
 	}
 
@@ -90,6 +95,7 @@ func (g *Graph) Require(m module.Version, reqs []module.Version) {
 // The caller must not modify the returned slice, but may safely append to it
 // and may rely on it not to be modified.
 func (g *Graph) RequiredBy(m module.Version) (reqs []module.Version, ok bool) {
+	// 注意Require()方法里把reqs数组的cap设置为len，这样append总是会分配新内存，不会修改返回值
 	reqs, ok = g.required[m]
 	return reqs, ok
 }
@@ -115,6 +121,7 @@ func (g *Graph) BuildList() []module.Version {
 
 	var list []module.Version
 	for _, r := range g.roots {
+		// roots是NewGraph()传入参数
 		if seenRoot[r.Path] {
 			// Multiple copies of the same root, with the same or different versions,
 			// are a bit of a degenerate case: we will take the transitive
@@ -125,6 +132,7 @@ func (g *Graph) BuildList() []module.Version {
 			continue
 		}
 
+		// NewGraph()中计算出了roots的最高版本
 		if v := g.Selected(r.Path); v != "none" {
 			list = append(list, module.Version{Path: r.Path, Version: v})
 		}
@@ -171,6 +179,7 @@ func (g *Graph) WalkBreadthFirst(f func(m module.Version)) {
 	}
 }
 
+// 最短路径算法, 需要构造出具体的最短路径，而不是仅仅返回长度。通过firstReqires map构造。
 // FindPath reports a shortest requirement path starting at one of the roots of
 // the graph and ending at a module version m for which f(m) returns true, or
 // nil if no such path exists.
@@ -200,6 +209,7 @@ func (g *Graph) FindPath(f func(module.Version) bool) []module.Version {
 				path = append(path, m)
 			}
 
+			// reverse slice
 			i, j := 0, len(path)-1
 			for i < j {
 				path[i], path[j] = path[j], path[i]

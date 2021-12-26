@@ -217,7 +217,7 @@ func checkFiles(files []File) (cf CheckedFiles, validFiles []File, validSizes []
 		p := f.Path()
 		dir, base := path.Split(p)
 		if strings.EqualFold(base, "go.mod") {
-			info, err := f.Lstat()
+			info, err := f.Lstat() // go.mod文件本身必须在files中
 			if err != nil {
 				addError(p, false, err)
 				continue
@@ -289,7 +289,7 @@ func checkFiles(files []File) (cf CheckedFiles, validFiles []File, validSizes []
 			addError(p, true, errSymlink)
 			continue
 		}
-		if !info.Mode().IsRegular() {
+		if !info.Mode().IsRegular() { // files必须是文件，当时我们记录中间路径为dir
 			addError(p, true, errNotRegular)
 			continue
 		}
@@ -380,9 +380,11 @@ func CheckZip(m module.Version, zipFile string) (CheckedFiles, error) {
 // used in Unzip to avoid redundant I/O.
 func checkZip(m module.Version, f *os.File) (*zip.Reader, CheckedFiles, error) {
 	// Make sure the module path and version are valid.
-	if vers := module.CanonicalVersion(m.Version); vers != m.Version {
+	if vers := module.CanonicalVersion(m.Version); vers != m.Version { // 注意是不带+build的
 		return nil, CheckedFiles{}, fmt.Errorf("version %q is not canonical (should be %q)", m.Version, vers)
 	}
+
+	// path中可以出现v2这样的major version，检查和Version匹配
 	if err := module.Check(m.Path, m.Version); err != nil {
 		return nil, CheckedFiles{}, err
 	}
@@ -572,6 +574,8 @@ func (f dirFile) Path() string                 { return f.slashPath }
 func (f dirFile) Lstat() (os.FileInfo, error)  { return f.info, nil }
 func (f dirFile) Open() (io.ReadCloser, error) { return os.Open(f.filePath) }
 
+
+// 简单检查，有vendor，且不是最后一个
 // isVendoredPackage attempts to report whether the given filename is contained
 // in a package whose import path contains (but does not end with) the component
 // "vendor".
@@ -710,6 +714,7 @@ func (cc collisionChecker) check(p string, isDir bool) error {
 	return nil
 }
 
+// 注意不会exclude .gitignore中指定的文件，比如*.swp, bin/xyz也会打包
 // listFilesInDir walks the directory tree rooted at dir and returns a list of
 // files, as well as a list of directories and files that were skipped (for
 // example, nested modules and symbolic links).
@@ -764,8 +769,8 @@ func listFilesInDir(dir string) (files []File, omitted []FileError, err error) {
 		}
 
 		files = append(files, dirFile{
-			filePath:  filePath,
-			slashPath: slashPath,
+			filePath:  filePath, // 这个是在当前FS中路径名，用来打开文件读取内容,w
+			slashPath: slashPath, // 这个才是真正出现在zip中的文件路径名
 			info:      info,
 		})
 		return nil

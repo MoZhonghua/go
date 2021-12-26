@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+// tamper-evident 防揭换, 防篡改
 // Package tlog implements a tamper-evident log
 // used in the Go module go.sum database server.
 //
@@ -10,6 +11,8 @@
 // See TestCertificateTransparency.
 //
 package tlog
+
+// 数据按照postorder顺序存放，但是发送给客户端是按照tile来发送
 
 import (
 	"crypto/sha256"
@@ -80,6 +83,8 @@ func maxpow2(n int64) (k int64, l int) {
 
 var zeroPrefix = []byte{0x00}
 
+// Merkle Hash Trees
+
 // RecordHash returns the content hash for the given record data.
 func RecordHash(data []byte) Hash {
 	// SHA256(0x00 || data)
@@ -115,6 +120,9 @@ func NodeHash(left, right Hash) Hash {
 // Hash storage implementations that store hashes in sequential
 // storage can use this function to compute where to read or write
 // a given hash.
+// 树的leaf level=0.每个子树连续存放，或者说要读取任意子树时，只需要计算出start/end，这个子树的所有
+// 数据都在这之间或者说就是postorder顺序遍历存放
+// 通过递推公式来计算, https://research.swtch.com/tlog#appendix_a
 func StoredHashIndex(level int, n int64) int64 {
 	// Level L's n'th hash is written right after level L+1's 2n+1'th hash.
 	// Work our way down to the level 0 ordering.

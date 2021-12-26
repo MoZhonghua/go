@@ -37,11 +37,13 @@ internal/web/http.go
 2021-12-24
 vendor/golang.org/x/mod/module/module.go
 vendor/golang.org/x/mod/semver/semver.go
-vendor/golang.org/x/mod/modfile/read.go ?
+vendor/golang.org/x/mod/modfile/read.go
+vendor/golang.org/x/mod/zip/zip.go
+vendor/golang.org/x/mod/sumdb/cache.go
 
+2021-12-26
 internal/mvs/mvs.go ?
 internal/vcs/vcs.go ?
-
 internal/load/path.go ?
 internal/get/get.go ?
 internal/list/list.go ?
