@@ -839,14 +839,17 @@ const (
 // good写死repo地址，不能重定向
 func RepoRootForImportPath(importPath string, mod ModuleMode, security web.SecurityMode) (*RepoRoot, error) {
 	rr, err := repoRootFromVCSPaths(importPath, security, vcsPaths)
+	// fmt.Printf("repoRootFromVCSPaths(good): importPath => %v\n", err)
 	if err == errUnknownSite {
 		rr, err = repoRootForImportDynamic(importPath, mod, security)
+		// fmt.Printf("repoRootForImportDynamic(): importPath => %v\n", err)
 		if err != nil {
 			err = importErrorf(importPath, "unrecognized import path %q: %v", importPath, err)
 		}
 	}
 	if err != nil {
 		rr1, err1 := repoRootFromVCSPaths(importPath, security, vcsPathsAfterDynamic)
+		// fmt.Printf("repoRootFromVCSPaths(after): importPath => %v\n", err1)
 		if err1 == nil {
 			rr = rr1
 			err = nil
