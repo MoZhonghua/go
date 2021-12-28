@@ -105,9 +105,15 @@ func (r *resolver) openLabelScope() {
 }
 
 func (r *resolver) closeLabelScope() {
-	// Label引用的规则要求定义Label的Scope >= 引用Label的Scope
-	// 这里的处理只在每个函数结束时调用，因此这里不会报错会
-	// cmd/compile中是自己实现的syntax，会检查
+	// Go Spec:
+	// Labels are declared by labeled statements and are used in the "break",
+	// "continue", and "goto" statements. It is illegal to define a label that
+	// is never used. In contrast to other identifiers, labels are not block
+	// scoped and do not conflict with identifiers that are not labels. The
+	// scope of a label is the body of the function in which it is declared and
+	// excludes the body of any nested function.
+	// cmd/compile中是自己实现的syntax，会检查Label引用的规则要求定义Label的
+	// Scope >= 引用Label的Scope, 两者的行为不太一样!
 	// resolve labels
 	n := len(r.targetStack) - 1
 	scope := r.labelScope
