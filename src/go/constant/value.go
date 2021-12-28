@@ -83,6 +83,8 @@ const prec = 512
 // exact, but once that precision is lost (by moving to floatVal), moving back to
 // a different representation implies a precision that's not actually there.
 
+// big.Rat = 有理数，通过a/b来表示，a和b都是整数(big.Int)
+
 type (
 	unknownVal struct{}
 	boolVal    bool
@@ -162,6 +164,11 @@ func reverse(x []string) []string {
 // Because a chain like a + b + c + d + e is actually represented
 // as ((((a + b) + c) + d) + e), the left-side loop avoids deep recursion.
 // x must be locked.
+// 相当于把一颗二叉树所有leafnode的stringVal.s都收集起来形成一个数组
+// 这里做了优化，减少了数组复制次数: 注意list每次都是append一个元素，而不是把左右
+// 子树形成list，然后再合并两个list
+// 算法本质上是对称的，左右哪个用loop都行，但是通常"a" + "b" + "c" ...这样的
+// 语句形成的二叉树是不平衡的，左边非常深，因此选择左边做loop
 func (x *stringVal) appendReverse(list []string) []string {
 	y := x
 	for y.r != nil {
@@ -198,7 +205,7 @@ func (x floatVal) String() string {
 
 	// Use exact fmt formatting if in float64 range (common case):
 	// proceed if f doesn't underflow to 0 or overflow to inf.
-	if x, _ := f.Float64(); f.Sign() == 0 == (x == 0) && !math.IsInf(x, 0) {
+	if x, _ := f.Float64(); (f.Sign() == 0) == (x == 0) && !math.IsInf(x, 0) {
 		return fmt.Sprintf("%.6g", x)
 	}
 
@@ -630,7 +637,7 @@ func Make(x interface{}) Value {
 // BitLen returns the number of bits required to represent
 // the absolute value x in binary representation; x must be an Int or an Unknown.
 // If x is Unknown, the result is 0.
-func BitLen(x Value) int {
+func BitLen(x Value) int { // 比如把constant赋值到变量x(int)时需要检查BitLen小于64
 	switch x := x.(type) {
 	case int64Val:
 		u := uint64(x)
@@ -747,6 +754,7 @@ func MakeFromBytes(bytes []byte) Value {
 	return makeInt(newInt().SetBits(words[:i]))
 }
 
+// Num => numerator, 分子
 // Num returns the numerator of x; x must be Int, Float, or Unknown.
 // If x is Unknown, or if it is too large or small to represent as a
 // fraction, the result is Unknown. Otherwise the result is an Int
@@ -770,6 +778,7 @@ func Num(x Value) Value {
 	return unknownVal{}
 }
 
+// Denom => denominator, 分母
 // Denom returns the denominator of x; x must be Int, Float, or Unknown.
 // If x is Unknown, or if it is too large or small to represent as a
 // fraction, the result is Unknown. Otherwise the result is an Int >= 1.
@@ -845,7 +854,7 @@ func ToInt(x Value) Value {
 		return x
 
 	case ratVal:
-		if x.val.IsInt() {
+		if x.val.IsInt() { // denominator == 1
 			return makeInt(x.val.Num())
 		}
 
@@ -989,6 +998,7 @@ func UnaryOp(op token.Token, y Value, prec uint) Value {
 		// thus "too large": We must limit the result precision
 		// to the type's precision.
 		if prec > 0 {
+			// 比如prec=16, 原来值为0xF,  0xF => 0x...F0 => 0xFFF0
 			z.AndNot(z, newInt().Lsh(big.NewInt(-1), prec)) // z &^= (-1)<<prec
 		}
 		return makeInt(z)
@@ -1029,6 +1039,8 @@ func ord(x Value) int {
 	}
 }
 
+// 有问题: 应该提升为最复杂的表示方式，比如x=int64Val, y=intVal,
+// 则需要把x提升为intVal
 // match returns the matching representation (same type) with the
 // smallest complexity for two values x and y. If one of them is
 // numeric, both of them must be numeric. If one of them is Unknown
@@ -1099,7 +1111,7 @@ func BinaryOp(x_ Value, op token.Token, y_ Value) Value {
 		return x
 
 	case boolVal:
-		y := y.(boolVal)
+		y := y.(boolVal) // 注意如果y的类型不对这里会panic
 		switch op {
 		case token.LAND:
 			return x && y
@@ -1285,6 +1297,7 @@ func Shift(x Value, op token.Token, s uint) Value {
 			z := i64toi(x).val
 			return makeInt(z.Lsh(z, s))
 		case token.SHR:
+			// 右移位总是变小
 			return x >> s
 		}
 
@@ -1361,6 +1374,7 @@ func Compare(x_ Value, op token.Token, y_ Value) bool {
 		}
 
 	case intVal:
+		// big.Int.Cmp()返回1, 0, -1
 		return cmpZero(x.val.Cmp(y.(intVal).val), op)
 
 	case ratVal:

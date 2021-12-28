@@ -18,7 +18,7 @@ import (
 //
 type Scope struct {
 	Outer   *Scope
-	Objects map[string]*Object
+	Objects map[string]*Object // Object.Data本身可以是一个*Scope(Kind=Pkg)
 }
 
 // NewScope creates a new scope nested in the outer scope.
@@ -39,7 +39,6 @@ func (s *Scope) Lookup(name string) *Object {
 // If the scope already contains an object alt with the same name,
 // Insert leaves the scope unchanged and returns alt. Otherwise
 // it inserts obj and returns nil.
-//
 func (s *Scope) Insert(obj *Object) (alt *Object) {
 	if alt = s.Objects[obj.Name]; alt == nil {
 		s.Objects[obj.Name] = obj
@@ -99,6 +98,8 @@ func (obj *Object) Pos() token.Pos {
 			}
 		}
 	case *ImportSpec:
+		// Kind=Pkg
+		// Data=*Scope
 		if d.Name != nil && d.Name.Name == name {
 			return d.Name.Pos()
 		}
@@ -139,7 +140,7 @@ type ObjKind int
 // The list of possible Object kinds.
 const (
 	Bad ObjKind = iota // for error handling
-	Pkg                // package
+	Pkg                // package, 不是指当前文件的package Name，而是指import的package
 	Con                // constant
 	Typ                // type
 	Var                // variable

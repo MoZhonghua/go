@@ -12,18 +12,24 @@ import (
 )
 
 var (
-	BuildAsmflags   PerPackageFlag // -asmflags
-	BuildGcflags    PerPackageFlag // -gcflags
-	BuildLdflags    PerPackageFlag // -ldflags
-	BuildGccgoflags PerPackageFlag // -gccgoflags
+	BuildAsmflags   = PerPackageFlag{name: "asmflags"}   // -asmflags
+	BuildGcflags    = PerPackageFlag{name: "gcflags"}    // -gcflags
+	BuildLdflags    = PerPackageFlag{name: "ldflags"}    // -ldflags
+	BuildGccgoflags = PerPackageFlag{name: "gccgoflags"} // -gccgoflags
 )
 
 // A PerPackageFlag is a command-line flag implementation (a flag.Value)
 // that allows specifying different effective flags for different packages.
 // See 'go help build' for more details about per-package flags.
+// 比如
+// go build -gcflags="all=-S" fmt: 打印fmt和fmt所有依赖的汇编代码
+// go -gcflags="-S" fmt: 只打印fmt本身的汇编代码
 type PerPackageFlag struct {
+	name    string
 	present bool
-	values  []ppfValue
+	// 可以指定多次，比如-gcflag="all=-N" -gcflag="-l" 每次对应一个ppfValue
+	// 同一个package多次匹配的话只有最后一个匹配的ppfValue.flags生效
+	values []ppfValue
 }
 
 // A ppfValue is a single <pattern>=<flags> per-package flag value.
@@ -34,6 +40,7 @@ type ppfValue struct {
 
 // Set is called each time the flag is encountered on the command line.
 func (f *PerPackageFlag) Set(v string) error {
+	fmt.Printf("PerPackageFlag: set %v\n", v)
 	return f.set(v, base.Cwd())
 }
 

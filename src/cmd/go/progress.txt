@@ -43,9 +43,24 @@ vendor/golang.org/x/mod/sumdb/cache.go
 
 2021-12-26
 internal/mvs/mvs.go
-internal/vcs/vcs.go ?
-internal/load/path.go ?
+internal/vcs/vcs.go
+internal/load/search.go
+internal/load/flag.go
+internal/load/path.go
+
+2021-12-27
+internal/load/pkg.go
+internal/load/test.go
+
+
+2021-12-28
+../go/build/build.go?
+
+internal/work/build.go ?
+
+// GOPATH-mod
 internal/get/get.go ?
+
 internal/list/list.go ?
 ../../go/build/build.go ?
 main.go

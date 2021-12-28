@@ -17,9 +17,11 @@ import (
 // including the file, line, and column location.
 // A Position is valid if the line number is > 0.
 //
+// 两种位置，一个是当前token在文件中的实际位置，另一个是显示给用户的位置
+// 因为//line <file>:<line>[:<col>]可以重设显示给用户的位置的base
 type Position struct {
 	Filename string // filename, if any
-	Offset   int    // offset, starting at 0
+	Offset   int    // offset, starting at 0  // 在实际文件中的实际偏移量
 	Line     int    // line number, starting at 1
 	Column   int    // column number, starting at 1 (byte count)
 }
@@ -105,7 +107,7 @@ type File struct {
 	// lines and infos are protected by mutex
 	mutex sync.Mutex
 	lines []int // lines contains the offset of the first character for each line (the first entry is always 0)
-	infos []lineInfo
+	infos []lineInfo // 对应每一个//line directive
 }
 
 // Name returns the file name of file f as registered with AddFile.
@@ -232,7 +234,7 @@ func (f *File) LineStart(line int) Pos {
 // for a given file offset.
 type lineInfo struct {
 	// fields are exported to make them accessible to gob
-	Offset       int
+	Offset       int // Offset指向的是//line的下一行起始位置
 	Filename     string
 	Line, Column int
 }
@@ -303,6 +305,7 @@ func (f *File) unpack(offset int, adjusted bool) (filename string, line, column 
 	defer f.mutex.Unlock()
 	filename = f.name
 	if i := searchInts(f.lines, offset); i >= 0 {
+		// 这里是在实际文件中的实际line和column
 		line, column = i+1, offset-f.lines[i]+1
 	}
 	if adjusted && len(f.infos) > 0 {

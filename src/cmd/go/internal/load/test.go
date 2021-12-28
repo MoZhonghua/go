@@ -75,6 +75,11 @@ func TestPackagesFor(ctx context.Context, opts PackageOpts, p *Package, cover *T
 	return pmain, ptest, pxtest, err
 }
 
+// 假设go test abc/xyz
+// pmain.ImportPath = "abc/xyz.test"
+// ptest.ImportPath = "abc/xyz"
+// pxtest.ImportPath = "abc/xyz_test", 只能引用p中的exported symbol
+
 // TestPackagesAndErrors returns three packages:
 //	- pmain, the package main corresponding to the test binary (running tests in ptest and pxtest).
 //	- ptest, the package p compiled with added "package p" test files.
@@ -111,6 +116,7 @@ func TestPackagesAndErrors(ctx context.Context, opts PackageOpts, p *Package, co
 	rawTestImports := str.StringList(p.TestImports)
 	for i, path := range p.TestImports {
 		p1 := loadImport(ctx, opts, pre, path, p.Dir, p, &stk, p.Internal.Build.TestImportPos[path], ResolveImport)
+		// p/xxx_test.go导致的循环依赖
 		if str.Contains(p1.Deps, p.ImportPath) || p1.ImportPath == p.ImportPath {
 			// Same error that loadPackage returns (via reusePackage) in pkg.go.
 			// Can't change that code, because that code is only for loading the
@@ -161,6 +167,7 @@ func TestPackagesAndErrors(ctx context.Context, opts PackageOpts, p *Package, co
 
 	// Test package.
 	if len(p.TestGoFiles) > 0 || p.Name == "main" || cover != nil && cover.Local {
+		// 复制一个，把xxx_test.go文件加进去
 		ptest = new(Package)
 		*ptest = *p
 		ptest.Error = ptestErr
@@ -319,11 +326,13 @@ func TestPackagesAndErrors(ctx context.Context, opts PackageOpts, p *Package, co
 	}
 	t.Cover = cover
 	if len(ptest.GoFiles)+len(ptest.CgoFiles) > 0 {
+		// 等价于在pmain中: import ptest
 		pmain.Internal.Imports = append(pmain.Internal.Imports, ptest)
 		pmain.Imports = append(pmain.Imports, ptest.ImportPath)
 		t.ImportTest = true
 	}
 	if pxtest != nil {
+		// 等价于在pmain中: import pxtest
 		pmain.Internal.Imports = append(pmain.Internal.Imports, pxtest)
 		pmain.Imports = append(pmain.Imports, pxtest.ImportPath)
 		t.ImportXtest = true
@@ -625,11 +634,14 @@ func (t *testFuncs) load(filename, pkg string, doImport, seen *bool) error {
 		name := n.Name.String()
 		switch {
 		case name == "TestMain":
+			// 参数是*testing.T?
 			if isTestFunc(n, "T") {
 				t.Tests = append(t.Tests, testFunc{pkg, name, "", false})
 				*doImport, *seen = true, true
 				continue
 			}
+
+			// 检查参数是*testing.M
 			err := checkTestFunc(n, "M")
 			if err != nil {
 				return err

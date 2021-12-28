@@ -50,11 +50,34 @@ type Package struct {
 	Internal      PackageInternal // for use inside go command only
 }
 
+// ImportComment:
+//   package xyz/abc // import "xyz/def"
+//   其他人用这个包必须import "xyz/def"而不是import "xzy/abc"
+// Target: main package有三个位置, 而lib package用同一套路径, InstallTargetDir()
+//   - $GOPATH/bin: go list playground/gotest
+//   - $GOROOT/bin: go list cmd/go cmd/gofmt
+//   - $GOROOT/pkg/tool/bin: go list cmd/vet
+//   - xyz/abc => $GOROOT/pkg/linux_amd64/xyz/abc.a
+// Export/BuildID: go list -export -json runtime
+//   - Export: /home/mozhonghua/.cache/go-build/ef/ef81a71ce0df181e6ec450f0537dc07f1bcdbab6bfdba1b46bfe792ac003fef1-d
+//   - BuildID: "IsTBhDwwWCfnM2u6JRms/QvP_Mp14L-yriNcHT--u"
+//     * 和go go buildid <Export>输出一致
+// Stale/StaleReason:
+//   - StaleReason="not installed but available in build cache"
+//     默认总是会加入到buildcache中，但是只有install的时候会复制到.Target
+// Root: 三种情况:
+//   - GOROOT
+//   - GOPATH
+//   - 当前目录的module root
+// ImportPath: 和dir对应的import path，可以有vendor
+//   只在$GOROOT/vendor和$GOROOT/cmd/vendor中的package出现这种情况
+//   比如: ImportPath=vendor/golang.org/x/crypto/cryptobyte/asn1
+//   特殊值"command-line-arguments"，比如go build main.go, main.go对应一个虚构的package
 type PackagePublic struct {
 	// Note: These fields are part of the go command's public API.
 	// See list.go. It is okay to add fields, but not to change or
 	// remove existing ones. Keep in sync with list.go
-	Dir           string                `json:",omitempty"` // directory containing package sources
+	Dir           string                `json:",omitempty"` // directory containing package sources, 是真正的目录,里面有.go代码
 	ImportPath    string                `json:",omitempty"` // import path of package in dir
 	ImportComment string                `json:",omitempty"` // path in import comment on package statement
 	Name          string                `json:",omitempty"` // package name
@@ -69,7 +92,7 @@ type PackagePublic struct {
 	Module        *modinfo.ModulePublic `json:",omitempty"` // info about package's module, if any
 	Match         []string              `json:",omitempty"` // command-line patterns matching this package
 	Goroot        bool                  `json:",omitempty"` // is this package found in the Go root?
-	Standard      bool                  `json:",omitempty"` // is this package part of the standard Go library?
+	Standard      bool                  `json:",omitempty"` // is this package part of the standard Go library?(in $GOROOT)
 	DepOnly       bool                  `json:",omitempty"` // package is only as a dependency, not explicitly listed
 	BinaryOnly    bool                  `json:",omitempty"` // package cannot be recompiled
 	Incomplete    bool                  `json:",omitempty"` // was there an error loading this package or dependencies?
@@ -100,8 +123,8 @@ type PackagePublic struct {
 	SysoFiles         []string `json:",omitempty"` // .syso system object files added to package
 
 	// Embedded files
-	EmbedPatterns []string `json:",omitempty"` // //go:embed patterns
-	EmbedFiles    []string `json:",omitempty"` // files matched by EmbedPatterns
+	EmbedPatterns []string `json:",omitempty"` // //go:embed patterns //go:embed *.txt => EmbedPatterns=["*.txt"]
+	EmbedFiles    []string `json:",omitempty"` // files matched by EmbedPatterns, *.txt => xyz.txt
 
 	// Cgo directives
 	CgoCFLAGS    []string `json:",omitempty"` // cgo: flags for C compiler
@@ -192,7 +215,8 @@ func (p *Package) Desc() string {
 
 type PackageInternal struct {
 	// Unexported fields are not part of the public API.
-	Build             *build.Package
+	Build             *build.Package // 和PackagePublic基本一样，PackagePublic有一些额外字段
+	// 包括自动添加的import，比如用到cgo，自动添加"runtime/cgo"
 	Imports           []*Package           // this package's direct imports
 	CompiledImports   []string             // additional Imports necessary when using CompiledGoFiles (all from standard library); 1:1 with the end of PackagePublic.Imports
 	RawImports        []string             // this package's original imports as they appear in the text of the program; 1:1 with the end of PackagePublic.Imports
@@ -249,7 +273,7 @@ func (e *NoGoError) Error() string {
 // imported packages, for example, if there was a parse error loading imports
 // in one file, but other files are okay.
 func (p *Package) setLoadPackageDataError(err error, path string, stk *ImportStack, importPos []token.Position) {
-	matchErr, isMatchErr := err.(*search.MatchError)
+	matchErr, isMatchErr := err.(*search.MatchError) // 比如查找匹配的package时filepath.Walk中报错
 	if isMatchErr && matchErr.Match.Pattern() == path {
 		if matchErr.Match.IsLiteral() {
 			// The error has a pattern has a pattern similar to the import path.
@@ -279,7 +303,7 @@ func (p *Package) setLoadPackageDataError(err error, path string, stk *ImportSta
 		isScanErr = true // For stack push/pop below.
 
 		scanPos := scanErr[0].Pos
-		scanPos.Filename = base.ShortPath(scanPos.Filename)
+		scanPos.Filename = base.ShortPath(scanPos.Filename) // 转换为相对CWD的相对路径
 		pos = scanPos.String()
 		err = errors.New(scanErr[0].Msg)
 	}
@@ -300,6 +324,8 @@ func (p *Package) setLoadPackageDataError(err error, path string, stk *ImportSta
 	// move the modload errors into this package to avoid a package import cycle,
 	// and from having to export an error type for the errors produced in build.
 	if !isMatchErr && (nogoErr != nil || isScanErr) {
+		// !isMatchErr: 说明找到了path对应的package dir或者module
+		// (nogoErr != nil || isScanErr): 但是加载path失败
 		stk.Push(path)
 		defer stk.Pop()
 	}
@@ -311,6 +337,7 @@ func (p *Package) setLoadPackageDataError(err error, path string, stk *ImportSta
 	}
 
 	if path != stk.Top() {
+		// 没找到path对应的package dir，说明是引用方import "path"的path是无效值
 		p.Error.setPos(importPos)
 	}
 }
@@ -351,6 +378,7 @@ type CoverVar struct {
 func (p *Package) copyBuild(opts PackageOpts, pp *build.Package) {
 	p.Internal.Build = pp
 
+	// 用户提供了-pkgdir参数，强制用这个值，而非自动计算出来的值
 	if pp.PkgTargetRoot != "" && cfg.BuildPkgdir != "" {
 		old := pp.PkgTargetRoot
 		pp.PkgRoot = cfg.BuildPkgdir
@@ -391,14 +419,14 @@ func (p *Package) copyBuild(opts PackageOpts, pp *build.Package) {
 	p.CgoLDFLAGS = pp.CgoLDFLAGS
 	p.CgoPkgConfig = pp.CgoPkgConfig
 	// We modify p.Imports in place, so make copy now.
-	p.Imports = make([]string, len(pp.Imports))
+	p.Imports = make([]string, len(pp.Imports)) // 后面可能会转换
 	copy(p.Imports, pp.Imports)
-	p.Internal.RawImports = pp.Imports
+	p.Internal.RawImports = pp.Imports // 代码中的import "path"
 	p.TestGoFiles = pp.TestGoFiles
 	p.TestImports = pp.TestImports
 	p.XTestGoFiles = pp.XTestGoFiles
 	p.XTestImports = pp.XTestImports
-	if opts.IgnoreImports {
+	if opts.IgnoreImports { // go list -find runtime
 		p.Imports = nil
 		p.Internal.RawImports = nil
 		p.TestImports = nil
@@ -616,6 +644,7 @@ func ReloadPackageNoFlags(arg string, stk *ImportStack) *Package {
 // Using a pseudo-import path like this makes the ./ imports no longer
 // a special case, so that all the code to deal with ordinary imports works
 // automatically.
+// dir总是绝对路径
 func dirToImportPath(dir string) string {
 	return pathpkg.Join("_", strings.Map(makeImportValid, filepath.ToSlash(dir)))
 }
@@ -640,6 +669,8 @@ const (
 	// gets recorded as the canonical import path. At that point, future loads
 	// of that package must not pass ResolveImport, because
 	// disallowVendor will reject direct use of paths containing /vendor/.
+	// 指Path是从.go文件的import语句来的, 需要解析到具体的路径，比如./vendor
+	// 只应该做一次解析，因此只有第一次的时候传这个flag，之后不应该传?
 	ResolveImport = 1 << iota
 
 	// ResolveModule is for download (part of "go get") and indicates
@@ -676,6 +707,7 @@ func loadImport(ctx context.Context, opts PackageOpts, pre *preload, path, srcDi
 	}
 	bp, loaded, err := loadPackageData(ctx, path, parentPath, srcDir, parentRoot, parentIsStd, mode)
 	if loaded && pre != nil && !opts.IgnoreImports {
+		// 在后台预加载path自己import的package
 		pre.preloadImports(ctx, opts, bp.Imports, bp)
 	}
 	if bp == nil {
@@ -701,6 +733,7 @@ func loadImport(ctx context.Context, opts PackageOpts, pre *preload, path, srcDi
 	}
 
 	importPath := bp.ImportPath
+	// 同名的ImportPath会返回相同的*Package
 	p := packageCache[importPath]
 	if p != nil {
 		stk.Push(path)
@@ -726,6 +759,8 @@ func loadImport(ctx context.Context, opts PackageOpts, pre *preload, path, srcDi
 			p.Error.setPos(importPos)
 		}
 	}
+
+	// 虽然是同一个*Package, 但是从不同地方import需要做不同的检查, 比如internal规则
 
 	// Checked on every import because the rules depend on the code doing the importing.
 	if perr := disallowInternal(ctx, srcDir, parent, parentPath, p, stk); perr != p {
@@ -813,10 +848,19 @@ func loadPackageData(ctx context.Context, path, parentPath, parentDir, parentRoo
 		parentIsStd: parentIsStd,
 		mode:        mode,
 	}
+
+	// parentDir一般就是import语句本身的.go文件所在的目录
+	// import "github.com/google/uuid" from main
+    //   - path=github.com/google/uuid parentDir=/home/mozhonghua/go/src/playground/modver2
+	//
+	// import "net" from github.com/google/uuid@v1.1.1
+	//  - path=net parentDir=/home/mozhonghua/go/pkg/mod/github.com/google/uuid@v1.1.1
+	//    * 注意parentDir是本地缓存的mod，目录下就是uuid@v1.1.1的源代码
 	r := resolvedImportCache.Do(importKey, func() interface{} {
 		var r resolvedImport
 		if build.IsLocalImport(path) {
 			r.dir = filepath.Join(parentDir, path)
+			// c:\home\gopher\my\pkg => _/c_/home/gopher/my/pkg
 			r.path = dirToImportPath(r.dir)
 		} else if cfg.ModulesEnabled {
 			r.dir, r.path, r.err = modload.Lookup(parentPath, parentIsStd, path)
@@ -994,6 +1038,8 @@ func (pre *preload) preloadMatches(ctx context.Context, opts PackageOpts, matche
 			case <-pre.cancel:
 				return
 			case pre.sema <- struct{}{}:
+				// 这一个pre.sema的用法：启动前写入一个item，即占用一个名额
+				// 结束后拿出一个item
 				go func(pkg string) {
 					mode := 0 // don't use vendoring or module import resolution
 					bp, loaded, err := loadPackageData(ctx, pkg, "", base.Cwd(), "", false, mode)
@@ -1083,6 +1129,7 @@ func ResolveImportPath(parent *Package, path string) (found string) {
 }
 
 func resolveImportPath(path, parentPath, parentDir, parentRoot string, parentIsStd bool) (found string) {
+	// 如果module-aware mode，则走modload流程
 	if cfg.ModulesEnabled {
 		if _, p, e := modload.Lookup(parentPath, parentIsStd, path); e == nil {
 			return p
@@ -1136,6 +1183,9 @@ func vendoredImportPath(path, parentPath, parentDir, parentRoot string) (found s
 		return path
 	}
 
+	// dir = <parentDir>
+	// root = <parentRoot>/src
+	// 且dir是root的子目录
 	dir, root := dirAndRoot(parentPath, parentDir, parentRoot)
 
 	vpath := "vendor/" + path
@@ -1186,6 +1236,7 @@ var (
 )
 
 // goModPath returns the module path in the go.mod in dir, if any.
+// 读取<dir>/go.mod，然后解析module <path>，返回path
 func goModPath(dir string) (path string) {
 	return goModPathCache.Do(dir, func() interface{} {
 		data, err := os.ReadFile(filepath.Join(dir, "go.mod"))
@@ -1263,6 +1314,9 @@ func isVersionElement(s string) bool {
 // x/y/v2/z does not exist and x/y/go.mod says “module x/y/v2”,
 // then go build will read the import as x/y/z instead.
 // See golang.org/issue/25069.
+// 从后向前依次检查path中的vNNN部分:  a/b/x/vNNN/y
+//  - 尝试Import("a/b/x"), 如果失败的跳过。成功时获得了a/b/x的Dir，可能是在GOPATH/GOROOT/modcache中
+//  - 检查Dir/go.mod存在且"module a/b/x/vNNN"，则返回a/b/x/y，即把vNNN部分删掉
 func moduleImportPath(path, parentPath, parentDir, parentRoot string) (found string) {
 	if parentRoot == "" {
 		return path
@@ -1308,6 +1362,7 @@ HaveGoMod:
 	// package m/v2/api/v1/foo.
 	limit := len(path)
 	for limit > 0 {
+		// 从后向前检查vNNN的部分
 		i, j := findVersionElement(path[:limit])
 		if i < 0 {
 			return path
@@ -1354,6 +1409,8 @@ func reusePackage(p *Package, stk *ImportStack) *Package {
 	// is in the midst of its own loadPackage call
 	// (all the recursion below happens before p.Internal.Imports gets set).
 	if p.Internal.Imports == nil {
+		// =nil说明p本身没有导入完成，然后再次看到p，也就是说import "p"过程中再次看到了import "p"
+		// 说明有import loop
 		if p.Error == nil {
 			p.Error = &PackageError{
 				ImportStack:   stk.Copy(),
@@ -1380,6 +1437,7 @@ func reusePackage(p *Package, stk *ImportStack) *Package {
 // is allowed to import p.
 // If the import is allowed, disallowInternal returns the original package p.
 // If not, it returns a new package containing just an appropriate error.
+// import "a/b/internal/x/y/z"则importer.ImportPath必须要有a/b前缀
 func disallowInternal(ctx context.Context, srcDir string, importer *Package, importerPath string, p *Package, stk *ImportStack) *Package {
 	// golang.org/s/go14internal:
 	// An import of a path containing the element “internal”
@@ -1419,7 +1477,7 @@ func disallowInternal(ctx context.Context, srcDir string, importer *Package, imp
 	}
 
 	// Check for "internal" element: three cases depending on begin of string and/or end of string.
-	i, ok := findInternal(p.ImportPath)
+	i, ok := findInternal(p.ImportPath) // i指向"internal"的第一个字符
 	if !ok {
 		return p
 	}
@@ -1427,10 +1485,14 @@ func disallowInternal(ctx context.Context, srcDir string, importer *Package, imp
 	// Internal is present.
 	// Map import path back to directory corresponding to parent of internal.
 	if i > 0 {
+		// 包含internal前面的"/"
 		i-- // rewind over slash in ".../internal"
 	}
 
 	if p.Module == nil {
+		// p.Dir:       /a/b/c/d/internal/x
+		// ImportPath:       c/d/internal/x (i=3)
+		// parent:      /a/b/c/d/
 		parent := p.Dir[:i+len(p.Dir)-len(p.ImportPath)]
 
 		if str.HasFilePathPrefix(filepath.Clean(srcDir), filepath.Clean(parent)) {
@@ -1452,6 +1514,8 @@ func disallowInternal(ctx context.Context, srcDir string, importer *Package, imp
 			// directory containing them.
 			// If the directory is outside the main module, this will resolve to ".",
 			// which is not a prefix of any valid module.
+			// importer是命令行，计算出当前目录(importer.Dir)在module中的import path，然后
+			// 检查这个import path
 			importerPath = modload.DirImportPath(ctx, importer.Dir)
 		}
 		parentOfInternal := p.ImportPath[:i]
@@ -1548,6 +1612,10 @@ func disallowVendorVisibility(srcDir string, p *Package, importerPath string, st
 	if truncateTo < 0 || len(p.Dir) < truncateTo {
 		return p
 	}
+
+	// p.Dir:   /a/b/c/vendor/x/y
+	// parent:  /a/b/c/
+	// srcDir:  /a/b/c/d/e
 	parent := p.Dir[:truncateTo]
 	if str.HasFilePathPrefix(filepath.Clean(srcDir), filepath.Clean(parent)) {
 		return p
@@ -1665,7 +1733,7 @@ func (p *Package) exeFromFiles() string {
 
 // DefaultExecName returns the default executable name for a package
 func (p *Package) DefaultExecName() string {
-	if p.Internal.CmdlineFiles {
+	if p.Internal.CmdlineFiles { // go build main.go
 		return p.exeFromFiles()
 	}
 	return p.exeFromImportPath()
@@ -1680,6 +1748,7 @@ func (p *Package) load(ctx context.Context, opts PackageOpts, path string, stk *
 	// The localPrefix is the path we interpret ./ imports relative to.
 	// Synthesized main packages sometimes override this.
 	if p.Internal.Local {
+		// 在p中import "./abc"，是相对于p.Dir
 		p.Internal.LocalPrefix = dirToImportPath(p.Dir)
 	}
 
@@ -1806,6 +1875,7 @@ func (p *Package) load(ctx context.Context, opts PackageOpts, path string, stk *
 			addImport("unsafe", true)
 		}
 		if p.UsesCgo() && (!p.Standard || !cgoExclude[p.ImportPath]) && cfg.BuildContext.Compiler != "gccgo" {
+			// 当p本身就是"runtime/cgo"时不应该再自动添加import "runtime/cgo", import loop
 			addImport("runtime/cgo", true)
 		}
 		if p.UsesCgo() && (!p.Standard || !cgoSyscallExclude[p.ImportPath]) {
@@ -1909,6 +1979,8 @@ func (p *Package) load(ctx context.Context, opts PackageOpts, path string, stk *
 		path = p1.ImportPath
 		importPaths[i] = path
 		if i < len(p.Imports) {
+			// 原来的值是.go中的import "path", 可能被改写，比如$GOROOT/vendor下的包
+			// vendor/golang.org/x/crypto/cryptobyte/asn1
 			p.Imports[i] = path
 		}
 
@@ -1921,6 +1993,7 @@ func (p *Package) load(ctx context.Context, opts PackageOpts, path string, stk *
 	p.collectDeps()
 
 	if cfg.ModulesEnabled && p.Error == nil && p.Name == "main" && len(p.DepsErrors) == 0 {
+		// 就是go version -m /tmp/main返回的内容，也就是runtime.buildinfo的值
 		p.Internal.BuildInfo = modload.PackageBuildInfo(pkgPath, p.Deps)
 	}
 
@@ -2168,10 +2241,11 @@ func (p *Package) collectDeps() {
 		// Prefer to record entries with errors, so we can report them.
 		p0 := deps[path]
 		if p0 == nil || p1.Error != nil && (p0.Error == nil || len(p0.Error.ImportStack) > len(p1.Error.ImportStack)) {
+			// path多次出现时优先选择有error的那个
 			deps[path] = p1
 			for _, p2 := range p1.Internal.Imports {
 				if deps[p2.ImportPath] != p2 {
-					q = append(q, p2)
+					q = append(q, p2)  // q在循环过程中会不断增长，相当于递归
 				}
 			}
 		}
@@ -2238,6 +2312,7 @@ func LinkerDeps(p *Package) []string {
 // externalLinkingForced reports whether external linking is being
 // forced even for programs that do not use cgo.
 func externalLinkingForced(p *Package) bool {
+	// CgoEnabled指的是是否支持cgo，而不是package本身是否使用了cgo(import "C")
 	if !cfg.BuildContext.CgoEnabled {
 		return false
 	}
@@ -2321,6 +2396,7 @@ func (p *Package) UsesCgo() bool {
 
 // PackageList returns the list of packages in the dag rooted at roots
 // as visited in a depth-first post-order traversal.
+// 按照depth-fist post-order顺序遍历图，并按照遍历顺序返回package列表
 func PackageList(roots []*Package) []*Package {
 	seen := map[*Package]bool{}
 	all := []*Package{}
@@ -2360,6 +2436,7 @@ func TestPackageList(ctx context.Context, opts PackageOpts, roots []*Package) []
 	}
 	walkTest := func(root *Package, path string) {
 		var stk ImportStack
+		// 相同的p.ImportPath一定返回相同的*Package, 因此不会重复添加
 		p1 := LoadImport(ctx, opts, path, root.Dir, root, &stk, root.Internal.Build.TestImportPos[path], ResolveImport)
 		if p1.Error == nil {
 			walk(p1)
@@ -2430,6 +2507,7 @@ func PackagesAndErrors(ctx context.Context, opts PackageOpts, patterns []string)
 		// - Files that are part of the same directory.
 		// - Explicit package paths or patterns.
 		if strings.HasSuffix(p, ".go") {
+			// 注意参数中有一个是xx.go文件就走这个流程
 			// We need to test whether the path is an actual Go file and not a
 			// package path or pattern ending in '.go' (see golang.org/issue/34653).
 			if fi, err := fsys.Stat(p); err == nil && !fi.IsDir() {
@@ -2642,6 +2720,7 @@ func setToolFlags(pkgs ...*Package) {
 func GoFilesPackage(ctx context.Context, opts PackageOpts, gofiles []string) *Package {
 	modload.Init()
 
+	// 要求全部都是.go文件
 	for _, f := range gofiles {
 		if !strings.HasSuffix(f, ".go") {
 			pkg := new(Package)
@@ -2699,7 +2778,7 @@ func GoFilesPackage(ctx context.Context, opts PackageOpts, gofiles []string) *Pa
 		base.Fatalf("%s", err)
 	}
 
-	bp, err := ctxt.ImportDir(dir, 0)
+	bp, err := ctxt.ImportDir(dir, 0) // 注意此时ctxt.ReadDir()只返回gofiles
 	pkg := new(Package)
 	pkg.Internal.Local = true
 	pkg.Internal.CmdlineFiles = true

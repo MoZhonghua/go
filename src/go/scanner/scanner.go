@@ -42,6 +42,12 @@ type Scanner struct {
 	offset     int  // character offset
 	rdOffset   int  // reading offset (position after current character)
 	lineOffset int  // current line offset
+
+	// 扫描过程中会跳过所有空白字符，包括\n。为了划分出语句(stmt/expr)，则
+	// 每条语句后都应该添加';', 注释需要特别处理一下:
+	//  - x := 1 \n => x := 1 ;
+	//  - x := 1 // abc \n => x := 1; // abc
+	// 注释Token本身是一个单独的语句，因此不用额外添加";"来和其他token区分
 	insertSemi bool // insert a semicolon before next newline
 
 	// public state - ok to modify
@@ -231,6 +237,9 @@ var prefix = []byte("line ")
 // updateLineInfo parses the incoming comment text at offset offs
 // as a line directive. If successful, it updates the line info table
 // for the position next per the line directive.
+// /*line xyz.txt:100*/
+// //line xyz.txt:100
+// 注意: 100后面不能有空格
 func (s *Scanner) updateLineInfo(next, offs int, text []byte) {
 	// extract comment text
 	if text[1] == '*' {
@@ -330,20 +339,24 @@ func (s *Scanner) findLineEnd() bool {
 				break
 			}
 		}
-		s.skipWhitespace() // s.insertSemi is set
+		s.skipWhitespace() // s.insertSemi is set，因此skipWhitespace不会跳过\n
 		if s.ch < 0 || s.ch == '\n' {
+			// s.ch < 0 => eof
 			return true
 		}
 		if s.ch != '/' {
+			/*abc*/ // 不是这种形式的，注意*/后跳过空格后一定是/
 			// non-comment token
 			return false
 		}
-		s.next() // consume '/'
+		/*abc*/  //abc
+		s.next() // consume '/' ，注意s.ch已经是指向//abc的第二个/
 	}
 
 	return false
 }
 
+// 注意这里优化: 优先判断ASCII字符的情况
 func isLetter(ch rune) bool {
 	return 'a' <= lower(ch) && lower(ch) <= 'z' || ch == '_' || ch >= utf8.RuneSelf && unicode.IsLetter(ch)
 }
@@ -388,7 +401,7 @@ func (s *Scanner) scanIdentifier() string {
 		// We know that the preceding character is valid for an identifier because
 		// scanIdentifier is only called when s.ch is a letter, so calling s.next()
 		// at s.rdOffset resets the scanner state.
-		s.next()
+		s.next() // 注意上面已经更新了s.rdOffset，现在指向第一个非ASCII letter的byte
 		for isLetter(s.ch) || isDigit(s.ch) {
 			s.next()
 		}
@@ -564,7 +577,7 @@ func invalidSep(x string) int {
 
 	// mantissa and exponent
 	for ; i < len(x); i++ {
-		p := d // previous digit
+		p := d // previous digit, 注意d就三种值'_', '0'(任意数字字符), '.'
 		d = rune(x[i])
 		switch {
 		case d == '_':
@@ -592,23 +605,29 @@ func invalidSep(x string) int {
 // character (without consuming it) and returns false. Otherwise
 // it returns true.
 func (s *Scanner) scanEscape(quote rune) bool {
+	// '\' consumed
 	offs := s.offset
 
 	var n int
 	var base, max uint32
 	switch s.ch {
 	case 'a', 'b', 'f', 'n', 'r', 't', 'v', '\\', quote:
+		// \a, \n, \\, \", \'
 		s.next()
 		return true
 	case '0', '1', '2', '3', '4', '5', '6', '7':
+		// "\NNN"
 		n, base, max = 3, 8, 255
 	case 'x':
+		// "\xNN"
 		s.next()
 		n, base, max = 2, 16, 255
 	case 'u':
+		// "\uNNNN"
 		s.next()
 		n, base, max = 4, 16, unicode.MaxRune
 	case 'U':
+		// "\UNNNNNNNN"
 		s.next()
 		n, base, max = 8, 16, unicode.MaxRune
 	default:
@@ -644,6 +663,7 @@ func (s *Scanner) scanEscape(quote rune) bool {
 	return true
 }
 
+// 'a', '\x'('\n', '\\'...), '\NNN', '\xNN', '\uNNNN', '\UNNNNNNNN'
 func (s *Scanner) scanRune() string {
 	// '\'' opening already consumed
 	offs := s.offset - 1
@@ -759,6 +779,7 @@ func (s *Scanner) skipWhitespace() {
 // respectively. Otherwise, the result is tok0 if there was no other
 // matching character, or tok2 if the matching character was ch2.
 
+// 比如已经看到了">>", 需要根据下一个字符是不是"="来判断最终的token是">>"还是">>="
 func (s *Scanner) switch2(tok0, tok1 token.Token) token.Token {
 	if s.ch == '=' {
 		s.next()
@@ -767,6 +788,7 @@ func (s *Scanner) switch2(tok0, tok1 token.Token) token.Token {
 	return tok0
 }
 
+// 比如已经看到了"^", 可能是"^100", "^=", "^&="
 func (s *Scanner) switch3(tok0, tok1 token.Token, ch2 rune, tok2 token.Token) token.Token {
 	if s.ch == '=' {
 		s.next()
@@ -853,8 +875,8 @@ scanAgain:
 		insertSemi = true
 		tok, lit = s.scanNumber()
 	default:
-		s.next() // always make progress
-		switch ch {
+		s.next()    // always make progress
+		switch ch { // 注意ch为前一个字符，比如 /*， 此时 ch='/', s.ch='*'
 		case -1:
 			if s.insertSemi {
 				s.insertSemi = false // EOF consumed
@@ -880,8 +902,11 @@ scanAgain:
 			tok = token.STRING
 			lit = s.scanRawString()
 		case ':':
+			// 1:3 或者 x := b
 			tok = s.switch2(token.COLON, token.DEFINE)
 		case '.':
+			// .123这种上面已经处理，这里处理其他情况
+			// a.b, func f(a: ...int)
 			// fractions starting with a '.' are handled by outer switch
 			tok = token.PERIOD
 			if s.ch == '.' && s.peek() == '.' {
@@ -910,21 +935,25 @@ scanAgain:
 			insertSemi = true
 			tok = token.RBRACE
 		case '+':
+			// x+1,  x+=1, x++
 			tok = s.switch3(token.ADD, token.ADD_ASSIGN, '+', token.INC)
 			if tok == token.INC {
 				insertSemi = true
 			}
 		case '-':
+			// x-1,  x-=1, x--
 			tok = s.switch3(token.SUB, token.SUB_ASSIGN, '-', token.DEC)
 			if tok == token.DEC {
 				insertSemi = true
 			}
 		case '*':
+			// x*1, x*=1
 			tok = s.switch2(token.MUL, token.MUL_ASSIGN)
 		case '/':
 			if s.ch == '/' || s.ch == '*' {
-				// comment
+				// comment, // or /*
 				if s.insertSemi && s.findLineEnd() {
+					// a := 100 // abc
 					// reset position to the beginning of the comment
 					s.ch = '/'
 					s.offset = s.file.Offset(pos)
@@ -941,6 +970,7 @@ scanAgain:
 				tok = token.COMMENT
 				lit = comment
 			} else {
+				// a/10, a/=10
 				tok = s.switch2(token.QUO, token.QUO_ASSIGN)
 			}
 		case '%':
@@ -952,6 +982,7 @@ scanAgain:
 				s.next()
 				tok = token.ARROW
 			} else {
+				// a < b, a <= b, a << b, a <<= b
 				tok = s.switch4(token.LSS, token.LEQ, '<', token.SHL, token.SHL_ASSIGN)
 			}
 		case '>':

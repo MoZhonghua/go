@@ -19,3 +19,15 @@ cmd/internal/objfile/*
 cmd/internal/goobj/*
 cmd/internal/objabi/*
 cmd/link/*.go
+
+
+2021-12-28
+go/scanner/scanner.go
+go/token/token.go
+go/constant/value.go.go
+go/ast/ast.go
+go/parser/interface.go
+go/parser/resolver.go
+
+2021-12-29
+go/parser/parser.go ?

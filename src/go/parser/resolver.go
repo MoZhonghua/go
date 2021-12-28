@@ -62,6 +62,9 @@ type resolver struct {
 	topScope   *ast.Scope   // top-most scope; may be pkgScope
 	unresolved []*ast.Ident // unresolved identifiers
 
+	// label的reference可以先于declaration, 在每个函数结束时再重新检查unresolved reference
+	// 实际处理是认为Label在整个函数可见，但是实际上应该限定在Label定义所在的Block中
+	// TODO(mzh): bug
 	// Label scopes
 	// (maintained by open/close LabelScope)
 	labelScope  *ast.Scope     // label scope for current function
@@ -102,6 +105,9 @@ func (r *resolver) openLabelScope() {
 }
 
 func (r *resolver) closeLabelScope() {
+	// Label引用的规则要求定义Label的Scope >= 引用Label的Scope
+	// 这里的处理只在每个函数结束时调用，因此这里不会报错会
+	// cmd/compile中是自己实现的syntax，会检查
 	// resolve labels
 	n := len(r.targetStack) - 1
 	scope := r.labelScope
@@ -129,7 +135,7 @@ func (r *resolver) declare(decl, data interface{}, scope *ast.Scope, kind ast.Ob
 		// remember the corresponding declaration for redeclaration
 		// errors and global variable resolution/typechecking phase
 		obj.Decl = decl
-		obj.Data = data
+		obj.Data = data // *Scope(Kind=Pkg), iota(Kind=Con)
 		ident.Obj = obj
 		if ident.Name != "_" {
 			if debugResolve {
@@ -146,6 +152,8 @@ func (r *resolver) declare(decl, data interface{}, scope *ast.Scope, kind ast.Ob
 	}
 }
 
+// var err error
+// x, err := what()
 func (r *resolver) shortVarDecl(decl *ast.AssignStmt) {
 	// Go spec: A short variable declaration may redeclare variables
 	// provided they were originally declared in the same block with
@@ -207,6 +215,7 @@ func (r *resolver) resolve(ident *ast.Ident, collectUnresolved bool) {
 	// (perhaps in another file), or universe scope --- collect
 	// them so that they can be resolved later
 	if collectUnresolved {
+		// 用这个做标记，有的Ident可能没调用resolve，需要区分下?
 		ident.Obj = unresolved
 		r.unresolved = append(r.unresolved, ident)
 	}
@@ -546,6 +555,7 @@ func (r *resolver) walkTParams(list *ast.FieldList) {
 	r.resolveList(list)
 }
 
+// 仅在FuncLit和FuncDecl两种Node下会调用
 func (r *resolver) walkBody(body *ast.BlockStmt) {
 	if body == nil {
 		return

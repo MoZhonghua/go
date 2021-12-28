@@ -43,6 +43,7 @@ func PackageExports(pkg *Package) bool {
 // ----------------------------------------------------------------------------
 // General filtering
 
+// 注意Filter只看name，和Node的类型完全无关
 type Filter func(string) bool
 
 func filterIdentList(list []*Ident, f Filter) []*Ident {
@@ -95,6 +96,9 @@ func filterFieldList(fields *FieldList, filter Filter, export bool) (removedFiel
 			keepField = len(f.Names) > 0
 		}
 		if keepField {
+			// 这里是指比如type x struct { hiddenType, PublicType }，如果是要计算exported
+			// 需要把hiddenType这个字段过滤掉。需要递归，比如PublicType里有这种
+			// 字段也要过滤
 			if export {
 				filterType(f.Type, filter, export)
 			}
@@ -240,6 +244,8 @@ func filterDecl(decl Decl, f Filter, export bool) bool {
 		d.Specs = filterSpecList(d.Specs, f, export)
 		return len(d.Specs) > 0
 	case *FuncDecl:
+		// func Foo(x Type), 注意没有过滤函数的出入参列表的类型
+		// Type中内部字段会保留
 		return f(d.Name.Name)
 	}
 	return false
@@ -256,6 +262,7 @@ func filterDecl(decl Decl, f Filter, export bool) bool {
 // left after filtering.
 //
 func FilterFile(src *File, f Filter) bool {
+	// 注意所有的GenDecl(import)都被删掉
 	return filterFile(src, f, false)
 }
 
@@ -315,17 +322,20 @@ const (
 // nameOf returns the function (foo) or method name (foo.bar) for
 // the given function declaration. If the AST is incorrect for the
 // receiver, it assumes a function instead.
-//
 func nameOf(f *FuncDecl) string {
 	if r := f.Recv; r != nil && len(r.List) == 1 {
 		// looks like a correct receiver declaration
 		t := r.List[0].Type
 		// dereference pointer receiver types
 		if p, _ := t.(*StarExpr); p != nil {
+			// func (*t) Foo() {} => f.Foo
+			// func (t) Foo() {}  => f.Foo
 			t = p.X
 		}
 		// the receiver type must be a type name
 		if p, _ := t.(*Ident); p != nil {
+			// 注意没有为funcname增加*，也就是这两个函数nameOf()返回相同值，去重
+			// 时会去掉一个
 			return p.Name + "." + f.Name.Name
 		}
 		// otherwise assume a function instead

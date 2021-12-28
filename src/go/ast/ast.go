@@ -38,7 +38,7 @@ type Node interface {
 // All expression nodes implement the Expr interface.
 type Expr interface {
 	Node
-	exprNode()
+	exprNode() // 仅是一个标记方法
 }
 
 // All statement nodes implement the Stmt interface.
@@ -143,7 +143,7 @@ func (g *CommentGroup) Text() string {
 	// Remove leading blank lines; convert runs of
 	// interior blank lines to a single blank line.
 	n := 0
-	for _, line := range lines {
+	for _, line := range lines { // 这类合并连续空行总是可以通过一次loop完成
 		if line != "" || n > 0 && lines[n-1] != "" {
 			lines[n] = line
 			n++
@@ -197,6 +197,21 @@ func isDirective(c string) bool {
 // Types belonging to the same type list share the same "type" identifier which also
 // records the position of that keyword.
 //
+/*
+type x struct {
+	// Doc:CommentGroup
+	name1, name2 Type `json:"v"` // Comment
+	Type2
+}
+
+type z interface {
+	// Doc:CommentGroup
+	func1(name1 int, name2 int) int // Comment
+	// 注意入参要么全部named，要么全部unamed，出参同样，但是出入参之间不用一样
+}
+
+func y(name Type)
+*/
 type Field struct {
 	Doc     *CommentGroup // associated documentation; or nil
 	Names   []*Ident      // field/method/(type) parameter names, or type "type"; or nil
@@ -205,11 +220,12 @@ type Field struct {
 	Comment *CommentGroup // line comments; or nil
 }
 
+// 注意Field的<pos, end>不包括前后的comment
 func (f *Field) Pos() token.Pos {
 	if len(f.Names) > 0 {
 		return f.Names[0].Pos()
 	}
-	if f.Type != nil {
+	if f.Type != nil { // embedded field or unnamed function parameter
 		return f.Type.Pos()
 	}
 	return token.NoPos
@@ -264,7 +280,7 @@ func (f *FieldList) NumFields() int {
 	n := 0
 	if f != nil {
 		for _, g := range f.List {
-			m := len(g.Names)
+			m := len(g.Names) // a, b, c int 一个*Field对应三个字段
 			if m == 0 {
 				m = 1
 			}
@@ -290,7 +306,7 @@ type (
 	Ident struct {
 		NamePos token.Pos // identifier position
 		Name    string    // identifier name
-		Obj     *Object   // denoted object; or nil
+		Obj     *Object   // denoted object; or nil; declaration本身中的Ident也会设置Obj,指向"自己"
 	}
 
 	// An Ellipsis node stands for the "..." type in a
@@ -308,12 +324,19 @@ type (
 		Value    string      // literal string; e.g. 42, 0x7f, 3.14, 1e-9, 2.4i, 'a', '\x7f', "foo" or `\m\n\o`
 	}
 
+	// 比如var x = func(z int) { }, "="后面就是一个FuncLit
 	// A FuncLit node represents a function literal.
 	FuncLit struct {
 		Type *FuncType  // function type
 		Body *BlockStmt // function body
 	}
 
+	/*
+		var x = []int{1, 2, 3}
+		var x = map[int]int{1:1, 2:2}
+		var x = T{a: 100, b: "xyz" }
+		Type { Elt1, Elt2, ... }
+	*/
 	// A CompositeLit node represents a composite literal.
 	CompositeLit struct {
 		Type       Expr      // literal type; or nil
@@ -323,6 +346,7 @@ type (
 		Incomplete bool      // true if (source) expressions are missing in the Elts list
 	}
 
+	// (X)
 	// A ParenExpr node represents a parenthesized expression.
 	ParenExpr struct {
 		Lparen token.Pos // position of "("
@@ -330,12 +354,14 @@ type (
 		Rparen token.Pos // position of ")"
 	}
 
+	// X.Sel
 	// A SelectorExpr node represents an expression followed by a selector.
 	SelectorExpr struct {
 		X   Expr   // expression
 		Sel *Ident // field selector
 	}
 
+	// X[Index]
 	// An IndexExpr node represents an expression followed by an index.
 	IndexExpr struct {
 		X      Expr      // expression
@@ -344,6 +370,7 @@ type (
 		Rbrack token.Pos // position of "]"
 	}
 
+	// X[Low:High:Max]
 	// A SliceExpr node represents an expression followed by slice indices.
 	SliceExpr struct {
 		X      Expr      // expression
@@ -355,9 +382,9 @@ type (
 		Rbrack token.Pos // position of "]"
 	}
 
+	// X.(Type)
 	// A TypeAssertExpr node represents an expression followed by a
 	// type assertion.
-	//
 	TypeAssertExpr struct {
 		X      Expr      // expression
 		Lparen token.Pos // position of "("
@@ -365,6 +392,7 @@ type (
 		Rparen token.Pos // position of ")"
 	}
 
+	// Func(Arg1, Arg2...)
 	// A CallExpr node represents an expression followed by an argument list.
 	CallExpr struct {
 		Fun      Expr      // function expression
@@ -374,23 +402,24 @@ type (
 		Rparen   token.Pos // position of ")"
 	}
 
+	// *X
 	// A StarExpr node represents an expression of the form "*" Expression.
 	// Semantically it could be a unary "*" expression, or a pointer type.
-	//
 	StarExpr struct {
 		Star token.Pos // position of "*"
 		X    Expr      // operand
 	}
 
+	// !X, -X, ^X
 	// A UnaryExpr node represents a unary expression.
 	// Unary "*" expressions are represented via StarExpr nodes.
-	//
 	UnaryExpr struct {
 		OpPos token.Pos   // position of Op
 		Op    token.Token // operator
 		X     Expr        // operand
 	}
 
+	// X + Y, X := Y,  X += Y
 	// A BinaryExpr node represents a binary expression.
 	BinaryExpr struct {
 		X     Expr        // left operand
@@ -401,7 +430,7 @@ type (
 
 	// A KeyValueExpr node represents (key : value) pairs
 	// in composite literals.
-	//
+	// { Key: Value }
 	KeyValueExpr struct {
 		Key   Expr
 		Colon token.Pos // position of ":"
@@ -424,6 +453,8 @@ const (
 // nodes.
 //
 type (
+	// 注意XxxType都是实现了Expr接口
+	// [Len]Elt
 	// An ArrayType node represents an array or slice type.
 	ArrayType struct {
 		Lbrack token.Pos // position of "["
@@ -431,6 +462,7 @@ type (
 		Elt    Expr      // element type
 	}
 
+	// /* type X */ struct { Field1, ... }
 	// A StructType node represents a struct type.
 	StructType struct {
 		Struct     token.Pos  // position of "struct" keyword
@@ -447,6 +479,7 @@ type (
 		Incomplete bool       // true if (source) methods or types are missing in the Methods list
 	}
 
+	// Map[Key]Value
 	// A MapType node represents a map type.
 	MapType struct {
 		Map   token.Pos // position of "map" keyword
@@ -454,6 +487,9 @@ type (
 		Value Expr
 	}
 
+	// Chan Value
+	// <-Chan Value
+	// Chan<- Value
 	// A ChanType node represents a channel type.
 	ChanType struct {
 		Begin token.Pos // position of "chan" keyword or "<-" (whichever comes first)
@@ -596,20 +632,22 @@ type (
 		From, To token.Pos // position range of bad statement
 	}
 
+	// var x int
 	// A DeclStmt node represents a declaration in a statement list.
 	DeclStmt struct {
 		Decl Decl // *GenDecl with CONST, TYPE, or VAR token
 	}
 
+	// ;
 	// An EmptyStmt node represents an empty statement.
 	// The "position" of the empty statement is the position
 	// of the immediately following (explicit or implicit) semicolon.
-	//
 	EmptyStmt struct {
 		Semicolon token.Pos // position of following ";"
 		Implicit  bool      // if set, ";" was omitted in the source
 	}
 
+	// Label:
 	// A LabeledStmt node represents a labeled statement.
 	LabeledStmt struct {
 		Label *Ident
@@ -617,13 +655,14 @@ type (
 		Stmt  Stmt
 	}
 
+	// f.Call(a + (b - c), 100)
 	// An ExprStmt node represents a (stand-alone) expression
 	// in a statement list.
-	//
 	ExprStmt struct {
 		X Expr // expression
 	}
 
+	// f.getChan() <- (10 + a)
 	// A SendStmt node represents a send statement.
 	SendStmt struct {
 		Chan  Expr
@@ -631,6 +670,7 @@ type (
 		Value Expr
 	}
 
+	// m["id"]++
 	// An IncDecStmt node represents an increment or decrement statement.
 	IncDecStmt struct {
 		X      Expr
@@ -638,9 +678,9 @@ type (
 		Tok    token.Token // INC or DEC
 	}
 
+	// x, _ := f.Call(a + (b - c), 100)
 	// An AssignStmt node represents an assignment or
 	// a short variable declaration.
-	//
 	AssignStmt struct {
 		Lhs    []Expr
 		TokPos token.Pos   // position of Tok
@@ -666,9 +706,9 @@ type (
 		Results []Expr    // result expressions; or nil
 	}
 
+	// break Label
 	// A BranchStmt node represents a break, continue, goto,
 	// or fallthrough statement.
-	//
 	BranchStmt struct {
 		TokPos token.Pos   // position of Tok
 		Tok    token.Token // keyword token (BREAK, CONTINUE, GOTO, FALLTHROUGH)
@@ -685,7 +725,7 @@ type (
 	// An IfStmt node represents an if statement.
 	IfStmt struct {
 		If   token.Pos // position of "if" keyword
-		Init Stmt      // initialization statement; or nil
+		Init Stmt      // initialization statement; or nil, 不要求是AssignStmt!
 		Cond Expr      // condition
 		Body *BlockStmt
 		Else Stmt // else branch; or nil
@@ -696,17 +736,19 @@ type (
 		Case  token.Pos // position of "case" or "default" keyword
 		List  []Expr    // list of expressions or types; nil means default case
 		Colon token.Pos // position of ":"
-		Body  []Stmt    // statement list; or nil
+		Body  []Stmt    // statement list; or nil, 可能是BlockStmt
 	}
 
 	// A SwitchStmt node represents an expression switch statement.
+	// switch x+=100; x { }
 	SwitchStmt struct {
 		Switch token.Pos  // position of "switch" keyword
 		Init   Stmt       // initialization statement; or nil
 		Tag    Expr       // tag expression; or nil
-		Body   *BlockStmt // CaseClauses only
+		Body   *BlockStmt // CaseClauses only, 指BlockStmt中的Stmt列表元素一定是CaseClause
 	}
 
+	// switch x := v.(type) { }
 	// A TypeSwitchStmt node represents a type switch statement.
 	TypeSwitchStmt struct {
 		Switch token.Pos  // position of "switch" keyword
@@ -715,6 +757,7 @@ type (
 		Body   *BlockStmt // CaseClauses only
 	}
 
+	// case y := <-chanX:
 	// A CommClause node represents a case of a select statement.
 	CommClause struct {
 		Case  token.Pos // position of "case" or "default" keyword
@@ -729,15 +772,17 @@ type (
 		Body   *BlockStmt // CommClauses only
 	}
 
+	// for Init; Cond; Post { Body }
 	// A ForStmt represents a for statement.
 	ForStmt struct {
 		For  token.Pos // position of "for" keyword
-		Init Stmt      // initialization statement; or nil
+		Init Stmt      // initialization statement; or nil; 可以是EmptyStmt, 比如 for;;{ }
 		Cond Expr      // condition; or nil
 		Post Stmt      // post iteration statement; or nil
 		Body *BlockStmt
 	}
 
+	// for Key, Value := range X { Body }
 	// A RangeStmt represents a for statement with a range clause.
 	RangeStmt struct {
 		For        token.Pos   // position of "for" keyword
@@ -865,7 +910,6 @@ func (*RangeStmt) stmtNode()      {}
 
 // A Spec node represents a single (non-parenthesized) import,
 // constant, type, or variable declaration.
-//
 type (
 	// The Spec type stands for any of *ImportSpec, *ValueSpec, and *TypeSpec.
 	Spec interface {
@@ -873,6 +917,12 @@ type (
 		specNode()
 	}
 
+	/*
+		import (
+			// Doc
+			Name "Path" // Comment
+		)
+	*/
 	// An ImportSpec node represents a single package import.
 	ImportSpec struct {
 		Doc     *CommentGroup // associated documentation; or nil
@@ -882,9 +932,12 @@ type (
 		EndPos  token.Pos     // end of spec (overrides Path.Pos if nonzero)
 	}
 
+	/*
+		// Doc
+		var|const Name1, Name2 Type = 1, 3 // Comment
+	*/
 	// A ValueSpec node represents a constant or variable declaration
 	// (ConstSpec or VarSpec production).
-	//
 	ValueSpec struct {
 		Doc     *CommentGroup // associated documentation; or nil
 		Names   []*Ident      // value names (len(Names) > 0)
@@ -949,9 +1002,16 @@ type (
 	//
 	//	token.IMPORT  *ImportSpec
 	//	token.CONST   *ValueSpec
-	//	token.TYPE    *TypeSpec
+	//	token.TYPE    *TypeSpec  // 在 ast_notypeparams.go 中定义
 	//	token.VAR     *ValueSpec
-	//
+	/*
+		var x int = 100; // var ValueSpec
+		var (  // Var ( ValueSpec, ValueSpec )
+			x int = 100
+			y int = 100
+		)
+		type Name struct { } => type TypeSpec
+	*/
 	GenDecl struct {
 		Doc    *CommentGroup // associated documentation; or nil
 		TokPos token.Pos     // position of Tok
@@ -961,6 +1021,9 @@ type (
 		Rparen token.Pos // position of ')', if any
 	}
 
+	/*
+		func (Recv)Name(Params)(Results) { Body }
+	*/
 	// A FuncDecl node represents a function declaration.
 	FuncDecl struct {
 		Doc  *CommentGroup // associated documentation; or nil
@@ -1022,17 +1085,29 @@ func (*FuncDecl) declNode() {}
 // and Comment comments directly associated with nodes, the remaining comments
 // are "free-floating" (see also issues #18593, #20744).
 //
-type File struct {
-	Doc        *CommentGroup   // associated documentation; or nil
-	Package    token.Pos       // position of "package" keyword
-	Name       *Ident          // package name
-	Decls      []Decl          // top-level declarations; or nil
+type File struct { // 实现了Node接口
+	Doc     *CommentGroup // associated documentation; or nil
+	Package token.Pos     // position of "package" keyword
+	Name    *Ident        // package name
+
+	// .go文件顶层的除了注释和package语句，其他全部都是Decl node
+	// 而且就两种:
+	//  - FuncDecl: func main() {}
+	//  - GenDecl:
+	//    * var x int = 1
+	//    * const x int = 1
+	//    * import "x"
+	//    * type x struct { }
+	Decls []Decl // top-level declarations; or nil
+
 	Scope      *Scope          // package scope (this file only)
 	Imports    []*ImportSpec   // imports in this file
 	Unresolved []*Ident        // unresolved identifiers in this file
 	Comments   []*CommentGroup // list of all comments in the source file
 }
 
+// 注意文件的<pos, end>是从package xx 到最后一个Decl的结尾处，不包括前后注释，也
+// 就是和物理文件不完全对应
 func (f *File) Pos() token.Pos { return f.Package }
 func (f *File) End() token.Pos {
 	if n := len(f.Decls); n > 0 {

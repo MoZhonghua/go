@@ -28,10 +28,18 @@ func SortImports(fset *token.FileSet, f *File) {
 
 		// Identify and sort runs of specs on successive lines.
 		i := 0
-		specs := d.Specs[:0]
+		specs := d.Specs[:0] // 只会减少ImportSpec，而且永远之后覆盖处理后的数据，避免重新分批内存
 		for j, s := range d.Specs {
 			if j > i && lineAt(fset, s.Pos()) > 1+lineAt(fset, d.Specs[j-1].End()) {
 				// j begins a new run. End this one.
+				// 注意只有连续的import才算，中间有comment也不是连续的比如
+				/*
+					//def
+					import "def"
+					//abc
+					import "abc"
+				*/
+				// 这两个import不会合在一起排序去重
 				specs = append(specs, sortSpecs(fset, f, d.Specs[i:j])...)
 				i = j
 			}
@@ -132,7 +140,7 @@ func sortSpecs(fset *token.FileSet, f *File, specs []Spec) []Spec {
 		}
 		// g.End() < end
 		if beg <= g.Pos() {
-			// comment is within the range [beg, end[ of import declarations
+			// comment is within the range [beg, end] of import declarations
 			if i < first {
 				first = i
 			}

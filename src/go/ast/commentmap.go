@@ -54,7 +54,6 @@ func (a byInterval) Less(i, j int) bool {
 func (a byInterval) Swap(i, j int) { a[i], a[j] = a[j], a[i] }
 
 // nodeList returns the list of nodes of the AST n in source order.
-//
 func nodeList(n Node) []Node {
 	var list []Node
 	Inspect(n, func(n Node) bool {
@@ -75,9 +74,8 @@ func nodeList(n Node) []Node {
 }
 
 // A commentListReader helps iterating through a list of comment groups.
-//
 type commentListReader struct {
-	fset     *token.FileSet
+	fset     *token.FileSet // FileSet最核心的是Pos(int64)只在FileSet内有效
 	list     []*CommentGroup
 	index    int
 	comment  *CommentGroup  // comment group at current index
@@ -139,7 +137,6 @@ func (s *nodeStack) pop(pos token.Pos) (top Node) {
 // node possible: For instance, if the comment is a line comment
 // trailing an assignment, the comment is associated with the entire
 // assignment rather than just the last operand in the assignment.
-//
 func NewCommentMap(fset *token.FileSet, node Node, comments []*CommentGroup) CommentMap {
 	if len(comments) == 0 {
 		return nil // no comments to map
@@ -172,6 +169,7 @@ func NewCommentMap(fset *token.FileSet, node Node, comments []*CommentGroup) Com
 		if q != nil {
 			qpos = fset.Position(q.Pos()) // current node position
 		} else {
+			// 注意上面在nodes最后加了一个nil
 			// set fake sentinel position to infinity so that
 			// all comments get processed before the sentinel
 			const infinity = 1 << 30
@@ -216,6 +214,11 @@ func NewCommentMap(fset *token.FileSet, node Node, comments []*CommentGroup) Com
 					// which would imply that there were no nodes
 					panic("internal error: no comments should be associated with sentinel")
 				}
+				/*
+				//doc
+				var x int
+				又有nodeList()返回的Node顺序的关系，此时q一定是StmtNode(var x int)
+				*/
 				assoc = q
 			}
 			cmap.addComment(assoc, r.comment)
@@ -232,6 +235,8 @@ func NewCommentMap(fset *token.FileSet, node Node, comments []*CommentGroup) Com
 		// update previous node group if we see an "important" node
 		switch q.(type) {
 		case *File, *Field, Decl, Spec, Stmt:
+			// 不用所有的Node都入栈，比如 a := 100 + c + d //abc
+			// 只需要把整个stmt压入栈，因为我们不会把//abc关联到Ident(d), Expr(c+d) ...
 			stack.push(q)
 		}
 	}

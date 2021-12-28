@@ -17,6 +17,11 @@ type (
 		Results *FieldList // (outgoing) results; or nil
 	}
 
+	/*
+	// Doc
+	type Name [=] TypeExpr
+	TypeExpr => struct { }, [10]int, interface{}, map[int]string
+	*/
 	// A TypeSpec node represents a type declaration (TypeSpec production).
 	TypeSpec struct {
 		Doc     *CommentGroup // associated documentation; or nil

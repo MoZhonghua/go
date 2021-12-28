@@ -18,7 +18,7 @@ import (
 type FieldFilter func(name string, value reflect.Value) bool
 
 // NotNilFilter returns true for field values that are not nil;
-// it returns false otherwise.
+// it returns true otherwise.
 func NotNilFilter(_ string, v reflect.Value) bool {
 	switch v.Kind() {
 	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr, reflect.Slice:
@@ -88,6 +88,7 @@ var indent = []byte(".  ")
 
 func (p *printer) Write(data []byte) (n int, err error) {
 	var m int
+	// 拆分为行，每行前面需要打印行数和缩进
 	for i, b := range data {
 		// invariant: data[0:n] has been written
 		if b == '\n' {

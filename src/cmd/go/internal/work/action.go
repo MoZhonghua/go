@@ -44,7 +44,7 @@ type Builder struct {
 	NeedExport          bool // list needs p.Export
 	NeedCompiledGoFiles bool // list needs p.CompiledGoFiles
 
-	objdirSeq int // counter for NewObjdir
+	objdirSeq int // counter for NewObjdir  // $WORK/b0001, $WORK/b0002, ...
 	pkgSeq    int
 
 	output    sync.Mutex
@@ -52,7 +52,7 @@ type Builder struct {
 
 	exec      sync.Mutex
 	readySema chan bool
-	ready     actionQueue
+	ready     actionQueue // []*Action, priority queue
 
 	id           sync.Mutex
 	toolIDCache  map[string]string // tool name -> tool ID
@@ -64,7 +64,7 @@ type Builder struct {
 
 // An Action represents a single action in the action graph.
 type Action struct {
-	Mode       string                                         // description of action operation
+	Mode       string                                         // description of action operation, link, build, get, ...
 	Package    *load.Package                                  // the package this action works on
 	Deps       []*Action                                      // actions that must happen before this one
 	Func       func(*Builder, context.Context, *Action) error // the action itself (nil = no-op)

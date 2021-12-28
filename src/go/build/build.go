@@ -105,6 +105,7 @@ type Context struct {
 	// ReadDir returns a slice of fs.FileInfo, sorted by Name,
 	// describing the content of the named directory.
 	// If ReadDir is nil, Import uses ioutil.ReadDir.
+	// 比如go build main.go 时来伪装当前目录下只有main.go一个文件
 	ReadDir func(dir string) ([]fs.FileInfo, error)
 
 	// OpenFile opens a file (not a directory) for reading.

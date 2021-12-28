@@ -137,6 +137,7 @@ func ParseFile(fset *token.FileSet, filename string, src interface{}, mode Mode)
 // returned. If a parse error occurred, a non-nil but incomplete map and the
 // first error encountered are returned.
 //
+// 在这里同一个目录下的不同.go文件可以用不同的package NAME
 func ParseDir(fset *token.FileSet, path string, filter func(fs.FileInfo) bool, mode Mode) (pkgs map[string]*ast.Package, first error) {
 	list, err := os.ReadDir(path)
 	if err != nil {
@@ -165,6 +166,7 @@ func ParseDir(fset *token.FileSet, path string, filter func(fs.FileInfo) bool, m
 				pkg = &ast.Package{
 					Name:  name,
 					Files: make(map[string]*ast.File),
+					// 注意Scope字段为nil
 				}
 				pkgs[name] = pkg
 			}
