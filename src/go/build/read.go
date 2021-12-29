@@ -31,6 +31,8 @@ type importReader struct {
 
 var bom = []byte{0xef, 0xbb, 0xbf}
 
+// r是.go源代码, 用来读取go文件内容知道import结束. 如果有import，一定是在
+// package Name的下一条语句，否则就没有import.
 func newImportReader(name string, r io.Reader) *importReader {
 	b := bufio.NewReader(r)
 	// Remove leading UTF-8 BOM.
@@ -71,8 +73,9 @@ func (r *importReader) syntaxError() {
 func (r *importReader) readByte() byte {
 	c, err := r.b.ReadByte()
 	if err == nil {
-		r.buf = append(r.buf, c)
+		r.buf = append(r.buf, c) // 注意会放到buf里
 		if c == 0 {
+			// go代码中不允许出现\0
 			err = errNUL
 		}
 	}
@@ -190,7 +193,19 @@ func (r *importReader) findEmbed(first bool) bool {
 	// so the reader is not at the start of a line on the first call.
 	// After that, each //go:embed extraction leaves the reader
 	// at the end of a line.
-	startLine := !first
+
+	// //go:embed有可能在buf中，因此必须重新扫描r.buf
+	/*
+		package main
+		imort "embed"
+		//go:embed a.txt
+		var data string
+		main() {
+		}
+		解析完成第一个import后，需要查找第二个import，到var的第一个字符
+		此时buf中有//go:embed
+	*/
+	startLine := !first // 第一次是从buf读取，感觉没啥意义，一定有package语句
 	var c byte
 	for r.err == nil && !r.eof {
 		c = r.readByteNoBuf()
@@ -422,6 +437,7 @@ func readGoInfo(f io.Reader, info *fileInfo) error {
 		return nil
 	}
 
+	// 检查是否有import "embed"
 	hasEmbed := false
 	for _, decl := range info.parsed.Decls {
 		d, ok := decl.(*ast.GenDecl)
@@ -460,6 +476,7 @@ func readGoInfo(f io.Reader, info *fileInfo) error {
 	// will reject them. They can be (and have already been) ignored.
 	if hasEmbed {
 		var line []byte
+		// 找到所有的//go:embed ""注释行, 然后处理
 		for first := true; r.findEmbed(first); first = false {
 			line = line[:0]
 			pos := r.pos
@@ -498,6 +515,10 @@ func parseGoEmbed(args string, pos token.Position) ([]fileEmbed, error) {
 		trimBytes(len(args) - len(trim))
 	}
 
+	/*
+	  //go:embed file1 file2 // 可以有多个pattern
+	  var files embed.FS     // 注意变量类型必须是embed.FS
+	*/
 	var list []fileEmbed
 	for trimSpace(); args != ""; trimSpace() {
 		var path string
@@ -526,7 +547,7 @@ func parseGoEmbed(args string, pos token.Position) ([]fileEmbed, error) {
 		case '"':
 			i := 1
 			for ; i < len(args); i++ {
-				if args[i] == '\\' {
+				if args[i] == '\\' { // 遇到\，需要继续处理，特别的\"不应该结束
 					i++
 					continue
 				}

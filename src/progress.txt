@@ -36,9 +36,9 @@ go/build/doc.go
 go/build/syslist.go
 go/build/gc.go
 go/build/zcgo.go
+go/build/read.go
 
 2021-12-30
-go/build/read.go ?
 go/build/build.go ?
 
 go/internal/gcimporter/gcimporter.go ?
