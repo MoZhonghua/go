@@ -30,4 +30,19 @@ go/parser/interface.go
 go/parser/resolver.go
 
 2021-12-29
-go/parser/parser.go ?
+go/parser/parser.go
+go/internal/typeparams/common.go
+go/build/doc.go
+go/build/syslist.go
+go/build/gc.go
+go/build/zcgo.go
+
+2021-12-30
+go/build/read.go ?
+go/build/build.go ?
+
+go/internal/gcimporter/gcimporter.go ?
+go/internal/srcimporter/srcimporter.go ?
+go/importer/importer.go ?
+go/importer/importer_test.go ?
+
