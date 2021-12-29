@@ -55,9 +55,11 @@ type parser struct {
 	syncPos token.Pos // last synchronization position
 	syncCnt int       // number of parser.advance calls without progress
 
+	// 这两个实际是用来表示当前的context，比如exprLev表示当前是否在解析Expr
+	// 根据这个context有些相同的token可能有不同处理
 	// Non-syntactic parser control
 	exprLev int  // < 0: in control clause, >= 0: in expression
-	inRhs   bool // if set, the parser is parsing a rhs expression
+	inRhs   bool // if set, the parser is parsing a rhs expression, rhs=right hand side
 
 	imports []*ast.ImportSpec // list of imports
 }
@@ -66,7 +68,7 @@ func (p *parser) init(fset *token.FileSet, filename string, src []byte, mode Mod
 	p.file = fset.AddFile(filename, -1, len(src))
 	var m scanner.Mode
 	if mode&ParseComments != 0 {
-		m = scanner.ScanComments
+		m = scanner.ScanComments // 如果不设置这个mode则scanner会跳过comment,即不返回comment token
 	}
 	eh := func(pos token.Position, msg string) { p.errors.Add(pos, msg) }
 	p.scanner.Init(p.file, src, eh, m)
@@ -193,6 +195,7 @@ func (p *parser) next() {
 	prev := p.pos
 	p.next0()
 
+	// 注意会不断循环直到遇到第一个非comment token。中间遇到的comment都收集到p.comments里
 	if p.tok == token.COMMENT {
 		var comment *ast.CommentGroup
 		var endline int
@@ -271,6 +274,7 @@ func (p *parser) expect(tok token.Token) token.Pos {
 	if p.tok != tok {
 		p.errorExpected(pos, "'"+tok.String()+"'")
 	}
+	// 注意返回的是当前token的pos，然后next()，此时p指向的是下一个token了
 	p.next() // make progress
 	return pos
 }
@@ -289,7 +293,6 @@ func (p *parser) expect2(tok token.Token) (pos token.Pos) {
 
 // expectClosing is like expect but provides a better error message
 // for the common case of a missing comma before a newline.
-//
 func (p *parser) expectClosing(tok token.Token, context string) token.Pos {
 	if p.tok != tok && p.tok == token.SEMICOLON && p.lit == "\n" {
 		p.error(p.pos, "missing ',' before newline in "+context)
@@ -336,6 +339,7 @@ func assert(cond bool, msg string) {
 	}
 }
 
+// 错误恢复过程，一般是不断跳过直到找到标记一个新的Node开始的token
 // advance consumes tokens until the current token p.tok
 // is in the 'to' set, or token.EOF. For error recovery.
 func (p *parser) advance(to map[token.Token]bool) {
@@ -420,7 +424,6 @@ func (p *parser) safePos(pos token.Pos) (res token.Pos) {
 
 // ----------------------------------------------------------------------------
 // Identifiers
-
 func (p *parser) parseIdent() *ast.Ident {
 	pos := p.pos
 	name := "_"
@@ -428,6 +431,8 @@ func (p *parser) parseIdent() *ast.Ident {
 		name = p.lit
 		p.next()
 	} else {
+		// 逻辑是expect IDENT，但是实际不是，输出错误，但是
+		// 把这个token当做是IDENT(Name="_")，然后继续处理
 		p.expect(token.IDENT) // use expect() error handling
 	}
 	return &ast.Ident{NamePos: pos, Name: name}
@@ -450,6 +455,7 @@ func (p *parser) parseIdentList() (list []*ast.Ident) {
 // ----------------------------------------------------------------------------
 // Common productions
 
+// var x, y int = expr1, expr2
 // If lhs is set, result list elements which are identifiers are not resolved.
 func (p *parser) parseExprList() (list []ast.Expr) {
 	if p.trace {
@@ -465,6 +471,12 @@ func (p *parser) parseExprList() (list []ast.Expr) {
 	return
 }
 
+// inRhs唯一用处就是影响token.ASSIGN("=")的优先级: tokPrec()
+//  - inRhs=true: 把ASSIGN转换为token.EQL("==")，并使用token.EQL的优先级
+//    * 任意CompareOp(Pred=3)都可以，没区别
+//  - inRhs=false: 不做特别处理，Pred("=")=LowestPrec
+// 比如x = y = 100, RHS: y=100, 虽然会报错，但是可以把"="当做"=="来继续处理
+// 更好的错误恢复
 func (p *parser) parseList(inRhs bool) []ast.Expr {
 	old := p.inRhs
 	p.inRhs = inRhs
@@ -476,6 +488,9 @@ func (p *parser) parseList(inRhs bool) []ast.Expr {
 // ----------------------------------------------------------------------------
 // Types
 
+// int => ast.Ident
+// time.Duration => ast.SelectorExpr
+// "" => ast.BadExpr
 func (p *parser) parseType() ast.Expr {
 	if p.trace {
 		defer un(trace(p, "Type"))
@@ -507,6 +522,8 @@ func (p *parser) parseQualifiedIdent(ident *ast.Ident) ast.Expr {
 }
 
 // If the result is an identifier, it is not resolved.
+// int => ast.Ident
+// time.Duration => ast.SelectorExpr
 func (p *parser) parseTypeName(ident *ast.Ident) ast.Expr {
 	if p.trace {
 		defer un(trace(p, "TypeName"))
@@ -535,9 +552,11 @@ func (p *parser) parseArrayLen() ast.Expr {
 	var len ast.Expr
 	// always permit ellipsis for more fault-tolerant parsing
 	if p.tok == token.ELLIPSIS {
+		// [...]int
 		len = &ast.Ellipsis{Ellipsis: p.pos}
 		p.next()
 	} else if p.tok != token.RBRACK {
+		// [Expr]int
 		len = p.parseRhs()
 	}
 	p.exprLev--
@@ -545,6 +564,7 @@ func (p *parser) parseArrayLen() ast.Expr {
 	return len
 }
 
+// struct { Name [10]Elt } => ast.Ident, ast.ArrayType
 func (p *parser) parseArrayFieldOrTypeInstance(x *ast.Ident) (*ast.Ident, ast.Expr) {
 	if p.trace {
 		defer un(trace(p, "ArrayFieldOrTypeInstance"))
@@ -603,6 +623,10 @@ func (p *parser) parseArrayFieldOrTypeInstance(x *ast.Ident) (*ast.Ident, ast.Ex
 	return nil, &ast.IndexExpr{X: x, Lbrack: lbrack, Index: typeparams.PackExpr(args), Rbrack: rbrack}
 }
 
+/*
+//Doc
+Name1, Name1 Type `tag` // Comment
+*/
 func (p *parser) parseFieldDecl() *ast.Field {
 	if p.trace {
 		defer un(trace(p, "FieldDecl"))
@@ -614,6 +638,8 @@ func (p *parser) parseFieldDecl() *ast.Field {
 	var typ ast.Expr
 	if p.tok == token.IDENT {
 		name := p.parseIdent()
+		// 分配对应: Type.Pacakge, Type ``, Type;, Type[
+		// 都是说明当前IDENT是类型名，而不是字段名，也就是说是embedded field
 		if p.tok == token.PERIOD || p.tok == token.STRING || p.tok == token.SEMICOLON || p.tok == token.RBRACE {
 			// embedded type
 			typ = name
@@ -640,6 +666,8 @@ func (p *parser) parseFieldDecl() *ast.Field {
 			}
 		}
 	} else {
+		// token.MUL: *time.Time
+		// token.LPAREN: parseType()会报错
 		// embedded, possibly generic type
 		// (using the enclosing parentheses to distinguish it from a named field declaration)
 		// TODO(rFindley) confirm that this doesn't allow parenthesized embedded type
@@ -652,6 +680,8 @@ func (p *parser) parseFieldDecl() *ast.Field {
 		p.next()
 	}
 
+	// 正常scanner会在 line comment前插入";"，不管如何都需要调用next()来
+	// 跳过(收集)comment
 	p.expectSemi() // call before accessing p.linecomment
 
 	field := &ast.Field{Doc: doc, Names: names, Type: typ, Tag: tag, Comment: p.lineComment}
@@ -736,6 +766,7 @@ func (p *parser) parseParamDecl(name *ast.Ident) (f field) {
 			f.typ = p.parseType()
 
 		case token.LBRACK:
+			// 注意[100]int和[]int在ast中都是ArrayType(Len=nil来区分是Slice)，没有单独的SliceType
 			// name[type1, type2, ...] or name []type or name [len]type
 			f.name, f.typ = p.parseArrayFieldOrTypeInstance(f.name)
 
@@ -766,6 +797,8 @@ func (p *parser) parseParamDecl(name *ast.Ident) (f field) {
 	return
 }
 
+// func params: func(int, int), func(a, b int)
+// generic type params: T[T1 any, T2 constaint]
 func (p *parser) parseParameterList(name0 *ast.Ident, closing token.Token, parseParamDecl func(*ast.Ident) field, tparams bool) (params []*ast.Field) {
 	if p.trace {
 		defer un(trace(p, "ParameterList"))
@@ -818,6 +851,8 @@ func (p *parser) parseParameterList(name0 *ast.Ident, closing token.Token, parse
 		// some named => all must be named
 		ok := true
 		var typ ast.Expr
+		// 注意func(byte, b int)不报错, 此时第一个参数名字为"byte", 类型为"int"，
+		// 而不是一个unamed byte类型参数, 允许类型名字做为参数名!!
 		for i := len(list) - 1; i >= 0; i-- {
 			if par := &list[i]; par.typ != nil {
 				typ = par.typ
@@ -828,6 +863,8 @@ func (p *parser) parseParameterList(name0 *ast.Ident, closing token.Token, parse
 					par.name = n
 				}
 			} else if typ != nil {
+				// 比如a, b int, 解析后a的typ=nil, 需要设置为b的typ
+				// 特别注意a的可以是类型名，比如int，但是不是参数类型为"int"而是参数名为"int"
 				par.typ = typ
 			} else {
 				// par.typ == nil && typ == nil => we only have a par.name
@@ -863,6 +900,8 @@ func (p *parser) parseParameterList(name0 *ast.Ident, closing token.Token, parse
 		params = append(params, field)
 		names = nil
 	}
+
+	// 注意这里会合并连续的同类型参数到一个Field，通过Field.Names同时表示多个参数
 	for _, par := range list {
 		if par.typ != typ {
 			if len(names) > 0 {
@@ -915,11 +954,14 @@ func (p *parser) parseResult() *ast.FieldList {
 		defer un(trace(p, "Result"))
 	}
 
+	// func foo() (x int, b string)
+	// func foo() (int, string)
 	if p.tok == token.LPAREN {
 		_, results := p.parseParameters(false)
 		return results
 	}
 
+	// func foo() int
 	typ := p.tryIdentOrType()
 	if typ != nil {
 		list := make([]*ast.Field, 1)
@@ -945,6 +987,7 @@ func (p *parser) parseFuncType() *ast.FuncType {
 	return &ast.FuncType{Func: pos, Params: params, Results: results}
 }
 
+// type X interface { Method(Params) Results }
 func (p *parser) parseMethodSpec() *ast.Field {
 	if p.trace {
 		defer un(trace(p, "MethodSpec"))
@@ -957,6 +1000,8 @@ func (p *parser) parseMethodSpec() *ast.Field {
 	if ident, _ := x.(*ast.Ident); ident != nil {
 		switch {
 		case p.tok == token.LBRACK && p.parseTypeParams():
+			// method[T1, T2](arg1 T1) T2
+			// embedType[T1, T2]
 			// generic method or embedded instantiated type
 			lbrack := p.pos
 			p.next()
@@ -1004,6 +1049,7 @@ func (p *parser) parseMethodSpec() *ast.Field {
 			typ = x
 		}
 	} else {
+		// ast.SelectorExpr, 比如io.Reader
 		// embedded, possibly instantiated type
 		typ = x
 		if p.tok == token.LBRACK && p.parseTypeParams() {
@@ -1094,6 +1140,7 @@ func (p *parser) parseChanType() *ast.ChanType {
 	return &ast.ChanType{Begin: pos, Arrow: arrow, Dir: dir, Value: value}
 }
 
+// 比如List[Int]
 func (p *parser) parseTypeInstance(typ ast.Expr) ast.Expr {
 	assert(p.parseTypeParams(), "parseTypeInstance while not parsing type params")
 	if p.trace {
@@ -1120,32 +1167,33 @@ func (p *parser) parseTypeInstance(typ ast.Expr) ast.Expr {
 
 func (p *parser) tryIdentOrType() ast.Expr {
 	switch p.tok {
-	case token.IDENT:
+	case token.IDENT: // VarName, TypeName, Type.Package
+		// 注意对于单个Ident，parser不能区分出是类型名还是变量名，都返回ast.Ident
 		typ := p.parseTypeName(nil)
 		if p.tok == token.LBRACK && p.parseTypeParams() {
 			typ = p.parseTypeInstance(typ)
 		}
 		return typ
-	case token.LBRACK:
+	case token.LBRACK: // [100]int, [constlen]time.Duration
 		lbrack := p.expect(token.LBRACK)
 		alen := p.parseArrayLen()
 		p.expect(token.RBRACK)
 		elt := p.parseType()
 		return &ast.ArrayType{Lbrack: lbrack, Len: alen, Elt: elt}
-	case token.STRUCT:
+	case token.STRUCT: // struct {}
 		return p.parseStructType()
-	case token.MUL:
+	case token.MUL: // *string
 		return p.parsePointerType()
-	case token.FUNC:
+	case token.FUNC: // func() {}
 		typ := p.parseFuncType()
 		return typ
-	case token.INTERFACE:
+	case token.INTERFACE: // interface{}
 		return p.parseInterfaceType()
-	case token.MAP:
+	case token.MAP: // map[Key]Value
 		return p.parseMapType()
-	case token.CHAN, token.ARROW:
+	case token.CHAN, token.ARROW: // chan, <-chan, chan<-
 		return p.parseChanType()
-	case token.LPAREN:
+	case token.LPAREN: // (Type)
 		lparen := p.pos
 		p.next()
 		typ := p.parseType()
@@ -1184,6 +1232,15 @@ func (p *parser) parseBody() *ast.BlockStmt {
 	return &ast.BlockStmt{Lbrace: lbrace, List: list, Rbrace: rbrace}
 }
 
+// 和parseBody没区别，就是trace名不同。这个用在解析内层的block块
+/*
+for { // parseBody()
+	...
+	{  // parseBlockStmt()
+		...
+	}
+}
+*/
 func (p *parser) parseBlockStmt() *ast.BlockStmt {
 	if p.trace {
 		defer un(trace(p, "BlockStmt"))
@@ -1204,12 +1261,14 @@ func (p *parser) parseFuncTypeOrLit() ast.Expr {
 		defer un(trace(p, "FuncTypeOrLit"))
 	}
 
+	// var x func(int) int
 	typ := p.parseFuncType()
-	if p.tok != token.LBRACE {
+	if p.tok != token.LBRACE { // 区别就是后面是不是大括号{
 		// function type only
 		return typ
 	}
 
+	// var x func(int) int { }
 	p.exprLev++
 	body := p.parseBody()
 	p.exprLev--
@@ -1227,15 +1286,20 @@ func (p *parser) parseOperand() ast.Expr {
 
 	switch p.tok {
 	case token.IDENT:
+		// return n
+		// return T{a: 100, b: "x"}也是这个分支，需要继续解析CompositeLit
 		x := p.parseIdent()
 		return x
 
 	case token.INT, token.FLOAT, token.IMAG, token.CHAR, token.STRING:
+		// return 100
 		x := &ast.BasicLit{ValuePos: p.pos, Kind: p.tok, Value: p.lit}
 		p.next()
 		return x
 
 	case token.LPAREN:
+		// 括号里整体看作一个操作数
+		// return (100*c)
 		lparen := p.pos
 		p.next()
 		p.exprLev++
@@ -1248,6 +1312,7 @@ func (p *parser) parseOperand() ast.Expr {
 		return p.parseFuncTypeOrLit()
 	}
 
+	// 比如[...]int{1, 2}
 	if typ := p.tryIdentOrType(); typ != nil { // do not consume trailing type parameters
 		// could be type for composite literal or conversion
 		_, isIdent := typ.(*ast.Ident)
@@ -1272,6 +1337,7 @@ func (p *parser) parseSelector(x ast.Expr) ast.Expr {
 	return &ast.SelectorExpr{X: x, Sel: sel}
 }
 
+// x.(Type)
 func (p *parser) parseTypeAssertion(x ast.Expr) ast.Expr {
 	if p.trace {
 		defer un(trace(p, "TypeAssertion"))
@@ -1279,10 +1345,12 @@ func (p *parser) parseTypeAssertion(x ast.Expr) ast.Expr {
 
 	lparen := p.expect(token.LPAREN)
 	var typ ast.Expr
-	if p.tok == token.TYPE {
+	if p.tok == token.TYPE { // type关键字
+		// switch t.(type)
 		// type switch: typ == nil
 		p.next()
 	} else {
+		// t.(io.Reader)
 		typ = p.parseType()
 	}
 	rparen := p.expect(token.RPAREN)
@@ -1296,7 +1364,7 @@ func (p *parser) parseIndexOrSliceOrInstance(x ast.Expr) ast.Expr {
 	}
 
 	lbrack := p.expect(token.LBRACK)
-	if p.tok == token.RBRACK {
+	if p.tok == token.RBRACK { // X[]
 		// empty index, slice or index expressions are not permitted;
 		// accept them for parsing tolerance, but complain
 		p.errorExpected(p.pos, "operand")
@@ -1316,7 +1384,7 @@ func (p *parser) parseIndexOrSliceOrInstance(x ast.Expr) ast.Expr {
 	var index [N]ast.Expr
 	var colons [N - 1]token.Pos
 	var firstComma token.Pos
-	if p.tok != token.COLON {
+	if p.tok != token.COLON { // X[Index0...]
 		// We can't know if we have an index expression or a type instantiation;
 		// so even if we see a (named) type we are not going to be in type context.
 		index[0] = p.parseRhsOrType()
@@ -1324,12 +1392,14 @@ func (p *parser) parseIndexOrSliceOrInstance(x ast.Expr) ast.Expr {
 	ncolons := 0
 	switch p.tok {
 	case token.COLON:
+		// X[:...] 或者 X[Index0:...]
 		// slice expression
 		for p.tok == token.COLON && ncolons < len(colons) {
 			colons[ncolons] = p.pos
 			ncolons++
 			p.next()
 			if p.tok != token.COLON && p.tok != token.RBRACK && p.tok != token.EOF {
+				// X[...:IndexI...]
 				index[ncolons] = p.parseRhs()
 			}
 		}
@@ -1348,7 +1418,7 @@ func (p *parser) parseIndexOrSliceOrInstance(x ast.Expr) ast.Expr {
 	p.exprLev--
 	rbrack := p.expect(token.RBRACK)
 
-	if ncolons > 0 {
+	if ncolons > 0 { // X[Low:High:Max], X[T1] 两者可以通过有没有":"来区分
 		// slice expression
 		slice3 := false
 		if ncolons == 2 {
@@ -1367,6 +1437,10 @@ func (p *parser) parseIndexOrSliceOrInstance(x ast.Expr) ast.Expr {
 		return &ast.SliceExpr{X: x, Lbrack: lbrack, Low: index[0], High: index[1], Max: index[2], Slice3: slice3, Rbrack: rbrack}
 	}
 
+	// IndexExpr三种情况:
+	//  - s[100] => len(args)=0, index[0]=100
+	//  - List[int]: 单个Type的type instance => len(args)=0, index[0]=int
+	//  - Map[int, string]: 多个Type的type instance => args=[int, string]
 	if len(args) == 0 {
 		// index expression
 		return &ast.IndexExpr{X: x, Lbrack: lbrack, Index: index[0], Rbrack: rbrack}
@@ -1381,6 +1455,9 @@ func (p *parser) parseIndexOrSliceOrInstance(x ast.Expr) ast.Expr {
 	return &ast.IndexExpr{X: x, Lbrack: lbrack, Index: typeparams.PackExpr(args), Rbrack: rbrack}
 }
 
+// fmt.Println(100)
+// foobar(100)
+// int(100)
 func (p *parser) parseCallOrConversion(fun ast.Expr) *ast.CallExpr {
 	if p.trace {
 		defer un(trace(p, "CallOrConversion"))
@@ -1409,7 +1486,7 @@ func (p *parser) parseCallOrConversion(fun ast.Expr) *ast.CallExpr {
 
 func (p *parser) parseValue() ast.Expr {
 	if p.trace {
-		defer un(trace(p, "Element"))
+		defer un(trace(p, "Value"))
 	}
 
 	if p.tok == token.LBRACE {
@@ -1426,8 +1503,11 @@ func (p *parser) parseElement() ast.Expr {
 		defer un(trace(p, "Element"))
 	}
 
-	x := p.parseValue()
+	// 两种情况
+	// Foo { 100 }
+	x := p.parseValue() // x=100
 	if p.tok == token.COLON {
+		// map[int]string { 100: "xxx" }
 		colon := p.pos
 		p.next()
 		x = &ast.KeyValueExpr{Key: x, Colon: colon, Value: p.parseValue()}
@@ -1452,6 +1532,9 @@ func (p *parser) parseElementList() (list []ast.Expr) {
 	return
 }
 
+// CompositeLit拆分为Type和ElementList两个部分来处理，先解析Type，然后根据
+// 后面是不是大括号"{"来区分: VarName 和 Type {}
+// 注意Type可以是复杂形式，比如map[string]int
 func (p *parser) parseLiteralValue(typ ast.Expr) ast.Expr {
 	if p.trace {
 		defer un(trace(p, "LiteralValue"))
@@ -1477,6 +1560,7 @@ func (p *parser) checkExpr(x ast.Expr) ast.Expr {
 	case *ast.FuncLit:
 	case *ast.CompositeLit:
 	case *ast.ParenExpr:
+		// 注意上面有unparan(x)，会递归一直到不是ParanExpr
 		panic("unreachable")
 	case *ast.SelectorExpr:
 	case *ast.IndexExpr:
@@ -1525,6 +1609,7 @@ func (p *parser) checkExprOrType(x ast.Expr) ast.Expr {
 	return x
 }
 
+//  PrimaryExpr指可以通过UnaryOp和BinaryOp进行运算的项，本身没有Op，不能再拆分
 func (p *parser) parsePrimaryExpr() (x ast.Expr) {
 	if p.trace {
 		defer un(trace(p, "PrimaryExpr"))
@@ -1537,8 +1622,12 @@ func (p *parser) parsePrimaryExpr() (x ast.Expr) {
 			p.next()
 			switch p.tok {
 			case token.IDENT:
+				// X.Sel: Sel必须是Ident，而X必须是Expr或者Type
+				// checkExprOrType()特别检查[...]int为非法X
 				x = p.parseSelector(p.checkExprOrType(x))
 			case token.LPAREN:
+				// X.(Type)
+				// switch X.(type)
 				x = p.parseTypeAssertion(p.checkExpr(x))
 			default:
 				pos := p.pos
@@ -1555,8 +1644,12 @@ func (p *parser) parsePrimaryExpr() (x ast.Expr) {
 				x = &ast.SelectorExpr{X: x, Sel: sel}
 			}
 		case token.LBRACK:
+			// X[1]
+			// X[1:200]
 			x = p.parseIndexOrSliceOrInstance(p.checkExpr(x))
 		case token.LPAREN:
+			// func call: fmt.Printf(100)
+			// type conversion: Type(v)
 			x = p.parseCallOrConversion(p.checkExprOrType(x))
 		case token.LBRACE:
 			// operand may have returned a parenthesized complit
@@ -1569,7 +1662,7 @@ func (p *parser) parsePrimaryExpr() (x ast.Expr) {
 					return
 				}
 				// x is possibly a composite literal type
-			case *ast.IndexExpr:
+			case *ast.IndexExpr: // type instance, List[int]
 				if p.exprLev < 0 {
 					return
 				}
@@ -1583,6 +1676,7 @@ func (p *parser) parsePrimaryExpr() (x ast.Expr) {
 				p.error(t.Pos(), "cannot parenthesize type in composite literal")
 				// already progressed, no need to advance
 			}
+			// Type { ElementList }
 			x = p.parseLiteralValue(x)
 		default:
 			return
@@ -1590,6 +1684,8 @@ func (p *parser) parsePrimaryExpr() (x ast.Expr) {
 	}
 }
 
+// 两种形式: Op + PrimaryExpr 和 PrimaryExpr
+// 注意Op一定是在前面，++/--这类不算
 func (p *parser) parseUnaryExpr() ast.Expr {
 	if p.trace {
 		defer un(trace(p, "UnaryExpr"))
@@ -1602,7 +1698,7 @@ func (p *parser) parseUnaryExpr() ast.Expr {
 		x := p.parseUnaryExpr()
 		return &ast.UnaryExpr{OpPos: pos, Op: op, X: p.checkExpr(x)}
 
-	case token.ARROW:
+	case token.ARROW: // 做为UnaryOp处理，但是在token.Precedence()返回LowestPrec
 		// channel type or receive expression
 		arrow := p.pos
 		p.next()
@@ -1624,7 +1720,7 @@ func (p *parser) parseUnaryExpr() ast.Expr {
 		x := p.parseUnaryExpr()
 
 		// determine which case we have
-		if typ, ok := x.(*ast.ChanType); ok {
+		if typ, ok := x.(*ast.ChanType); ok { // x = chan Type
 			// (<-type)
 
 			// re-associate position info and <-
@@ -1675,9 +1771,15 @@ func (p *parser) parseBinaryExpr(prec1 int) ast.Expr {
 	x := p.parseUnaryExpr()
 	for {
 		op, oprec := p.tokPrec()
+		// 解析ExprY时，如果遇到一个优先级小于或者等于当前操作符时就应该结束ExprY
+		// 比如:
+		//  a+b*c => ExprY=b*c
+		//  a+b-c => ExprY=b, 因为"-"的优先级等于"+"
+		//  a+b==100 => ExprY=b, 因为"=="的优先级小于"+"
 		if oprec < prec1 {
 			return x
 		}
+		// 如果在rhs中遇到"="，上面的tokPrec()返回的op是"=="，这里一定会报错!
 		pos := p.expect(op)
 		y := p.parseBinaryExpr(oprec + 1)
 		x = &ast.BinaryExpr{X: p.checkExpr(x), OpPos: pos, Op: op, Y: p.checkExpr(y)}
@@ -1696,6 +1798,8 @@ func (p *parser) parseExpr() ast.Expr {
 }
 
 func (p *parser) parseRhs() ast.Expr {
+	// x = y = 100
+	// RHS: y = 100， 报错`expected '==', found '='`
 	old := p.inRhs
 	p.inRhs = true
 	x := p.checkExpr(p.parseExpr())
@@ -1721,15 +1825,17 @@ const (
 	rangeOk
 )
 
+// 注意go stmt()不是simpleStmt，后面的stmt()是，但是不包括前面的go关键字
 // parseSimpleStmt returns true as 2nd result if it parsed the assignment
 // of a range clause (with mode == rangeOk). The returned statement is an
 // assignment with a right-hand side that is a single unary expression of
 // the form "range x". No guarantees are given for the left-hand side.
-func (p *parser) parseSimpleStmt(mode int) (ast.Stmt, bool) {
+func (p *parser) parseSimpleStmt(mode int) (_ ast.Stmt, isRange bool) {
 	if p.trace {
 		defer un(trace(p, "SimpleStmt"))
 	}
 
+	// expr0, expr1, expr2 <not ,>
 	x := p.parseList(false)
 
 	switch p.tok {
@@ -1742,7 +1848,6 @@ func (p *parser) parseSimpleStmt(mode int) (ast.Stmt, bool) {
 		pos, tok := p.pos, p.tok
 		p.next()
 		var y []ast.Expr
-		isRange := false
 		if mode == rangeOk && p.tok == token.RANGE && (tok == token.DEFINE || tok == token.ASSIGN) {
 			pos := p.pos
 			p.next()
@@ -1758,6 +1863,7 @@ func (p *parser) parseSimpleStmt(mode int) (ast.Stmt, bool) {
 		return as, isRange
 	}
 
+	// x, y这样多个表达式后面必须有 =, :=
 	if len(x) > 1 {
 		p.errorExpected(x[0].Pos(), "1 expression")
 		// continue with first expression
@@ -1785,6 +1891,7 @@ func (p *parser) parseSimpleStmt(mode int) (ast.Stmt, bool) {
 		return &ast.BadStmt{From: x[0].Pos(), To: colon + 1}, false
 
 	case token.ARROW:
+		// X <- Y
 		// send statement
 		arrow := p.pos
 		p.next()
@@ -1802,6 +1909,8 @@ func (p *parser) parseSimpleStmt(mode int) (ast.Stmt, bool) {
 	return &ast.ExprStmt{X: x[0]}, false
 }
 
+// x, y := 1, 2
+// 这样的DEFINE语句x，y必须是IDENT，不能是其他Expr
 func (p *parser) checkAssignStmt(as *ast.AssignStmt) {
 	for _, x := range as.Lhs {
 		if _, isIdent := x.(*ast.Ident); !isIdent {
@@ -1811,6 +1920,8 @@ func (p *parser) checkAssignStmt(as *ast.AssignStmt) {
 }
 
 func (p *parser) parseCallExpr(callType string) *ast.CallExpr {
+	// 解析PrimaryExpr时遇到 IDENT "("会按照CallExpr解析
+	// 其他情况可能是任意Expr
 	x := p.parseRhsOrType() // could be a conversion: (some type)(x)
 	if call, isCall := x.(*ast.CallExpr); isCall {
 		return call
@@ -1868,6 +1979,7 @@ func (p *parser) parseReturnStmt() *ast.ReturnStmt {
 	return &ast.ReturnStmt{Return: pos, Results: x}
 }
 
+// goto, break, continue, fallthrough, 前三个可以带Label
 func (p *parser) parseBranchStmt(tok token.Token) *ast.BranchStmt {
 	if p.trace {
 		defer un(trace(p, "BranchStmt"))
@@ -1883,6 +1995,7 @@ func (p *parser) parseBranchStmt(tok token.Token) *ast.BranchStmt {
 	return &ast.BranchStmt{TokPos: pos, Tok: tok, Label: label}
 }
 
+// 有些地方要求必须是单个Expr，比如if condition
 func (p *parser) makeExpr(s ast.Stmt, want string) ast.Expr {
 	if s == nil {
 		return nil
@@ -1927,7 +2040,7 @@ func (p *parser) parseIfHeader() (init ast.Stmt, cond ast.Expr) {
 		lit string // ";" or "\n"; valid if pos.IsValid()
 	}
 	if p.tok != token.LBRACE {
-		if p.tok == token.SEMICOLON {
+		if p.tok == token.SEMICOLON { // 注意可以是源代码中有";"，也可以是换行自动插入的";"
 			semi.pos = p.pos
 			semi.lit = p.lit
 			p.next()
@@ -2034,6 +2147,8 @@ func isTypeSwitchAssert(x ast.Expr) bool {
 	return ok && a.Type == nil
 }
 
+// v.(type)
+// x := v.(type)
 func (p *parser) isTypeSwitchGuard(s ast.Stmt) bool {
 	switch t := s.(type) {
 	case *ast.ExprStmt:
@@ -2062,7 +2177,10 @@ func (p *parser) parseSwitchStmt() ast.Stmt {
 
 	pos := p.expect(token.SWITCH)
 
+	// switch s1; s2 { }, s1和s2可以都不出现
 	var s1, s2 ast.Stmt
+	// Go Spec: A missing switch expression is equivalent to the boolean value true.
+	// 也就是switch后可以直接{}，比如switch {}等价于switch true {}
 	if p.tok != token.LBRACE {
 		prevLev := p.exprLev
 		p.exprLev = -1
@@ -2109,6 +2227,7 @@ func (p *parser) parseSwitchStmt() ast.Stmt {
 	return &ast.SwitchStmt{Switch: pos, Init: s1, Tag: p.makeExpr(s2, "switch expression"), Body: body}
 }
 
+// select { case *ast.CommClause: }
 func (p *parser) parseCommClause() *ast.CommClause {
 	if p.trace {
 		defer un(trace(p, "CommClause"))
@@ -2118,8 +2237,12 @@ func (p *parser) parseCommClause() *ast.CommClause {
 	var comm ast.Stmt
 	if p.tok == token.CASE {
 		p.next()
+		// 三种情况:
+		//  * <-a: 会解析为UnaryExpr, Op=Arrow, 此时<-已经消耗掉了
+		//  * a<-b: 解析为UnaryExpr, Ident=a, 此时<-没被消耗掉
+		//  * a := <-b
 		lhs := p.parseList(false)
-		if p.tok == token.ARROW {
+		if p.tok == token.ARROW { // a <- b
 			// SendStmt
 			if len(lhs) > 1 {
 				p.errorExpected(lhs[0].Pos(), "1 expression")
@@ -2132,6 +2255,7 @@ func (p *parser) parseCommClause() *ast.CommClause {
 		} else {
 			// RecvStmt
 			if tok := p.tok; tok == token.ASSIGN || tok == token.DEFINE {
+				// a := <-b, 只有一个方向的Arrow，接收还是发送需要根据上下文来推断
 				// RecvStmt with assignment
 				if len(lhs) > 2 {
 					p.errorExpected(lhs[0].Pos(), "1 or 2 expressions")
@@ -2190,20 +2314,22 @@ func (p *parser) parseForStmt() ast.Stmt {
 
 	pos := p.expect(token.FOR)
 
+	// for ExprList; Expr; ExprList { }
+	// for ExprLsit := range Expr { }
 	var s1, s2, s3 ast.Stmt
 	var isRange bool
 	if p.tok != token.LBRACE {
 		prevLev := p.exprLev
 		p.exprLev = -1
 		if p.tok != token.SEMICOLON {
-			if p.tok == token.RANGE {
+			if p.tok == token.RANGE { // range X
 				// "for range x" (nil lhs in assignment)
 				pos := p.pos
 				p.next()
 				y := []ast.Expr{&ast.UnaryExpr{OpPos: pos, Op: token.RANGE, X: p.parseRhs()}}
 				s2 = &ast.AssignStmt{Rhs: y}
 				isRange = true
-			} else {
+			} else { // X, Y := range Z
 				s2, isRange = p.parseSimpleStmt(rangeOk)
 			}
 		}
@@ -2277,6 +2403,7 @@ func (p *parser) parseStmt() (s ast.Stmt) {
 		token.IDENT, token.INT, token.FLOAT, token.IMAG, token.CHAR, token.STRING, token.FUNC, token.LPAREN, // operands
 		token.LBRACK, token.STRUCT, token.MAP, token.CHAN, token.INTERFACE, // composite types
 		token.ADD, token.SUB, token.MUL, token.AND, token.XOR, token.ARROW, token.NOT: // unary operators
+		// TODO(mzh): 简单语句怎么以func开头?
 		s, _ = p.parseSimpleStmt(labelOk)
 		// because of the required look-ahead, labeled statements are
 		// parsed by parseSimpleStmt - don't expect a semicolon after
@@ -2347,6 +2474,8 @@ func (p *parser) parseImportSpec(doc *ast.CommentGroup, _ token.Pos, _ token.Tok
 	var ident *ast.Ident
 	switch p.tok {
 	case token.PERIOD:
+		// 注意这种语法: import . "fmt"
+		// 这样在当前文件中调用fmt.Println时可以直接用Println()，不需要fmt.Println()
 		ident = &ast.Ident{NamePos: p.pos, Name: "."}
 		p.next()
 	case token.IDENT:
@@ -2383,6 +2512,7 @@ func (p *parser) parseValueSpec(doc *ast.CommentGroup, _ token.Pos, keyword toke
 		defer un(trace(p, keyword.String()+"Spec"))
 	}
 
+	// var Ident, Ident Type = Value, Value
 	pos := p.pos
 	idents := p.parseIdentList()
 	typ := p.tryIdentOrType()
@@ -2400,6 +2530,12 @@ func (p *parser) parseValueSpec(doc *ast.CommentGroup, _ token.Pos, keyword toke
 			p.error(pos, "missing variable type or initialization")
 		}
 	case token.CONST:
+		/*
+		const (
+			x int = iota  // values不是nil，而是[iota]
+			y             // values是nil，但是iota=1
+		)
+		*/
 		if values == nil && (iota == 0 || typ != nil) {
 			p.error(pos, "missing constant value")
 		}
@@ -2432,11 +2568,12 @@ func (p *parser) parseTypeSpec(doc *ast.CommentGroup, _ token.Pos, _ token.Token
 		defer un(trace(p, "TypeSpec"))
 	}
 
+	// type Name [=] TypeExpr
 	ident := p.parseIdent()
 	spec := &ast.TypeSpec{Doc: doc, Name: ident}
 
 	switch p.tok {
-	case token.LBRACK:
+	case token.LBRACK: // type Name [100|IDENT]int
 		lbrack := p.pos
 		p.next()
 		if p.tok == token.IDENT {
@@ -2490,12 +2627,23 @@ func (p *parser) parseGenDecl(keyword token.Token, f parseSpecFunction) *ast.Gen
 	if p.tok == token.LPAREN {
 		lparen = p.pos
 		p.next()
+		// iota本质是一个内置变量，ValueSpec list中总是从0开始，每个ValueSpec+1
+		// 赋值时可以使用iota这个变量
+		/*
+		var (
+			x int
+			y int = iota // 这里y=1，不是0
+			z int
+			z2 int = iota + 100 // z2=3+100
+		)
+		*/
 		for iota := 0; p.tok != token.RPAREN && p.tok != token.EOF; iota++ {
 			list = append(list, f(p.leadComment, pos, keyword, iota))
 		}
 		rparen = p.expect(token.RPAREN)
 		p.expectSemi()
 	} else {
+		// var ...
 		list = append(list, f(nil, pos, keyword, 0))
 	}
 
@@ -2519,6 +2667,7 @@ func (p *parser) parseFuncDecl() *ast.FuncDecl {
 
 	var recv *ast.FieldList
 	if p.tok == token.LPAREN {
+		// func (x *Type)Name() {}
 		_, recv = p.parseParameters(false)
 	}
 
@@ -2539,6 +2688,7 @@ func (p *parser) parseFuncDecl() *ast.FuncDecl {
 			body = p.parseBody()
 			p.expectSemi()
 		}
+		// 可以没有body, 比如声明xxx.S中的函数原型, runtime/stubs.go 中很多
 	} else {
 		p.expectSemi()
 	}
@@ -2595,6 +2745,7 @@ func (p *parser) parseFile() *ast.File {
 	// Don't bother parsing the rest if we had errors scanning the first token.
 	// Likely not a Go source file at all.
 	if p.errors.Len() != 0 {
+		// 注意此时已经在init()中调用过next()
 		return nil
 	}
 

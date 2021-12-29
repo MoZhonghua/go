@@ -361,7 +361,10 @@ type (
 		Sel *Ident // field selector
 	}
 
-	// X[Index]
+	// 三种情况:
+	//  - s[100]
+	//  - List[int]: 单个Type的type instance
+	//  - Map[int, string]: 多个Type的type instance, 此时Expr为ListExpr，即把多个Type打包为一个Expr
 	// An IndexExpr node represents an expression followed by an index.
 	IndexExpr struct {
 		X      Expr      // expression
@@ -392,7 +395,10 @@ type (
 		Rparen token.Pos // position of ")"
 	}
 
-	// Func(Arg1, Arg2...)
+	// 如下语句:
+	//  - 函数调用: Func(Arg1, Arg2...)
+	//  - 类型转换: Type(Var1)
+	//  - make(Type, Arg1): 注意函数一个参数为Type
 	// A CallExpr node represents an expression followed by an argument list.
 	CallExpr struct {
 		Fun      Expr      // function expression
@@ -487,9 +493,9 @@ type (
 		Value Expr
 	}
 
-	// Chan Value
-	// <-Chan Value
-	// Chan<- Value
+	// Chan ValueType
+	// <-Chan ValueType
+	// Chan<- ValueType
 	// A ChanType node represents a channel type.
 	ChanType struct {
 		Begin token.Pos // position of "chan" keyword or "<-" (whichever comes first)
