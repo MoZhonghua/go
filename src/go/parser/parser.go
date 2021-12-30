@@ -1276,9 +1276,13 @@ func (p *parser) parseFuncTypeOrLit() ast.Expr {
 	return &ast.FuncLit{Type: typ, Body: body}
 }
 
+// 表达式中的基本单元为PrimaryExpr, Operand不是完整的PrimaryExpr
+// 比如:
+//   - X.A.B.c(100, 200) => Operand=X, PrimaryExpr=整个函数调用
+//   - (X.b).c => Operand=(X.b), PrimaryExpr=(X.b).c
+//      => 递归解析X.b为Expr => Operand=X, PrimaryExpr=X.b
 // parseOperand may return an expression or a raw type (incl. array
 // types of the form [...]T. Callers must verify the result.
-//
 func (p *parser) parseOperand() ast.Expr {
 	if p.trace {
 		defer un(trace(p, "Operand"))

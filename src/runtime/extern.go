@@ -227,6 +227,10 @@ func Callers(skip int, pc []uintptr) int {
 	return callers(skip, pc)
 }
 
+// 优先级为:
+//   - 编译toolchain时设置的GOROOT_FINAL
+//   - 编译toolchain时设置的GO_ROOT
+//   - 编译toolchain使用的cmd/link本身的默认GO_ROOT
 var defaultGOROOT string // set by cmd/link
 
 // GOROOT returns the root of the Go tree. It uses the

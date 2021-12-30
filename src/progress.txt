@@ -39,6 +39,7 @@ go/build/zcgo.go
 go/build/read.go
 
 2021-12-30
+go/build/constraint/expr.go
 go/build/build.go ?
 
 go/internal/gcimporter/gcimporter.go ?

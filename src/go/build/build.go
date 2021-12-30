@@ -42,7 +42,7 @@ type Context struct {
 	// to locate the main module.
 	//
 	// If Dir is non-empty, directories passed to Import and ImportDir must
-	// be absolute.
+	// be absolute. // 注意非空时不允许传入relative import path
 	Dir string
 
 	CgoEnabled  bool   // whether cgo files are included
@@ -69,7 +69,7 @@ type Context struct {
 	// using the race detector, the go command uses InstallSuffix = "race", so
 	// that on a Linux/386 system, packages are written to a directory named
 	// "linux_386_race" instead of the usual "linux_386".
-	InstallSuffix string
+	InstallSuffix string // 目录的suffix，不是文件后缀名
 
 	// By default, Import uses the operating system's file system calls
 	// to read directories and files. To read from other sources,
@@ -83,6 +83,7 @@ type Context struct {
 
 	// SplitPathList splits the path list into a slice of individual paths.
 	// If SplitPathList is nil, Import uses filepath.SplitList.
+	// NOTE: 不是把路径拆分为多个field!
 	SplitPathList func(list string) []string
 
 	// IsAbsPath reports whether path is an absolute path.
@@ -146,6 +147,10 @@ func (ctxt *Context) isDir(path string) bool {
 	return err == nil && fi.IsDir()
 }
 
+func (ctxt *Context) HasSubdir2(root, dir string) (rel string, ok bool) {
+	return ctxt.hasSubdir(root, dir)
+}
+
 // hasSubdir calls ctxt.HasSubdir (if not nil) or else uses
 // the local file system to answer the question.
 func (ctxt *Context) hasSubdir(root, dir string) (rel string, ok bool) {
@@ -180,6 +185,8 @@ func hasSubdir(root, dir string) (rel string, ok bool) {
 	if !strings.HasSuffix(root, sep) {
 		root += sep
 	}
+
+	// 注意Clean会去掉最后的"/"，因此如果dir==root，也会返回false
 	dir = filepath.Clean(dir)
 	if !strings.HasPrefix(dir, root) {
 		return "", false
@@ -221,6 +228,7 @@ func (ctxt *Context) isFile(path string) bool {
 	return true
 }
 
+// GOPATH可以是多个路径，类似PATH
 // gopath returns the list of Go path directories.
 func (ctxt *Context) gopath() []string {
 	var all []string
@@ -277,7 +285,7 @@ func (ctxt *Context) SrcDirs() []string {
 // if set, or else the compiled code's GOARCH, GOOS, and GOROOT.
 var Default Context = defaultContext()
 
-func defaultGOPATH() string {
+func defaultGOPATH() string { // $HOME/go
 	env := "HOME"
 	if runtime.GOOS == "windows" {
 		env = "USERPROFILE"
@@ -301,8 +309,10 @@ var defaultToolTags, defaultReleaseTags []string
 func defaultContext() Context {
 	var c Context
 
+	// 编译toolchain时的GOARCH和GOOS，也就是toolchain可以在GOARCH+GOOS下运行
 	c.GOARCH = buildcfg.GOARCH
 	c.GOOS = buildcfg.GOOS
+	// 优先用$GOROOT环境变量，否则是编译toolchain的GO_FINALROOT或者GO_ROOT
 	c.GOROOT = pathpkg.Clean(runtime.GOROOT())
 	c.GOPATH = envOr("GOPATH", defaultGOPATH())
 	c.Compiler = runtime.Compiler
@@ -347,7 +357,6 @@ func defaultContext() Context {
 		}
 		c.CgoEnabled = false
 	}
-
 	return c
 }
 
@@ -387,6 +396,14 @@ const (
 	// 其他人引用abc时，必须通过import "xyz/abc"来导入，否则报错
 	ImportComment
 
+	// 注意优先搜索vendor目录是默认行为, 如果在vendor中找到返回的ImportPath里有vendor
+	//  x1/vendor/y
+	//  x2/vendor/y
+	// 在x1和x2中都是import "y"， 但是实际解析后的ImportPath是x1/vendor/y和x2/vendor/y
+	// 也就是本质上是两个不同的package
+	// 在一个build中，ImportPath唯一标识一个package，也就是ImportPath和*Package是一一对应的
+	// 同ImportPath一定是从相同位置读取源代码(或者_pkg_.a)
+
 	// By default, Import searches vendor directories
 	// that apply in the given source directory before searching
 	// the GOROOT and GOPATH roots.
@@ -415,7 +432,7 @@ type Package struct {
 	ImportComment string   // path in import comment on package statement
 	Doc           string   // documentation synopsis
 	ImportPath    string   // import path of package ("" if unknown)
-	Root          string   // root of Go tree where this package lives
+	Root          string   // root of Go tree where this package lives; $GOROOT, $GOPATH, module-root
 	SrcRoot       string   // package source root directory ("" if unknown)
 	PkgRoot       string   // package install root directory ("" if unknown)
 	PkgTargetRoot string   // architecture dependent install root directory ("" if unknown)
@@ -423,8 +440,15 @@ type Package struct {
 	Goroot        bool     // package found in Go root
 	PkgObj        string   // installed .a file
 	AllTags       []string // tags that can influence file selection in this directory
-	ConflictDir   string   // this directory shadows Dir in $GOPATH
-	BinaryOnly    bool     // cannot be rebuilt from source (has //go:binary-only-package comment)
+
+	// GOROOT和GOPATH可能有同名(ImportPath)的Package, 比如GOPATH=dir1:dir2
+	//   - dir1/src/xyz/abc
+	//   - dir2/src/xyz/abc
+	// 此时有两个package的importpath都是xyz/abc，如果p.Dir=dir1/src/xyz/abc，则
+	// p.ConflictDir=dir2/xyz/abc，反之亦然
+	ConflictDir string // this directory shadows Dir in $GOPATH.
+
+	BinaryOnly bool // cannot be rebuilt from source (has //go:binary-only-package comment)
 
 	// Source files
 	GoFiles           []string // .go source files (excluding CgoFiles, TestGoFiles, XTestGoFiles)
@@ -520,6 +544,13 @@ func nameExt(name string) string {
 	return name[i:]
 }
 
+// path不会有"...":
+//  - relative path: join(path, srcDir)，然后依次检查是否是GOROOT, GOPATH的子目录
+//  - 非relative path:
+//    * 如果可以用module-aware mode: GO111MODULE=on 或者 GO111MODULE=auto且任意父目录中有go.mod
+//      执行go list来查找ImportPath, Root
+//    * 否则还是从vendor, GOROOT, GOPATH中查找，比如检查GOROOT/src/path是否存在
+//
 // Import returns details about the Go package named by the import path,
 // interpreting local import paths relative to the srcDir directory.
 // If the path is a local import path naming a package that can be imported
@@ -566,6 +597,8 @@ func (ctxt *Context) Import(path string, srcDir string, mode ImportMode) (*Packa
 			dir, elem := pathpkg.Split(p.ImportPath)
 			pkga = pkgtargetroot + "/" + dir + "lib" + elem + ".a"
 		case "gc":
+			// 注意这里没有说是$GOROOT还是$GOPATH下
+			// github.com/abc/xyz => pkg/linux_amd64/github.com/abc/xyz.a
 			pkga = pkgtargetroot + "/" + p.ImportPath + ".a"
 		}
 	}
@@ -578,7 +611,7 @@ func (ctxt *Context) Import(path string, srcDir string, mode ImportMode) (*Packa
 			return p, fmt.Errorf("import %q: import relative to unknown directory", path)
 		}
 		if !ctxt.isAbsPath(path) {
-			p.Dir = ctxt.joinPath(srcDir, path)
+			p.Dir = ctxt.joinPath(srcDir, path) // 特别的path="."，p.Dir=srcDir
 		}
 		// p.Dir directory may or may not exist. Gather partial information first, check if it exists later.
 		// Determine canonical import path, if any.
@@ -586,6 +619,8 @@ func (ctxt *Context) Import(path string, srcDir string, mode ImportMode) (*Packa
 		inTestdata := func(sub string) bool {
 			return strings.Contains(sub, "/testdata/") || strings.HasSuffix(sub, "/testdata") || strings.HasPrefix(sub, "testdata/") || sub == "testdata"
 		}
+		// 注意此时p.Dir已经是绝对路径(=join(srcDir, path))，检查GOROOT, GOPATH，看看p.Dir
+		// 是不是在这些目录下，如果是则截掉前缀做为ImportPath
 		if ctxt.GOROOT != "" {
 			root := ctxt.joinPath(ctxt.GOROOT, "src")
 			if sub, ok := ctxt.hasSubdir(root, p.Dir); ok && !inTestdata(sub) {
@@ -605,6 +640,7 @@ func (ctxt *Context) Import(path string, srcDir string, mode ImportMode) (*Packa
 				// else first.
 				if ctxt.GOROOT != "" && ctxt.Compiler != "gccgo" {
 					if dir := ctxt.joinPath(ctxt.GOROOT, "src", sub); ctxt.isDir(dir) {
+						// 注意这里直接跳转了，没更新ImporPath
 						p.ConflictDir = dir
 						goto Found
 					}
@@ -637,6 +673,7 @@ func (ctxt *Context) Import(path string, srcDir string, mode ImportMode) (*Packa
 			return p, err
 		}
 
+		// err == errNoModules
 		gopath := ctxt.gopath() // needed twice below; avoid computing many times
 
 		// tried records the location of unsuccessful package lookups
@@ -650,6 +687,8 @@ func (ctxt *Context) Import(path string, srcDir string, mode ImportMode) (*Packa
 		if mode&IgnoreVendor == 0 && srcDir != "" {
 			searchVendor := func(root string, isGoroot bool) bool {
 				sub, ok := ctxt.hasSubdir(root, srcDir)
+				// srcDir必须是root的必须是严格子目录，同时srcDir=root/src时也不符合，因为sub=src，没有"/"后缀
+				// 正常情况下GOROOT/src, GOPATH/src本身不能是pacakge
 				if !ok || !strings.HasPrefix(sub, "src/") || strings.Contains(sub, "/testdata/") {
 					return false
 				}
@@ -1162,12 +1201,18 @@ func (ctxt *Context) importGo(p *Package, path, srcDir string, mode ImportMode) 
 			}
 			d := filepath.Dir(parent)
 			if len(d) >= len(parent) {
+				// Dir("/") = "/"
 				return errNoModules // reached top of file system, no go.mod
 			}
 			parent = d
 		}
 	}
 
+	// With the -e flag, the list command never prints errors to standard
+	// error and instead processes the erroneous packages with the usual
+	// printing. Erroneous packages will have a non-empty ImportPath and
+	// a non-nil Error field; other information may or may not be missing
+	// (zeroed).
 	cmd := exec.Command("go", "list", "-e", "-compiler="+ctxt.Compiler, "-tags="+strings.Join(ctxt.BuildTags, ","), "-installsuffix="+ctxt.InstallSuffix, "-f={{.Dir}}\n{{.ImportPath}}\n{{.Root}}\n{{.Goroot}}\n{{if .Error}}{{.Error}}{{end}}\n", "--", path)
 
 	if ctxt.Dir != "" {

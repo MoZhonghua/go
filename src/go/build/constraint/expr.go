@@ -393,12 +393,14 @@ func splitPlusBuild(line string) (expr string, ok bool) {
 // parsePlusBuildExpr parses a legacy build tag expression (as used with “// +build”).
 func parsePlusBuildExpr(text string) Expr {
 	var x Expr
-	for _, clause := range strings.Fields(text) {
+	// 空格相当于"||"， 逗号相当于"&&"
+	// tag1,!tag2 tag3 =>  tag1 && !tag2 || tag3
+	for _, clause := range strings.Fields(text) { // ["tag1,!tag2", "tag3"]
 		var y Expr
-		for _, lit := range strings.Split(clause, ",") {
+		for _, lit := range strings.Split(clause, ",") { // ["tag1", "!tag2"]
 			var z Expr
 			var neg bool
-			if strings.HasPrefix(lit, "!!") || lit == "!" {
+			if strings.HasPrefix(lit, "!!") || lit == "!" { // "!!tag" or "!<notag>"
 				z = tag("ignore")
 			} else {
 				if strings.HasPrefix(lit, "!") {
@@ -449,6 +451,7 @@ func isValidTag(word string) bool {
 
 var errComplex = errors.New("expression too complex for // +build lines")
 
+// 主要问题在于//+build格式不支持"()" :(
 // PlusBuildLines returns a sequence of “// +build” lines that evaluate to the build expression x.
 // If the expression is too complex to convert directly to “// +build” lines, PlusBuildLines returns an error.
 func PlusBuildLines(x Expr) ([]string, error) {
