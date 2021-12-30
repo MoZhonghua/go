@@ -38,7 +38,7 @@ type Importer struct {
 // files; and imported packages are added to the packages map.
 func New(ctxt *build.Context, fset *token.FileSet, packages map[string]*types.Package) *Importer {
 	return &Importer{
-		ctxt:     ctxt,
+		ctxt:     ctxt,  // &build.Default
 		fset:     fset,
 		sizes:    types.SizesFor(ctxt.Compiler, ctxt.GOARCH), // uses go/types default if GOARCH not found
 		packages: packages,
@@ -228,6 +228,7 @@ func (p *Importer) cgo(bp *build.Package) (*ast.File, error) {
 	args = append(args, "-I", tmpdir)
 	args = append(args, strings.Fields(os.Getenv("CGO_CFLAGS"))...)
 	args = append(args, bp.CgoCFLAGS...)
+	// cmd/cgo会把第一个.go参数前的当做CG_FLAGS
 	args = append(args, bp.CgoFiles...)
 
 	cmd := exec.Command(args[0], args[1:]...)

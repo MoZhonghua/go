@@ -15,7 +15,9 @@ import (
 )
 
 func readGopackHeader(r *bufio.Reader) (name string, size int, err error) {
-	// See $GOROOT/include/ar.h.
+	// ../../../cmd/internal/archive/archive.go:36
+	// %-16s%-12d%-6d%-6d%-8o%-10d`\n // 注意最后面有个`加换行
+	// name mtime uid gid mode size
 	hdr := make([]byte, 16+12+6+6+8+10+2)
 	_, err = io.ReadFull(r, hdr)
 	if err != nil {
@@ -41,6 +43,16 @@ func readGopackHeader(r *bufio.Reader) (name string, size int, err error) {
 // start of the file before calling this function. The hdr result
 // is the string before the export data, either "$$" or "$$B".
 //
+/*
+!<arch>
+__.PKGDEF       0           0     0     644     12973     `
+go object linux amd64 go1.17.2 X:regabiwrappers,regabig,regabireflect,regabidefer,regabiargs
+build id "JjffeX1LVeBlM4SUl9WF/GWzcADjG4FIf4_g-HuDz"
+
+
+$$B
+....
+*/
 func FindExportData(r *bufio.Reader) (hdr string, err error) {
 	// Read first line to make sure this is an object file.
 	line, err := r.ReadSlice('\n')
@@ -70,6 +82,8 @@ func FindExportData(r *bufio.Reader) (hdr string, err error) {
 		}
 	}
 
+	// 第一行是: go object linux amd64 go1.17.2 X:regabiwrappers,regabig,regabireflect,regabidefer,regabiargs
+	// 注意这里列出的是所有enabled experiment，不是和默认值不一样的experiment
 	// Now at __.PKGDEF in archive or still at beginning of file.
 	// Either way, line should begin with "go object ".
 	if !strings.HasPrefix(string(line), "go object ") {
@@ -85,6 +99,7 @@ func FindExportData(r *bufio.Reader) (hdr string, err error) {
 			return
 		}
 	}
+	// $$B\n
 	hdr = string(line)
 
 	return

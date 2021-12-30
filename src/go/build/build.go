@@ -660,6 +660,7 @@ func (ctxt *Context) Import(path string, srcDir string, mode ImportMode) (*Packa
 				goto Found
 			}
 		}
+		// 注意这里没有返回错误，而是等价于goto Found
 		// It's okay that we didn't find a root containing dir.
 		// Keep going with the information we have.
 	} else {
@@ -685,10 +686,12 @@ func (ctxt *Context) Import(path string, srcDir string, mode ImportMode) (*Packa
 
 		// Vendor directories get first chance to satisfy import.
 		if mode&IgnoreVendor == 0 && srcDir != "" {
+			// 注意只有srcDir在GOROOT/GOPATH下，才会搜索src -> root之间的vendor目录
 			searchVendor := func(root string, isGoroot bool) bool {
 				sub, ok := ctxt.hasSubdir(root, srcDir)
 				// srcDir必须是root的必须是严格子目录，同时srcDir=root/src时也不符合，因为sub=src，没有"/"后缀
 				// 正常情况下GOROOT/src, GOPATH/src本身不能是pacakge
+				// 其实有点奇怪: 因为GOROOT下确实有vendor，而且能正常使用
 				if !ok || !strings.HasPrefix(sub, "src/") || strings.Contains(sub, "/testdata/") {
 					return false
 				}
@@ -758,6 +761,7 @@ func (ctxt *Context) Import(path string, srcDir string, mode ImportMode) (*Packa
 		for _, root := range gopath {
 			dir := ctxt.joinPath(root, "src", path)
 			isDir := ctxt.isDir(dir)
+			// 比如GOPATH/src/xyz/abc， abc这个本身是一个文件，包含一行//go:binary-only-package
 			binaryOnly = !isDir && mode&AllowBinary != 0 && pkga != "" && ctxt.isFile(ctxt.joinPath(root, pkga))
 			if isDir || binaryOnly {
 				p.Dir = dir
@@ -810,6 +814,8 @@ func (ctxt *Context) Import(path string, srcDir string, mode ImportMode) (*Packa
 
 Found:
 	if p.Root != "" {
+		// 注意这个Root和go list -f "{{.Root}}"不相同，这里总是GOROOT或者GOPATH
+		// 而go list可以是module-root
 		p.SrcRoot = ctxt.joinPath(p.Root, "src")
 		p.PkgRoot = ctxt.joinPath(p.Root, "pkg")
 		p.BinDir = ctxt.joinPath(p.Root, "bin")
@@ -818,6 +824,13 @@ Found:
 			p.PkgObj = ctxt.joinPath(p.Root, pkga)
 		}
 	}
+
+	// IsLocalImport(path)有如下情况:
+	//   - p.Dir=join(srcDir, path), 和ROOTS无关，可能存在，也可能不存在
+	//   - srcDir在ROOTS中
+	//     * p.Dir存在，p.ImportPath=Rel(p.Dir, ROOT), p.Root = ROOT
+	//     * p.Dir不存在，p.ImportPath="", p.ROOT=""
+	//   - srcDir不在ROOTS中，此时p.ImportPath="", p.Root = ""
 
 	// If it's a local import path, by the time we get here, we still haven't checked
 	// that p.Dir directory exists. This is the right time to do that check.
@@ -928,7 +941,7 @@ Found:
 		var pkg string
 		if info.parsed != nil {
 			pkg = info.parsed.Name.Name
-			if pkg == "documentation" {
+			if pkg == "documentation" { // 注意package "documentation"的特殊含义
 				p.IgnoredGoFiles = append(p.IgnoredGoFiles, name)
 				continue
 			}
@@ -937,6 +950,7 @@ Found:
 		isTest := strings.HasSuffix(name, "_test.go")
 		isXTest := false
 		if isTest && strings.HasSuffix(pkg, "_test") {
+			// xtest指的是xxx_test.go，且package abc_test
 			isXTest = true
 			pkg = pkg[:len(pkg)-len("_test")]
 		}
@@ -960,6 +974,7 @@ Found:
 		}
 
 		if mode&ImportComment != 0 {
+			// package abc // import "xyz"
 			qcom, line := findImportComment(data)
 			if line != 0 {
 				com, err := strconv.Unquote(qcom)
@@ -984,6 +999,10 @@ Found:
 				}
 				isCgo = true
 				if imp.doc != nil {
+					/*
+						//cgo: xxx
+						import "C"
+					*/
 					if err := ctxt.saveCgo(filename, p, imp.doc); err != nil {
 						badFile(name, err)
 					}
@@ -994,7 +1013,7 @@ Found:
 		var fileList *[]string
 		var importMap, embedMap map[string][]token.Position
 		switch {
-		case isCgo:
+		case isCgo: // 文件里import "C"
 			allTags["cgo"] = true
 			if ctxt.CgoEnabled {
 				fileList = &p.CgoFiles
@@ -1413,9 +1432,12 @@ var dummyPkg Package
 
 // fileInfo records information learned about a file included in a build.
 type fileInfo struct {
-	name     string // full name including dir
-	header   []byte
-	fset     *token.FileSet
+	name   string // full name including dir
+	header []byte
+	fset   *token.FileSet
+
+	// 只有这个是通过go/parser生成，其他都是通过自己扫描文件内容生成注意也是只解析到所有import结束。
+	// 这也是为什么很多指令只能出现在.go文件最开始的原因，必要信息都在最开始，优化性能
 	parsed   *ast.File
 	parseErr error
 	imports  []fileImport
@@ -1685,6 +1707,11 @@ Lines:
 	return content[:end], goBuild, sawBinaryOnly, nil
 }
 
+/*
+#cgo darwin,!arm64 LDFLAGS: -lpthread
+// darwin,!arm64条件和// +build或者//go:build一样，两种都支持
+*/
+
 // saveCgo saves the information from the #cgo lines in the import "C" comment.
 // These lines set CFLAGS, CPPFLAGS, CXXFLAGS and LDFLAGS and pkg-config directives
 // that affect the way cgo's C code is built.
@@ -1720,6 +1747,7 @@ func (ctxt *Context) saveCgo(filename string, di *Package, cg *ast.CommentGroup)
 			ok := false
 			for _, c := range cond {
 				if ctxt.matchAuto(c, nil) {
+					// 空格表示 or, 一个返回true就匹配
 					ok = true
 					break
 				}
@@ -1735,6 +1763,7 @@ func (ctxt *Context) saveCgo(filename string, di *Package, cg *ast.CommentGroup)
 		}
 		var ok bool
 		for i, arg := range args {
+			// cgo指令中可以使用这个变量 ${SRCDIR}
 			if arg, ok = expandSrcDir(arg, di.Dir); !ok {
 				return fmt.Errorf("%s: malformed #cgo argument: %s", filename, arg)
 			}
@@ -1871,6 +1900,7 @@ func splitQuoted(s string) (r []string, err error) {
 			escaped = true
 			continue
 		case quote != '\x00':
+			// 此时在"中且不是\，任何非"的字符都是直接添加
 			if rune == quote {
 				quote = '\x00'
 				continue

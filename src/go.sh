@@ -3,8 +3,8 @@
 set -e
 
 function buildgo() {
-	export PATH=/home/mozhonghua/go/src/github.com/golang/go/bin:$PATH
-	export GOROOT=/home/mozhonghua/go/src/github.com/golang/go
+	export PATH=/data/go/bin:$PATH
+	export GOROOT=/data/go
 
 	cp ../bin/{go.old,go}
 	go build -o ../bin/go2 ./cmd/go/

@@ -33,7 +33,7 @@ First, on a line by itself
 Then zero or more file records. Each file record has a fixed-size one-line header
 followed by data bytes followed by an optional padding byte. The header is:
 
-	%-16s%-12d%-6d%-6d%-8o%-10d`
+	%-16s%-12d%-6d%-6d%-8o%-10d`  // 注意最后面有个`加换行
 	name mtime uid gid mode size
 
 (note the trailing backquote). The %-16s here means at most 16 *bytes* of

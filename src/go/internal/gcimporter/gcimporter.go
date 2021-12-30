@@ -41,6 +41,7 @@ func FindPkg(path, srcDir string) (filename, id string) {
 		if abs, err := filepath.Abs(srcDir); err == nil { // see issue 14282
 			srcDir = abs
 		}
+		// 注意此时path不是相对路径，且srcDir不为空
 		bp, _ := build.Import(path, srcDir, build.FindOnly|build.AllowBinary)
 		if bp.PkgObj == "" {
 			id = path // make sure we have an id to print in error message
@@ -136,6 +137,7 @@ func Import(fset *token.FileSet, packages map[string]*types.Package, path, srcDi
 
 	var hdr string
 	buf := bufio.NewReader(rc)
+	// 在.a中的__.PKGDEF文件中
 	if hdr, err = FindExportData(buf); err != nil {
 		return
 	}

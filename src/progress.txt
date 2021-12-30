@@ -40,10 +40,8 @@ go/build/read.go
 
 2021-12-30
 go/build/constraint/expr.go
-go/build/build.go ?
-
-go/internal/gcimporter/gcimporter.go ?
-go/internal/srcimporter/srcimporter.go ?
-go/importer/importer.go ?
-go/importer/importer_test.go ?
+go/build/build.go
+go/importer/importer.go
+go/internal/gcimporter/gcimporter.go
+go/internal/srcimporter/srcimporter.go
 

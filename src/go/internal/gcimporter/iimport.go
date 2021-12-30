@@ -124,6 +124,7 @@ func iImportData(fset *token.FileSet, imports map[string]*types.Package, dataRea
 		_ = r.uint64() // package height; unused by go/types
 
 		if pkgPath == "" {
+			// 应该是第0个?
 			pkgPath = path
 		}
 		pkg := imports[pkgPath]
@@ -180,7 +181,7 @@ type iimporter struct {
 	pkgCache    map[uint64]*types.Package
 
 	declData []byte
-	pkgIndex map[*types.Package]map[string]uint64
+	pkgIndex map[*types.Package]map[string]uint64 // 每个package中所有sym的Name -> Index
 	typCache map[uint64]types.Type
 
 	fake          fakeFileSet
@@ -262,21 +263,27 @@ func (r *importReader) obj(name string) {
 
 	switch tag {
 	case 'A':
+		// type alias: type X time.Duration
 		typ := r.typ()
-
 		r.declare(types.NewTypeName(pos, r.currPkg, name, typ))
 
 	case 'C':
+		// const C int
 		typ, val := r.value()
 
 		r.declare(types.NewConst(pos, r.currPkg, name, typ, val))
 
 	case 'F':
+		// func F() { }
 		sig := r.signature(nil)
 
 		r.declare(types.NewFunc(pos, r.currPkg, name, sig))
 
 	case 'T':
+		// type T1 int
+		// type T2 *int
+		// type T3 struct { }
+		// type T4 interface { }
 		// Types can be recursive. We need to setup a stub
 		// declaration before recursing.
 		obj := types.NewTypeName(pos, r.currPkg, name, nil)
@@ -287,6 +294,8 @@ func (r *importReader) obj(name string) {
 		named.SetUnderlying(underlying)
 
 		if !isInterface(underlying) {
+			// 所有类型都可以有method，不仅仅是struct; interface{}不能有method，method列表已经
+			// 在定义interface类型时全部列出了
 			for n := r.uint64(); n > 0; n-- {
 				mpos := r.pos()
 				mname := r.ident()
@@ -298,6 +307,7 @@ func (r *importReader) obj(name string) {
 		}
 
 	case 'V':
+		// var V int
 		typ := r.typ()
 
 		r.declare(types.NewVar(pos, r.currPkg, name, typ))
@@ -485,6 +495,7 @@ func (r *importReader) doType(base *types.Named) types.Type {
 		return nil
 
 	case definedType:
+		// type X pkg.Name
 		pkg, name := r.qualifiedIdent()
 		r.p.doDecl(pkg, name)
 		return pkg.Scope().Lookup(name).(*types.TypeName).Type()

@@ -9,11 +9,11 @@ function dist() {
 	unset GOBIN
 	unset GOPATH
 	export GOENV=off
-	export GOROOT=/home/mozhonghua/go/src/github.com/golang/go
+	export GOROOT=/data/go
 	export GOROOT_BOOTSTRAP=/usr/lib/go
 	export GO_LDSO=/lib64/ld-linux-x86-64.so.2
 	#export GOMAXPROCS=1
-	export PATH=/home/mozhonghua/go/src/github.com/golang/go/bin:$PATH
+	export PATH=/data/go/bin:$PATH
 
 	./cmd/dist/dist "$@"
 }
