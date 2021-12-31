@@ -18,6 +18,24 @@ import (
 	"unicode/utf8"
 )
 
+/*
+抽取xxx_test.go中的, 特别是playable example要构造一个main.go
+package xyz_test
+func ExampleABC() {
+	// example to do something
+	...
+	// [unordered] output: xxxxx
+}
+=>
+package main  // package => main
+func main() { // ExampleABC => main
+	// example to do something
+	...
+	// output deleted
+}
+
+*/
+
 // An Example represents an example function found in a test source file.
 type Example struct {
 	Name        string // name of the item being exemplified (including optional suffix)
@@ -47,6 +65,8 @@ type Example struct {
 //     example function, zero test or benchmark functions, and at least one
 //     top-level function, type, variable, or constant declaration other
 //     than the example function.
+// go doc 没有调用这个，不会显示example
+// go test 会调用这个, 运行Example并检查输出是否正确
 func Examples(testFiles ...*ast.File) []*Example {
 	var list []*Example
 	for _, file := range testFiles {
@@ -83,14 +103,14 @@ func Examples(testFiles ...*ast.File) []*Example {
 			}
 			output, unordered, hasOutput := exampleOutput(f.Body, file.Comments)
 			flist = append(flist, &Example{
-				Name:        name[len("Example"):],
+				Name:        name[len("Example"):], // 可以为"", 也就是函数名为"Example"
 				Doc:         doc,
 				Code:        f.Body,
 				Play:        playExample(file, f),
 				Comments:    file.Comments,
 				Output:      output,
 				Unordered:   unordered,
-				EmptyOutput: output == "" && hasOutput,
+				EmptyOutput: output == "" && hasOutput, // 没指定//Output和output为空是两个概念
 				Order:       len(flist),
 			})
 		}
@@ -110,6 +130,7 @@ func Examples(testFiles ...*ast.File) []*Example {
 	return list
 }
 
+// i              case-insensitive (default false)
 var outputPrefix = lazyregexp.New(`(?i)^[[:space:]]*(unordered )?output:`)
 
 // Extracts the expected output and whether there was a valid output comment
@@ -144,6 +165,7 @@ func isTest(name, prefix string) bool {
 		return true
 	}
 	rune, _ := utf8.DecodeRuneInString(name[len(prefix):])
+	// TestAbc is ok, but Testabc is not ok
 	return !unicode.IsLower(rune)
 }
 
@@ -222,7 +244,7 @@ func playExample(file *ast.File, f *ast.FuncDecl) *ast.File {
 		return true
 	}
 	ast.Inspect(body, inspectFunc)
-	for i := 0; i < len(depDecls); i++ {
+	for i := 0; i < len(depDecls); i++ { // 不能用range，遍历过程中会不断增长
 		switch d := depDecls[i].(type) {
 		case *ast.FuncDecl:
 			// Inspect types of parameters and results. See #28492.
@@ -434,6 +456,7 @@ func stripOutputComment(body *ast.BlockStmt, comments []*ast.CommentGroup) (*ast
 }
 
 // lastComment returns the last comment inside the provided block.
+// 遍历查找在<b.Pos, b.End>范围内的最后一个comment
 func lastComment(b *ast.BlockStmt, c []*ast.CommentGroup) (i int, last *ast.CommentGroup) {
 	if b == nil {
 		return
@@ -462,7 +485,6 @@ func lastComment(b *ast.BlockStmt, c []*ast.CommentGroup) (i int, last *ast.Comm
 // 	  or Foo (with a "bar" suffix).
 //
 // Examples with malformed names are not associated with anything.
-//
 func classifyExamples(p *Package, examples []*Example) {
 	if len(examples) == 0 {
 		return

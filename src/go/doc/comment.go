@@ -52,6 +52,8 @@ func convertQuotes(text string) string {
 
 const (
 	// Regexp for Go identifiers
+	// \p{Greek} => Unicode character class
+	// L, Letter, see https://en.wikipedia.org/wiki/Unicode_character_property
 	identRx = `[\pL_][\pL_0-9]*`
 
 	// Regexp for URLs
@@ -104,7 +106,7 @@ func emphasize(w io.Writer, line string, words map[string]string, nice bool) {
 		// m >= 6 (two parenthesized sub-regexps in matchRx, 1st one is urlRx)
 
 		// write text before match
-		commentEscape(w, line[0:m[0]], nice)
+		commentEscape(w, line[0:m[0]], nice) // m[0]是matchRx匹配的起始位置
 
 		// adjust match for URLs
 		match := line[m[0]:m[1]]
@@ -264,9 +266,14 @@ func heading(line string) string {
 type op int
 
 const (
-	opPara op = iota
-	opHead
-	opPre
+	opPara op = iota // <p/>: paragraph
+	opHead           // <h3/>: head
+
+	// The <pre> tag defines preformatted text. Text in a <pre> element is
+	// displayed in a fixed-width font, and the text preserves both spaces and
+	// line breaks. The text will be displayed exactly as written in the HTML
+	// source code.
+	opPre // <pre/>: preformatted
 )
 
 type block struct {
@@ -306,6 +313,7 @@ func anchorID(line string) string {
 // Go identifiers that appear in the words map are italicized; if the corresponding
 // map value is not the empty string, it is considered a URL and the word is converted
 // into a link.
+// 注意words的含义
 func ToHTML(w io.Writer, text string, words map[string]string) {
 	for _, b := range blocks(text) {
 		switch b.op {
@@ -319,6 +327,7 @@ func ToHTML(w io.Writer, text string, words map[string]string) {
 			w.Write(html_h)
 			id := ""
 			for _, line := range b.lines {
+				// <h3 id="...">
 				if id == "" {
 					id = anchorID(line)
 					w.Write([]byte(id))
@@ -327,8 +336,10 @@ func ToHTML(w io.Writer, text string, words map[string]string) {
 				commentEscape(w, line, true)
 			}
 			if id == "" {
+				// <h3>
 				w.Write(html_hq)
 			}
+			// </h3>
 			w.Write(html_endh)
 		case opPre:
 			w.Write(html_pre)

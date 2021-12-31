@@ -12,13 +12,13 @@ import (
 // firstSentenceLen returns the length of the first sentence in s.
 // The sentence ends after the first period followed by space and
 // not preceded by exactly one uppercase letter.
-//
 func firstSentenceLen(s string) int {
 	var ppp, pp, p rune
 	for i, q := range s {
 		if q == '\n' || q == '\r' || q == '\t' {
 			q = ' '
 		}
+		// 两个连续的大写认为是缩写，比如HTML. 单个大写字符认为有问题?
 		if q == ' ' && p == '.' && (!unicode.IsUpper(pp) || unicode.IsUpper(ppp)) {
 			return i
 		}

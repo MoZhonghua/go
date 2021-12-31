@@ -25,6 +25,11 @@ type Package struct {
 	// but all new code should use Notes instead.
 	Bugs []string
 
+	// global vars会根据情况放到:
+	// - Package.Vars: 没有和Type关联的情况
+	// - Type.Vars: 和Type关联的情况
+	// 只会出现一次
+
 	// declarations
 	Consts []*Value
 	Types  []*Type
@@ -115,12 +120,13 @@ const (
 // To have the Examples fields populated, use NewFromFiles and include
 // the package's _test.go files.
 //
+// cmd/doc/pkg.go:174 调用, mode=doc.AllDecls | doc.PreserveAST
 func New(pkg *ast.Package, importPath string, mode Mode) *Package {
 	var r reader
 	r.readPackage(pkg, mode)
 	r.computeMethodSets()
 	r.cleanupTypes()
-	return &Package{
+	p := &Package{
 		Doc:        r.doc,
 		Name:       pkg.Name,
 		ImportPath: importPath,
@@ -133,6 +139,8 @@ func New(pkg *ast.Package, importPath string, mode Mode) *Package {
 		Vars:       sortedValues(r.values, token.VAR),
 		Funcs:      sortedFuncs(r.funcs, true),
 	}
+
+	return p
 }
 
 // NewFromFiles computes documentation for a package.
@@ -213,6 +221,7 @@ func NewFromFiles(fset *token.FileSet, files []*ast.File, importPath string, opt
 func simpleImporter(imports map[string]*ast.Object, path string) (*ast.Object, error) {
 	pkg := imports[path]
 	if pkg == nil {
+		// 注意Pkg Object的Name字段只有package，不是完整的ImportPath
 		// note that strings.LastIndex returns -1 if there is no "/"
 		pkg = ast.NewObj(ast.Pkg, path[strings.LastIndex(path, "/")+1:])
 		pkg.Data = ast.NewScope(nil) // required by ast.NewPackage for dot-import

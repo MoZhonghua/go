@@ -64,6 +64,7 @@ var (
 	showSrc    bool // -src flag
 	short      bool // -short flag
 	debug      bool // -d flag
+	showEmbed  bool // -e flag
 )
 
 // usage is a replacement usage function for the flags package.
@@ -106,6 +107,7 @@ func do(writer io.Writer, flagSet *flag.FlagSet, args []string) (err error) {
 	flagSet.BoolVar(&showSrc, "src", false, "show source code for symbol")
 	flagSet.BoolVar(&short, "short", false, "one-line representation for each symbol")
 	flagSet.BoolVar(&debug, "d", false, "debug output")
+	flagSet.BoolVar(&showEmbed, "e", false, "show methods of embedded field")
 	flagSet.Parse(args)
 
 	if debug {

@@ -131,6 +131,7 @@ func NewPackage(fset *token.FileSet, files map[string]*File, importer Importer, 
 
 			// add import to file scope
 			if name == "." {
+				// 比如import . "fmt", 把fmt中的所有Exported Symbol加入到当前文件的Scope中
 				// merge imported scope with file scope
 				for _, obj := range pkg.Data.(*Scope).Objects {
 					p.declare(fileScope, pkgScope, obj)
@@ -142,7 +143,7 @@ func NewPackage(fset *token.FileSet, files map[string]*File, importer Importer, 
 				// for different files)
 				obj := NewObj(Pkg, name)
 				obj.Decl = spec
-				obj.Data = pkg.Data
+				obj.Data = pkg.Data  // Kind=ast.Pkg, Data=*ast.Scope
 				p.declare(fileScope, pkgScope, obj)
 			}
 		}

@@ -175,10 +175,15 @@ func parsePackage(writer io.Writer, pkg *build.Package, userPath string) *Packag
 	if showSrc {
 		mode |= doc.PreserveAST // See comment for Package.emit.
 	}
+	if showEmbed {
+		mode |= doc.AllMethods
+	}
+	// 注意mode没有加入doc.AllMethods, 因此embedded field提供的方法不可见
 	docPkg := doc.New(astPkg, pkg.ImportPath, mode)
 	typedValue := make(map[*doc.Value]bool)
 	constructor := make(map[*doc.Func]bool)
 	for _, typ := range docPkg.Types {
+		// 注意这里把每个Type的Consts, Vars, Funcs追加到全局列表中了
 		docPkg.Consts = append(docPkg.Consts, typ.Consts...)
 		docPkg.Vars = append(docPkg.Vars, typ.Vars...)
 		docPkg.Funcs = append(docPkg.Funcs, typ.Funcs...)

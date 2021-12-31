@@ -45,3 +45,12 @@ go/importer/importer.go
 go/internal/gcimporter/gcimporter.go
 go/internal/srcimporter/srcimporter.go
 
+
+2021-12-31
+go/doc/doc.go
+go/doc/reader.go
+go/doc/example.go
+go/doc/comment.go
+go/doc/exports.go
+go/doc/filter.go
+go/doc/synopsis.go

@@ -460,7 +460,7 @@ const (
 //
 type (
 	// 注意XxxType都是实现了Expr接口
-	// [Len]Elt
+	// [Len]Elt，可以表示[4]int和[]int这两大类类型(Array, Slice)
 	// An ArrayType node represents an array or slice type.
 	ArrayType struct {
 		Lbrack token.Pos // position of "["

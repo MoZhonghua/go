@@ -75,7 +75,6 @@ func (mset methodSet) set(f *ast.FuncDecl, preserveAST bool) {
 // add adds method m to the method set; m is ignored if the method set
 // already contains a method with the same name at the same or a higher
 // level than m.
-//
 func (mset methodSet) add(m *Func) {
 	old := mset[m.Name]
 	if old == nil || m.Level < old.Level {
@@ -94,9 +93,9 @@ func (mset methodSet) add(m *Func) {
 // ----------------------------------------------------------------------------
 // Named types
 
+// 同一个baseType不能同时嵌入，比如T和*T
 // baseTypeName returns the name of the base type of x (or "")
 // and whether the type is imported or not.
-//
 func baseTypeName(x ast.Expr) (name string, imported bool) {
 	switch t := x.(type) {
 	case *ast.Ident:
@@ -121,19 +120,21 @@ type embeddedSet map[*namedType]bool
 // A namedType represents a named unqualified (package local, or possibly
 // predeclared) type. The namedType for a type name is always found via
 // reader.lookupType.
-//
 type namedType struct {
 	doc  string       // doc comment for type
 	name string       // type name
 	decl *ast.GenDecl // nil if declaration hasn't been seen yet
 
-	isEmbedded bool        // true if this type is embedded
-	isStruct   bool        // true if this type is a struct
-	embedded   embeddedSet // true if the embedded type is a pointer
+	// type T1 struct { *T2 } => T2.isEmbedded=true
+	isEmbedded bool // true if this type is embedded
+	isStruct   bool // true if this type is a struct
+
+	// type T1 struct { *T2, T3 } => T1.embedded=map{T2: true, T3: false}
+	embedded embeddedSet // true if the embedded type is a pointer
 
 	// associated declarations
-	values  []*Value // consts and vars
-	funcs   methodSet
+	values  []*Value  // consts and vars
+	funcs   methodSet // 比如func NewXxxx() *Xxx
 	methods methodSet
 }
 
@@ -163,12 +164,14 @@ type reader struct {
 	types     map[string]*namedType
 	funcs     methodSet
 
+	// 比如type error XYZ，此时error覆盖掉了go内置的error接口
 	// support for package-local error type declarations
 	errorDecl bool                 // if set, type "error" was declared locally
 	fixlist   []*ast.InterfaceType // list of interfaces containing anonymous field "error"
 }
 
 func (r *reader) isVisible(name string) bool {
+	// 注意go doc总是mode&AllDecls!=0
 	return r.mode&AllDecls != 0 || token.IsExported(name)
 }
 
@@ -176,7 +179,6 @@ func (r *reader) isVisible(name string) bool {
 // If the base type has not been encountered yet, a new
 // type with the given name but no associated declaration
 // is added to the type map.
-//
 func (r *reader) lookupType(name string) *namedType {
 	if name == "" || name == "_" {
 		return nil // no type docs for anonymous types
@@ -199,10 +201,10 @@ func (r *reader) lookupType(name string) *namedType {
 // anonymous field in the parent type. If the field is imported
 // (qualified name) or the parent is nil, the field is ignored.
 // The function returns the field name.
-//
 func (r *reader) recordAnonymousField(parent *namedType, fieldType ast.Expr) (fname string) {
 	fname, imp := baseTypeName(fieldType)
 	if parent == nil || imp {
+		// 注意此时fname已经设置了
 		return
 	}
 	if ftype := r.lookupType(fname); ftype != nil {
@@ -240,16 +242,23 @@ func specNames(specs []ast.Spec) []string {
 }
 
 // readValue processes a const or var declaration.
-//
 func (r *reader) readValue(decl *ast.GenDecl) {
 	// determine if decl should be associated with a type
 	// Heuristic: For each typed entry, determine the type name, if any.
 	//            If there is exactly one type name that is sufficiently
 	//            frequent, associate the decl with the respective type.
-	domName := ""
+	domName := "" // dominating name
 	domFreq := 0
 	prev := ""
 	n := 0
+	/*
+		var (
+			X1 T1
+			X2 T2
+		)
+		这种情况下，不会把X1关联到T1，X2关联到T2。因为一般情况下会把同一个
+		类型的enum值放到单独的var ()中，上面这种情况不符合。
+	*/
 	for _, spec := range decl.Specs {
 		s, ok := spec.(*ast.ValueSpec)
 		if !ok {
@@ -260,6 +269,7 @@ func (r *reader) readValue(decl *ast.GenDecl) {
 		case s.Type != nil:
 			// a type is present; determine its name
 			if n, imp := baseTypeName(s.Type); !imp {
+				// 注意这里类型是pkg.Type时name="", 忽略掉
 				name = n
 			}
 		case decl.Tok == token.CONST && len(s.Values) == 0:
@@ -290,6 +300,8 @@ func (r *reader) readValue(decl *ast.GenDecl) {
 	// determine values list with which to associate the Value for this decl
 	values := &r.values
 	const threshold = 0.75
+	// threshold是因为遍历时会忽略掉pkg.Type这种，不能忽略太多
+	// 注意这里比较前转换为int，因此len=2, domFreq=1时也满足: 1 >= int(2*0.75)=1
 	if domName != "" && r.isVisible(domName) && domFreq >= int(float64(len(decl.Specs))*threshold) {
 		// typed entries are sufficiently frequent
 		if typ := r.lookupType(domName); typ != nil {
@@ -297,6 +309,7 @@ func (r *reader) readValue(decl *ast.GenDecl) {
 		}
 	}
 
+	// 在这里同一个Value/Const只会加入到type.values或者reader.values
 	*values = append(*values, &Value{
 		Doc:   decl.Doc.Text(),
 		Names: specNames(decl.Specs),
@@ -314,7 +327,6 @@ func (r *reader) readValue(decl *ast.GenDecl) {
 }
 
 // fields returns a struct's fields or an interface's methods.
-//
 func fields(typ ast.Expr) (list []*ast.Field, isStruct bool) {
 	var fields *ast.FieldList
 	switch t := typ.(type) {
@@ -331,9 +343,8 @@ func fields(typ ast.Expr) (list []*ast.Field, isStruct bool) {
 }
 
 // readType processes a type declaration.
-//
 func (r *reader) readType(decl *ast.GenDecl, spec *ast.TypeSpec) {
-	typ := r.lookupType(spec.Name.Name)
+	typ := r.lookupType(spec.Name.Name) // lookup and create if not exist
 	if typ == nil {
 		return // no name or blank name - ignore the type
 	}
@@ -367,13 +378,12 @@ func (r *reader) readType(decl *ast.GenDecl, spec *ast.TypeSpec) {
 }
 
 // isPredeclared reports whether n denotes a predeclared type.
-//
 func (r *reader) isPredeclared(n string) bool {
+	// 可以覆盖golang预定义类型，比如type int int32
 	return predeclaredTypes[n] && r.types[n] == nil
 }
 
 // readFunc processes a func or method declaration.
-//
 func (r *reader) readFunc(fun *ast.FuncDecl) {
 	// strip function body if requested.
 	if r.mode&PreserveAST == 0 {
@@ -407,7 +417,7 @@ func (r *reader) readFunc(fun *ast.FuncDecl) {
 
 	// Associate factory functions with the first visible result type, as long as
 	// others are predeclared types.
-	if fun.Type.Results.NumFields() >= 1 {
+	if fun.Type.Results.NumFields() >= 1 { // func NewType() *Type { }
 		var typ *namedType // type to associate the function with
 		numResultTypes := 0
 		for _, res := range fun.Type.Results.List {
@@ -417,6 +427,7 @@ func (r *reader) readFunc(fun *ast.FuncDecl) {
 				// T (or pointers to T) as factory functions of T.
 				factoryType = t.Elt
 			}
+			// 除了内置类型或者unexported type外，有且只有一个返回T ([4]T, []*T, T, *T都可以)
 			if n, imp := baseTypeName(factoryType); !imp && r.isVisible(n) && !r.isPredeclared(n) {
 				if t := r.lookupType(n); t != nil {
 					typ = t
@@ -440,23 +451,28 @@ func (r *reader) readFunc(fun *ast.FuncDecl) {
 }
 
 var (
+	// 比如XXXX(who): MARKER="XXXX", uid="who"
+	// 注意go的regexp默认都是单行模式，也就是\n之后不会匹配"^"
+	// ^              at beginning of text or line (flag m=true)
+	// 如果要从多行comment中匹配应该是`(?m)^....`
 	noteMarker    = `([A-Z][A-Z]+)\(([^)]+)\):?`                // MARKER(uid), MARKER at least 2 chars, uid at least 1 char
 	noteMarkerRx  = lazyregexp.New(`^[ \t]*` + noteMarker)      // MARKER(uid) at text start
 	noteCommentRx = lazyregexp.New(`^/[/*][ \t]*` + noteMarker) // MARKER(uid) at comment start
 )
 
 // readNote collects a single note from a sequence of comments.
-//
 func (r *reader) readNote(list []*ast.Comment) {
 	text := (&ast.CommentGroup{List: list}).Text()
+	// FindStringSubmatchIndex返回单个int slice，两个两个一组，每组比较一个
+	// submatch的起始结束位置
 	if m := noteMarkerRx.FindStringSubmatchIndex(text); m != nil {
 		// The note body starts after the marker.
 		// We remove any formatting so that we don't
 		// get spurious line breaks/indentation when
 		// showing the TODO body.
-		body := clean(text[m[1]:], keepNL)
+		body := clean(text[m[1]:], keepNL) // 只做单byte替换，因此Index还是有效
 		if body != "" {
-			marker := text[m[2]:m[3]]
+			marker := text[m[2]:m[3]] // submatch[1] (submatch[0]是整个re匹配的字符串)
 			r.notes[marker] = append(r.notes[marker], &Note{
 				Pos:  list[0].Pos(),
 				End:  list[len(list)-1].End(),
@@ -467,14 +483,22 @@ func (r *reader) readNote(list []*ast.Comment) {
 	}
 }
 
+/*
+	// XXXX(uid): body1
+	// body2
+	//
+	// body3
+	注意body是包含body1 body2 body3，而不仅仅是body1
+*/
 // readNotes extracts notes from comments.
 // A note must start at the beginning of a comment with "MARKER(uid):"
 // and is followed by the note body (e.g., "// BUG(gri): fix this").
 // The note ends at the end of the comment group or at the start of
 // another note in the same comment group, whichever comes first.
-//
 func (r *reader) readNotes(comments []*ast.CommentGroup) {
 	for _, group := range comments {
+		// 注意: 每一个//都解析为独立的Comment, 连续的Comment(没有空行/非Comment)组成一个
+		// CommentGroup
 		i := -1 // comment index of most recent note start, valid if >= 0
 		list := group.List
 		for j, c := range list {
@@ -492,7 +516,6 @@ func (r *reader) readNotes(comments []*ast.CommentGroup) {
 }
 
 // readFile adds the AST for a source file to the reader.
-//
 func (r *reader) readFile(src *ast.File) {
 	// add package documentation
 	if src.Doc != nil {
@@ -588,6 +611,7 @@ func (r *reader) readPackage(pkg *ast.Package, mode Mode) {
 	for _, filename := range r.filenames {
 		f := pkg.Files[filename]
 		if mode&AllDecls == 0 {
+			// 修改*ast.File，删除其中unexported symbols
 			r.fileExports(f)
 		}
 		r.readFile(f)
@@ -606,6 +630,14 @@ func (r *reader) readPackage(pkg *ast.Package, mode Mode) {
 // ----------------------------------------------------------------------------
 // Types
 
+/*
+struct T1 { *T2 }: embeddedIsPtr=true, level=1
+struct T1 {  T2 }: embeddedIsPtr=false, level=1
+func (*T2) F2() { }
+
+go doc T1.F2
+func (*T1) F2() {} // 注意Recv的类型变成了T1，而不是T2
+*/
 func customizeRecv(f *Func, recvTypeName string, embeddedIsPtr bool, level int) *Func {
 	if f == nil || f.Decl == nil || f.Decl.Recv == nil || len(f.Decl.Recv.List) != 1 {
 		return f // shouldn't happen, but be safe
@@ -618,6 +650,12 @@ func customizeRecv(f *Func, recvTypeName string, embeddedIsPtr bool, level int) 
 	newIdent := &ast.Ident{NamePos: origPos, Name: recvTypeName}
 	var typ ast.Expr = newIdent
 	if !embeddedIsPtr && origRecvIsPtr {
+		// 需要考虑两个因素: 嵌入字段是否指针，方法本身接收的是指针还是对象，共4
+		// 种情况
+		//  struct T { *X }, func (*X) F() => func (T) F()
+		//  struct T { *X }, func ( X) F() => func (T) F()
+		//  struct T {  X }, func (*X) F() => func (*T) F()
+		//  struct T {  X }, func ( X) F() => func (T) F()
 		newIdent.NamePos++ // '*' is one character
 		typ = &ast.StarExpr{Star: origPos, X: newIdent}
 	}
@@ -642,7 +680,6 @@ func customizeRecv(f *Func, recvTypeName string, embeddedIsPtr bool, level int) 
 }
 
 // collectEmbeddedMethods collects the embedded methods of typ in mset.
-//
 func (r *reader) collectEmbeddedMethods(mset methodSet, typ *namedType, recvTypeName string, embeddedIsPtr bool, level int, visited embeddedSet) {
 	visited[typ] = true
 	for embedded, isPtr := range typ.embedded {
@@ -658,6 +695,9 @@ func (r *reader) collectEmbeddedMethods(mset methodSet, typ *namedType, recvType
 				mset.add(customizeRecv(m, recvTypeName, thisEmbeddedIsPtr, level))
 			}
 		}
+		// 递归嵌套
+		//   struct T1 { *T2 }
+		//   struct T2 { *T1 }
 		if !visited[embedded] {
 			r.collectEmbeddedMethods(mset, embedded, recvTypeName, thisEmbeddedIsPtr, level+1, visited)
 		}
@@ -691,7 +731,6 @@ func (r *reader) computeMethodSets() {
 // types that have no declaration. Instead, these functions and methods
 // are shown at the package level. It also removes types with missing
 // declarations or which are not visible.
-//
 func (r *reader) cleanupTypes() {
 	for _, t := range r.types {
 		visible := r.isVisible(t.name)
@@ -712,7 +751,7 @@ func (r *reader) cleanupTypes() {
 				r.funcs[name] = f
 			}
 			// 3) move methods
-			if !predeclared {
+			if !predeclared { // => visible && (t.isEmbedded || r.hasDotImp)
 				for name, m := range t.methods {
 					// don't overwrite functions with the same name - drop them
 					if _, found := r.funcs[name]; !found {
@@ -758,7 +797,6 @@ func sortedKeys(m map[string]int) []string {
 }
 
 // sortingName returns the name to use when sorting d into place.
-//
 func sortingName(d *ast.GenDecl) string {
 	if len(d.Specs) == 1 {
 		if s, ok := d.Specs[0].(*ast.ValueSpec); ok {
@@ -851,7 +889,6 @@ func sortedFuncs(m methodSet, allMethods bool) []*Func {
 
 // noteBodies returns a list of note body strings given a list of notes.
 // This is only used to populate the deprecated Package.Bugs field.
-//
 func noteBodies(notes []*Note) []string {
 	var list []string
 	for _, n := range notes {
