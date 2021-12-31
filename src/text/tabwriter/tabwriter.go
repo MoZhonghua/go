@@ -32,9 +32,8 @@ type cell struct {
 
 // cell和column的概念：
 // cell指一行中由\t,\v,\n,\f结束的字段
-// column由不同行中的同一index的位置构成，这些cell必须满足如下要求：
-//   - 必须是连续行中
-//   - cell必须全部都是\t或者\n结束
+// column由不同行中的同一index的位置构成，cell必须满足如下要求：
+//   - 必须是连续行, 每当遇到短行，就会结束一些column。特别的只有一个cell的行结束所有column
 //   - cell的index必须相同
 // column的计算可以通过逐行扫描完成，新的一行可以结束已知的column和开始新的column
 
@@ -127,7 +126,7 @@ func (b *Writer) addLine(flushed bool) {
 	// as that gives us an opportunity
 	// to re-use an existing []cell.
 	if n := len(b.lines) + 1; n <= cap(b.lines) {
-		b.lines = b.lines[:n] // 注意n>len(b.lines)，检查过cap，不会panic
+		b.lines = b.lines[:n]           // 注意n>len(b.lines)，检查过cap，不会panic
 		b.lines[n-1] = b.lines[n-1][:0] // 注意nil[:0]不会panic，还是返回nil
 	} else {
 		b.lines = append(b.lines, nil)
@@ -363,6 +362,8 @@ func (b *Writer) writeLines(pos0 int, line0, line1 int) (pos int) {
 	return
 }
 
+var indent = "                                                     "
+
 // flush时调用，行都拆分为cells，还没有计算column，顺序遍历所有行计算出column，
 // 当column列表改变的时候就输出当前column配置的行，然后递归调用format
 
@@ -370,7 +371,7 @@ func (b *Writer) writeLines(pos0 int, line0, line1 int) (pos int) {
 // is the buffer position corresponding to the beginning of line0.
 // Returns the buffer position corresponding to the beginning of
 // line1 and an error (by panic), if any.
-func (b *Writer) format(pos0 int, line0, line1 int) (pos int) {
+func (b *Writer) format(pos0 int, line0, line1 int, level int) (pos int) {
 	pos = pos0
 	column := len(b.widths)
 	for this := line0; this < line1; this++ {
@@ -418,9 +419,9 @@ func (b *Writer) format(pos0 int, line0, line1 int) (pos int) {
 
 		// format and print all columns to the right of this column
 		// (we know the widths of this column and all columns to the left)
-		b.widths = append(b.widths, width) // push width
-		pos = b.format(pos, line0, this) // 注意是递归调用
-		b.widths = b.widths[0 : len(b.widths)-1] // pop width
+		b.widths = append(b.widths, width)        // push width
+		pos = b.format(pos, line0, this, level+2) // 注意是递归调用
+		b.widths = b.widths[0 : len(b.widths)-1]  // pop width
 		line0 = this
 	}
 
@@ -536,7 +537,7 @@ func (b *Writer) flushNoDefers() {
 	}
 
 	// format contents of buffer
-	b.format(0, 0, len(b.lines))
+	b.format(0, 0, len(b.lines), 0)
 	b.reset()
 }
 
