@@ -112,7 +112,8 @@ func (p *printer) fixGoBuildLines() {
 
 	// Collect output after insertion point, with lines deleted, into after.
 	var after []byte
-	start := insert
+	start := insert  // 注意insert一定是在所有toDelete之前
+	// 循环中[start, end]指向的是需要删除的//go:build或者// +build之间的行
 	for _, end := range toDelete {
 		if end < start {
 			continue
@@ -148,7 +149,7 @@ func (p *printer) lineAt(start int) []byte {
 	for pos < len(p.output) && !isNL(p.output[pos]) {
 		pos++
 	}
-	if pos < len(p.output) {
+	if pos < len(p.output) { // 包括结尾的\n
 		pos++
 	}
 	return p.output[start:pos]

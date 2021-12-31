@@ -18,19 +18,22 @@ import (
 )
 
 const (
-	maxNewlines = 2     // max. number of newlines between source text
+	maxNewlines = 2     // max. number of newlines between source text, 两个\n是空一行，不是空两行
 	debug       = false // enable for debugging
 	infinity    = 1 << 30
 )
 
 type whiteSpace byte
 
+// \f: form feed (Ctrl-L)
+// The form feed character is sometimes used in plain text files of source code as a delimiter for a
+// page break, or as marker for sections of code.
 const (
 	ignore   = whiteSpace(0)
 	blank    = whiteSpace(' ')
 	vtab     = whiteSpace('\v')
 	newline  = whiteSpace('\n')
-	formfeed = whiteSpace('\f')
+	formfeed = whiteSpace('\f') // Ctrl+L
 	indent   = whiteSpace('>')
 	unindent = whiteSpace('<')
 )
@@ -123,6 +126,7 @@ func (p *printer) commentsHaveNewline(list []*ast.Comment) bool {
 			// not all comments on the same line
 			return true
 		}
+		// t[0]='/'
 		if t := c.Text; len(t) >= 2 && (t[1] == '/' || strings.Contains(t, "\n")) {
 			return true
 		}
@@ -151,14 +155,12 @@ func (p *printer) nextComment() {
 // commentBefore reports whether the current comment group occurs
 // before the next position in the source code and printing it does
 // not introduce implicit semicolons.
-//
 func (p *printer) commentBefore(next token.Position) bool {
 	return p.commentOffset < next.Offset && (!p.impliedSemi || !p.commentNewline)
 }
 
 // commentSizeBefore returns the estimated size of the
 // comments on the same line before the next position.
-//
 func (p *printer) commentSizeBefore(next token.Position) int {
 	// save/restore current p.commentInfo (p.nextComment() modifies it)
 	defer func(info commentInfo) {
@@ -188,7 +190,6 @@ func (p *printer) recordLine(linePtr *int) {
 // output line and the line argument, ignoring any pending (not yet
 // emitted) whitespace or comments. It is used to compute an accurate
 // size (in number of lines) for a formatted construct.
-//
 func (p *printer) linesFrom(line int) int {
 	return p.out.Line - line
 }
@@ -243,7 +244,7 @@ func (p *printer) writeByte(ch byte, n int) {
 		// existing columns.
 		switch ch {
 		case '\t', '\v':
-			ch = ' '
+			ch = ' ' // tabwriter每一行最后一个cell不会对齐
 		case '\n', '\f':
 			ch = '\f'
 			p.endAlignment = false
@@ -352,7 +353,6 @@ func (p *printer) writeString(pos token.Position, s string, isLit bool) {
 // pos is the comment position, next the position of the item
 // after all pending comments, prev is the previous comment in
 // a group of comments (or nil), and tok is the next token.
-//
 func (p *printer) writeCommentPrefix(pos, next token.Position, prev *ast.Comment, tok token.Token) {
 	if len(p.output) == 0 {
 		// the comment is the first item to be printed - don't write any whitespace
@@ -366,6 +366,10 @@ func (p *printer) writeCommentPrefix(pos, next token.Position, prev *ast.Comment
 	}
 
 	if pos.Line == p.last.Line && (prev == nil || prev.Text[1] != '/') {
+		/*
+			abc //ThisComment
+			abc /*abc* / //ThisComment
+		*/
 		// comment on the same line as last item:
 		// separate with at least one separator
 		hasSep := false
@@ -507,7 +511,6 @@ func trimRight(s string) string {
 // The prefix is computed using heuristics such that is likely that the comment
 // contents are nicely laid out after re-printing each line using the printer's
 // current indentation.
-//
 func stripCommonPrefix(lines []string) {
 	if len(lines) <= 1 {
 		return // at most one line - nothing to do
@@ -1366,7 +1369,6 @@ func (cfg *Config) fprint(output io.Writer, fset *token.FileSet, node interface{
 
 // A CommentedNode bundles an AST node and corresponding comments.
 // It may be provided as argument to any of the Fprint functions.
-//
 type CommentedNode struct {
 	Node     interface{} // *ast.File, or ast.Expr, ast.Decl, ast.Spec, or ast.Stmt
 	Comments []*ast.CommentGroup

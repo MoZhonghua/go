@@ -27,8 +27,16 @@ import (
 type cell struct {
 	size  int  // cell size in bytes
 	width int  // cell width in runes
-	htab  bool // true if the cell is terminated by an htab ('\t')
+	htab  bool // true if the cell is terminated by an htab ('\t'), hard tab
 }
+
+// cell和column的概念：
+// cell指一行中由\t,\v,\n,\f结束的字段
+// column由不同行中的同一index的位置构成，这些cell必须满足如下要求：
+//   - 必须是连续行中
+//   - cell必须全部都是\t或者\n结束
+//   - cell的index必须相同
+// column的计算可以通过逐行扫描完成，新的一行可以结束已知的column和开始新的column
 
 // A Writer is a filter that inserts padding around tab-delimited
 // columns in its input to align them in the output.
@@ -68,6 +76,9 @@ type cell struct {
 // If a Writer is configured to filter HTML, HTML tags and entities
 // are passed through. The widths of tags and entities are
 // assumed to be zero (tags) and one (entities) for formatting purposes.
+// see https://www.w3schools.com/html/html_entities.asp
+//   - non-breaking space: &nbsp;
+// 比如<h1> &nbsp; </h1>: tag=<h1>和</h1>, entity=&nbsp;
 //
 // A segment of text may be escaped by bracketing it with Escape
 // characters. The tabwriter passes escaped text segments through
@@ -77,12 +88,14 @@ type cell struct {
 // are passed through as well. For the purpose of formatting, the
 // width of the escaped text is always computed excluding the Escape
 // characters.
+// 比如 0xffA\t0xff\n不是解释为一个\n结束的cell("A\t")，而不是2个cell("0xffA"和"0xff")
 //
 // The formfeed character acts like a newline but it also terminates
 // all columns in the current line (effectively calling Flush). Tab-
 // terminated cells in the next line start new columns. Unless found
 // inside an HTML tag or inside an escaped text segment, formfeed
 // characters appear as newlines in the output.
+// 遇到\f表示所有column都马上结束，注意\f也是换行符，也就是下一行重新开始所有column
 //
 // The Writer must buffer input internally, because proper spacing
 // of one line may depend on the cells in future lines. Clients must
@@ -114,8 +127,8 @@ func (b *Writer) addLine(flushed bool) {
 	// as that gives us an opportunity
 	// to re-use an existing []cell.
 	if n := len(b.lines) + 1; n <= cap(b.lines) {
-		b.lines = b.lines[:n]
-		b.lines[n-1] = b.lines[n-1][:0]
+		b.lines = b.lines[:n] // 注意n>len(b.lines)，检查过cap，不会panic
+		b.lines[n-1] = b.lines[n-1][:0] // 注意nil[:0]不会panic，还是返回nil
 	} else {
 		b.lines = append(b.lines, nil)
 	}
@@ -173,6 +186,7 @@ const (
 	// and ending in ';') as single characters (width = 1).
 	FilterHTML uint = 1 << iota
 
+	// 0xff abc 0xff => abc ?
 	// Strip Escape characters bracketing escaped text segments
 	// instead of passing them through unchanged with the text.
 	StripEscape
@@ -181,10 +195,12 @@ const (
 	// Default is left-alignment.
 	AlignRight
 
+	// 实际是所有的空\v都会被删除，因为单行中的cell总是一个column
 	// Handle empty columns as if they were not present in
 	// the input in the first place.
 	DiscardEmptyColumns
 
+	// 每行开头的空的cell特别处理
 	// Always use tabs for indentation columns (i.e., padding of
 	// leading empty cells on the left) independent of padchar.
 	TabIndent
@@ -303,6 +319,7 @@ func (b *Writer) writeLines(pos0 int, line0, line1 int) (pos int) {
 		// if TabIndent is set, use tabs to pad leading empty cells
 		useTabs := b.flags&TabIndent != 0
 
+		// column数量大于等于所有行的cell数量
 		for j, c := range line {
 			if j > 0 && b.flags&Debug != 0 {
 				// indicate column break
@@ -320,7 +337,7 @@ func (b *Writer) writeLines(pos0 int, line0, line1 int) (pos int) {
 				if b.flags&AlignRight == 0 { // align left
 					b.write0(b.buf[pos : pos+c.size])
 					pos += c.size
-					if j < len(b.widths) {
+					if j < len(b.widths) { // 注意每行的最后一个cell在column里，但是不会padding
 						b.writePadding(c.width, b.widths[j], false)
 					}
 				} else { // align right
@@ -346,11 +363,13 @@ func (b *Writer) writeLines(pos0 int, line0, line1 int) (pos int) {
 	return
 }
 
+// flush时调用，行都拆分为cells，还没有计算column，顺序遍历所有行计算出column，
+// 当column列表改变的时候就输出当前column配置的行，然后递归调用format
+
 // Format the text between line0 and line1 (excluding line1); pos
 // is the buffer position corresponding to the beginning of line0.
 // Returns the buffer position corresponding to the beginning of
-// line1 and an error, if any.
-//
+// line1 and an error (by panic), if any.
 func (b *Writer) format(pos0 int, line0, line1 int) (pos int) {
 	pos = pos0
 	column := len(b.widths)
@@ -400,7 +419,7 @@ func (b *Writer) format(pos0 int, line0, line1 int) (pos int) {
 		// format and print all columns to the right of this column
 		// (we know the widths of this column and all columns to the left)
 		b.widths = append(b.widths, width) // push width
-		pos = b.format(pos, line0, this)
+		pos = b.format(pos, line0, this) // 注意是递归调用
 		b.widths = b.widths[0 : len(b.widths)-1] // pop width
 		line0 = this
 	}
@@ -526,7 +545,6 @@ var hbar = []byte("---\n")
 // Write writes buf to the writer b.
 // The only errors returned are ones encountered
 // while writing to the underlying output stream.
-//
 func (b *Writer) Write(buf []byte) (n int, err error) {
 	defer b.handlePanic(&err, "Write")
 
@@ -538,7 +556,7 @@ func (b *Writer) Write(buf []byte) (n int, err error) {
 			switch ch {
 			case '\t', '\v', '\n', '\f':
 				// end of cell
-				b.append(buf[n:i])
+				b.append(buf[n:i]) // 注意不包括\t, \v, ...
 				b.updateWidth()
 				n = i + 1 // ch consumed
 				ncells := b.terminateCell(ch == '\t')

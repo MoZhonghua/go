@@ -54,3 +54,13 @@ go/doc/comment.go
 go/doc/exports.go
 go/doc/filter.go
 go/doc/synopsis.go
+
+go/printer/gobuild.go
+text/tabwriter/tabwriter.go *
+go/printer/printer.g  *
+go/printer/nodes.go *
+go/format/format.go
+go/format/internal.go
+
+2022-01-01
+go/types/type.go ? // cmd/compile 和 cmd/vet使用
