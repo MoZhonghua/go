@@ -260,6 +260,11 @@ func lookupDirect(path string) (Repo, error) {
 	if module.MatchPrefixPatterns(cfg.GOINSECURE, path) {
 		security = web.Insecure
 	}
+	// 根据path是否包含一直VCS地址(比如github.com)来处理：
+	//  - 如果包含，则直接通过path计算VCS地址
+	//  - 否则把path当做web地址，读取meta-tag, curl "https://path?go-get=1" (fallback to http if insecure)
+	//    <meta name="go-import" content="foo/bar git https://github.com/rsc/foo/bar">
+	//    Prefix=foo/bar, VCS=git, RepoRoot=https://github.com/rsc/foo/bar"
 	rr, err := vcs.RepoRootForImportPath(path, vcs.PreferMod, security)
 	if err != nil {
 		// We don't know where to find code for a module with this path.
@@ -267,6 +272,7 @@ func lookupDirect(path string) (Repo, error) {
 	}
 
 	if rr.VCS.Name == "mod" {
+		// meta-tag中的特殊值:VCS=mod，此时Repo地址为goproxy地址
 		// Fetch module from proxy with base URL rr.Repo.
 		return newProxyRepo(rr.Repo, path)
 	}

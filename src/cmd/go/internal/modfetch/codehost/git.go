@@ -64,6 +64,7 @@ func newGitRepoCached(remote string, localOK bool) (Repo, error) {
 	return c.repo, c.err
 }
 
+// remote=https://github.com/google/uuid
 func newGitRepo(remote string, localOK bool) (Repo, error) {
 	r := &gitRepo{remote: remote}
 	if strings.Contains(remote, "://") {
@@ -124,7 +125,7 @@ func newGitRepo(remote string, localOK bool) (Repo, error) {
 type gitRepo struct {
 	remote, remoteURL string
 	local             bool
-	dir               string
+	dir               string // GOPATH/pkg/mod/cache/vcs/<hash>或者local git dir
 
 	mu lockedfile.Mutex // protects fetchLevel and git repo state
 
@@ -175,6 +176,7 @@ func (r *gitRepo) loadRefs() {
 	// The git protocol sends all known refs and ls-remote filters them on the client side,
 	// so we might as well record both heads and tags in one shot.
 	// Most of the time we only care about tags but sometimes we care about heads too.
+	// List references in a remote repository
 	out, gitErr := Run(r.dir, "git", "ls-remote", "-q", r.remote)
 	if gitErr != nil {
 		if rerr, ok := gitErr.(*RunError); ok {
@@ -422,6 +424,8 @@ func (r *gitRepo) fetchRefsLocked() error {
 		// golang.org/issue/34266 and
 		// https://github.com/git/git/blob/4c86140027f4a0d2caaa3ab4bd8bfc5ce3c11c8a/transport.c#L1303-L1309.)
 
+		// -f: --force
+		// refspec: <src>:<dst>
 		if _, err := Run(r.dir, "git", "fetch", "-f", r.remote, "refs/heads/*:refs/heads/*", "refs/tags/*:refs/tags/*"); err != nil {
 			return err
 		}
@@ -440,6 +444,10 @@ func (r *gitRepo) fetchRefsLocked() error {
 // statLocal returns a RevInfo describing rev in the local git repository.
 // It uses version as info.Version.
 func (r *gitRepo) statLocal(version, rev string) (*RevInfo, error) {
+	// -c <name>=<value>
+	// %D: ref names without the " (", ")" wrapping
+	// %H: commit hash
+	// %ct: committer date, UNIX timestamp
 	out, err := Run(r.dir, "git", "-c", "log.showsignature=false", "log", "-n1", "--format=format:%H %ct %D", rev, "--")
 	if err != nil {
 		return nil, &UnknownRevisionError{Rev: rev}
@@ -661,6 +669,7 @@ func (r *gitRepo) RecentTag(rev, prefix string, allowed func(string) bool) (tag 
 	// result is definitive.
 	describe := func() (definitive bool) {
 		var out []byte
+		// --merged=rev: Only list refs whose tips are reachable from the specified commit
 		out, err = Run(r.dir, "git", "for-each-ref", "--format", "%(refname)", "refs/tags", "--merged", rev)
 		if err != nil {
 			return true

@@ -53,8 +53,30 @@ internal/load/pkg.go
 internal/load/test.go
 
 
-2022-01-01
+2022-01-04
 // go list ***?
+// mod**
+internal/modfetch/fetch.go
+internal/modfetch/sumdb.go
+internal/modfetch/repo.go
+internal/modfetch/proxy.go
+internal/modfetch/key.go
+internal/modfetch/cache.go
+internal/modfetch/codehost/codehost.go
+internal/modfetch/codehost/git.go
+internal/modfetch/codehost/shell.go
+internal/modfetch/codehost/svn.go
+internal/modfetch/codehost/vcs.go
+
+
+2022-01-05
+internal/modfetch/coderepo.go ?
+internal/modinfo/info.go ?
+
+
+internal/modcmd/init.go ?
+internal/modcmd/download.go ?
+
 internal/work/build.go ?
 
 // GOPATH-mod

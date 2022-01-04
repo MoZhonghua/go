@@ -95,7 +95,7 @@ func newVCSRepo(vcs, remote string) (Repo, error) {
 
 	r := &vcsRepo{remote: remote, cmd: cmd}
 	var err error
-	r.dir, r.mu.Path, err = WorkDir(vcsWorkDirType+vcs, r.remote)
+	r.dir, r.mu.Path, err = WorkDir(vcsWorkDirType+vcs, r.remote) // vcs1.svn:remote
 	if err != nil {
 		return nil, err
 	}

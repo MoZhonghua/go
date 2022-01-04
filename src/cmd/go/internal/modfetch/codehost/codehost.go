@@ -154,7 +154,10 @@ func ShortenSHA1(rev string) string {
 
 // WorkDir returns the name of the cached work directory to use for the
 // given repository type and name.
-func WorkDir(typ, name string) (dir, lockfile string, err error) {
+// $GOPATH/pkg/mod/cache/vcs/c3a7687c436b44e1c0c389b1d5515300d44b6949685144fd082c00abc5f758a4
+// c3a7687c436b44e1c0c389b1d5515300d44b6949685144fd082c00abc5f758a4=sha256("git3:https://github.com/google/uuid")
+//typ=git3, remote=https://github.com/google/uuid
+func WorkDir(typ, name string) (dir, lockfile string, err error) { // typ=git
 	if cfg.GOMODCACHE == "" {
 		return "", "", fmt.Errorf("neither GOPATH nor GOMODCACHE are set")
 	}

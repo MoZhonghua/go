@@ -167,6 +167,8 @@ func DownloadZip(ctx context.Context, mod module.Version) (zipfile string, err e
 	}
 	c := downloadZipCache.Do(mod, func() interface{} {
 		zipfile, err := CachePath(mod, "zip")
+		// mod => $GOMODCACHE/cache/download/<mod.Path>/@v/<mod.Version>
+		// go.uber.org/zap@v1.19.1 => $GOMODCACHE/cache/download/go.uber.org/zap/@v/v1.19.1.zip
 		if err != nil {
 			return cached{"", err}
 		}
@@ -242,6 +244,7 @@ func downloadZip(ctx context.Context, mod module.Version, zipfile string) (err e
 	// is zip-compressed, we need an actual file — or at least an io.ReaderAt — to
 	// validate it: we can't just tee the stream as we write it.
 	f, err := os.CreateTemp(filepath.Dir(zipfile), tmpPattern)
+	// v1.19.1.zip*.tmp => v1.19.1.zip3883781121.tmp
 	if err != nil {
 		return err
 	}
@@ -290,6 +293,7 @@ func downloadZip(ctx context.Context, mod module.Version, zipfile string) (err e
 	if err != nil {
 		return err
 	}
+	// zip中所有文件名必须是path@versoin/realfile.go
 	prefix := mod.Path + "@" + mod.Version + "/"
 	for _, f := range z.File {
 		if !strings.HasPrefix(f.Name, prefix) {
@@ -320,6 +324,8 @@ func downloadZip(ctx context.Context, mod module.Version, zipfile string) (err e
 // If the hash does not match go.sum (or the sumdb if enabled), hashZip returns
 // an error and does not write ziphashfile.
 func hashZip(mod module.Version, zipfile, ziphashfile string) error {
+	// 遍历zip中的每个文件生成一行 filename  xxxxxx
+	// 然后对所有行做hash得到最终结果
 	hash, err := dirhash.HashZip(zipfile, dirhash.DefaultHash)
 	if err != nil {
 		return err
@@ -384,6 +390,7 @@ func RemoveAll(dir string) error {
 	return robustio.RemoveAll(dir)
 }
 
+// root module中的go.sum?
 var GoSumFile string // path to go.sum; set by package modload
 
 type modSum struct {
@@ -393,6 +400,7 @@ type modSum struct {
 
 var goSum struct {
 	mu        sync.Mutex
+	// 同一个versin为什么可能有多个hash值? 比如hash算法不一致，或者从多个服务器下载的内容不同
 	m         map[module.Version][]string // content of go.sum file
 	status    map[modSum]modSumStatus     // state of sums in m
 	overwrite bool                        // if true, overwrite go.sum without incorporating its contents
@@ -407,6 +415,9 @@ type modSumStatus struct {
 // The boolean it returns reports whether the
 // use of go.sum is now enabled.
 // The goSum lock must be held.
+// go.sum中每个<path, version>对应两行
+//  ekyu.moe/leb128 v1.0.1 h1:zWcNapXDoFEobgJquW8jOgnVClkRLV9StPmi+LhtTGQ=
+//  ekyu.moe/leb128 v1.0.1/go.mod h1:hphPjsG3qJdFKRttMyBWptntD0vAUE3NUenOGL0914A=
 func initGoSum() (bool, error) {
 	if GoSumFile == "" {
 		return false, nil
@@ -468,6 +479,7 @@ func readGoSum(dst map[module.Version][]string, file string, data []byte) error 
 			// Old bug; drop it.
 			continue
 		}
+		// 注意Version可能是v1.0.0/go.mod
 		mod := module.Version{Path: f[0], Version: f[1]}
 		dst[mod] = append(dst[mod], f[2])
 	}
@@ -532,6 +544,7 @@ func checkMod(mod module.Version) {
 
 // goModSum returns the checksum for the go.mod contents.
 func goModSum(data []byte) (string, error) {
+	// 假装只有一个go.mod文件，然后计算dirhash
 	return dirhash.Hash1([]string{"go.mod"}, func(string) (io.ReadCloser, error) {
 		return io.NopCloser(bytes.NewReader(data)), nil
 	})
@@ -560,7 +573,7 @@ func checkModSum(mod module.Version, h string) error {
 
 	// Check whether mod+h is listed in go.sum already. If so, we're done.
 	goSum.mu.Lock()
-	inited, err := initGoSum()
+	inited, err := initGoSum() // 没有设置GoSumFile或者报错时返回inited=false, 可以返回false,nil
 	if err != nil {
 		goSum.mu.Unlock()
 		return err
@@ -579,7 +592,7 @@ func checkModSum(mod module.Version, h string) error {
 
 	// Not listed, so we want to add them.
 	// Consult checksum database if appropriate.
-	if useSumDB(mod) {
+	if useSumDB(mod) { // 检查GOSUMDB和GONOSUMDB
 		// Calls base.Fatalf if mismatch detected.
 		if err := checkSumDB(mod, h); err != nil {
 			return err
@@ -606,6 +619,7 @@ func haveModSumLocked(mod module.Version, h string) bool {
 		if h == vh {
 			return true
 		}
+		// h1: 表示是用dirhash.Hash1算法计算的哈希值
 		if strings.HasPrefix(vh, "h1:") {
 			base.Fatalf("verifying %s@%s: checksum mismatch\n\tdownloaded: %v\n\tgo.sum:     %v"+goSumMismatch, mod.Path, mod.Version, h, vh)
 		}
@@ -635,7 +649,7 @@ func checkSumDB(mod module.Version, h string) error {
 		modWithoutSuffix.Version = strings.TrimSuffix(mod.Version, "/go.mod")
 	}
 
-	db, lines, err := lookupSumDB(mod)
+	db, lines, err := lookupSumDB(mod) // 注意这里mod.Version可以有/go.mod后缀
 	if err != nil {
 		return module.VersionError(modWithoutSuffix, fmt.Errorf("verifying %s: %v", noun, err))
 	}
@@ -643,10 +657,12 @@ func checkSumDB(mod module.Version, h string) error {
 	have := mod.Path + " " + mod.Version + " " + h
 	prefix := mod.Path + " " + mod.Version + " h1:"
 	for _, line := range lines {
+		// 正确情况下是有且只有一行数据h1:xxx，且hash值匹配
 		if line == have {
 			return nil
 		}
 		if strings.HasPrefix(line, prefix) {
+			// 注意跳过非h1哈希，不报错
 			return module.VersionError(modWithoutSuffix, fmt.Errorf("verifying %s: checksum mismatch\n\tdownloaded: %v\n\t%s: %v"+sumdbMismatch, noun, h, db, line[len(prefix)-len("h1:"):]))
 		}
 	}
@@ -655,7 +671,7 @@ func checkSumDB(mod module.Version, h string) error {
 
 // Sum returns the checksum for the downloaded copy of the given module,
 // if present in the download cache.
-func Sum(mod module.Version) string {
+func Sum(mod module.Version) string { // 读取GOMODCACHE/cache/download/<path>/@v/<version>.ziphash文件
 	if cfg.GOMODCACHE == "" {
 		// Do not use current directory.
 		return ""
@@ -745,7 +761,7 @@ Outer:
 			// truncated the file to remove erroneous hashes, and we shouldn't restore
 			// them without good reason.
 			goSum.m = make(map[module.Version][]string, len(goSum.m))
-			readGoSum(goSum.m, GoSumFile, data)
+			readGoSum(goSum.m, GoSumFile, data) // data为go.sum文件内容
 			for ms, st := range goSum.status {
 				if st.used {
 					addModSumLocked(ms.mod, ms.sum)
@@ -765,6 +781,9 @@ Outer:
 			sort.Strings(list)
 			for _, h := range list {
 				st := goSum.status[modSum{m, h}]
+				// TrimGoSum(keep)不在keep中的版本状态为used=false, dirty=true
+				// 这个条件一定为false. 但是注意status是以<path, version, h>为key的，
+				// 在TrimGoSum(keep)后添加的<path, version, h'>不受限制
 				if !st.dirty || (st.used && keep[m]) {
 					fmt.Fprintf(&buf, "%s %s %s\n", m.Path, m.Version, h)
 				}

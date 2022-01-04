@@ -49,6 +49,7 @@ var proxyOnce struct {
 
 type proxySpec struct {
 	// url is the proxy URL or one of "off", "direct", "noproxy".
+	// TODO(mzh): off/direct/noproxy有啥区别?
 	url string
 
 	// fallBackOnError is true if a request should be attempted on the next proxy
@@ -68,6 +69,11 @@ func proxyList() ([]proxySpec, error) {
 		for goproxy != "" {
 			var url string
 			fallBackOnError := false
+			// List elements may be separated by commas (,) or pipes (|), which determine error
+			// fallback behavior. When a URL is followed by a comma, the go command falls back to
+			// later sources only after a 404 (Not Found) or 410 (Gone) response. When a URL is
+			// followed by a pipe, the go command falls back to later sources after any error,
+			// including non-HTTP errors such as timeouts.
 			if i := strings.IndexAny(goproxy, ",|"); i >= 0 {
 				url = goproxy[:i]
 				fallBackOnError = goproxy[i] == '|'
@@ -123,6 +129,9 @@ func proxyList() ([]proxySpec, error) {
 		}
 	})
 
+
+	// GOPROXY默认值为: https://proxy.golang.org,direct => ["noproxy", "https://proxy.golang.org", "direct"]
+	// 注意noproxy在第一个
 	return proxyOnce.list, proxyOnce.err
 }
 
@@ -182,6 +191,8 @@ func TryProxies(f func(proxy string) error) error {
 	}
 	return bestErr
 }
+
+var _ Repo = (*proxyRepo)(nil)
 
 type proxyRepo struct {
 	url         *url.URL

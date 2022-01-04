@@ -29,8 +29,14 @@ import (
 	"golang.org/x/mod/semver"
 )
 
+// GOMODCACHE=$GOPATH/pkg/mod 三种路径
+//  -cache/download/modpath/@v/version.suffix: proxyRepo生成 TODO(mzh)?
+//  -cache/vcs/hash{.lock, .info, <dir>}: codeRepo生成, hash=sha256("git3:https://github.com/google/uuid")
+//   - hash.info: 内容就是"git3:https://github.com/google/uuid"
+//  -modpath@version: 上面两者unzip/checkout后的go源代码
+
 func cacheDir(path string) (string, error) {
-	if err := checkCacheDir(); err != nil {
+	if err := checkCacheDir(); err != nil { // $GOMODCACHE or $GOPATH/pkg/mod
 		return "", err
 	}
 	enc, err := module.EscapePath(path)
@@ -40,6 +46,13 @@ func cacheDir(path string) (string, error) {
 	return filepath.Join(cfg.GOMODCACHE, "cache/download", enc, "/@v"), nil
 }
 
+// $GOPATH/pkg/mod/cache/download/<path>/@v/<version>.suffix
+// suffix:
+//  - info: RevInfo
+//  - mod: go.mod
+//  - lock
+//  - zip
+//  - ziphash: dirhash of zip
 func CachePath(m module.Version, suffix string) (string, error) {
 	dir, err := cacheDir(m.Path)
 	if err != nil {
@@ -63,6 +76,7 @@ func CachePath(m module.Version, suffix string) (string, error) {
 // An error satisfying errors.Is(err, fs.ErrNotExist) will be returned
 // along with the directory if the directory does not exist or if the directory
 // is not completely populated.
+// go.uber.org/zap@v1.19.1 => $GOPATH/pkg/mod/go.urber.org/zap@v1.19.1
 func DownloadDir(m module.Version) (string, error) {
 	if err := checkCacheDir(); err != nil {
 		return "", err
@@ -94,6 +108,7 @@ func DownloadDir(m module.Version) (string, error) {
 
 	// Check if a .partial file exists. This is created at the beginning of
 	// a download and removed after the zip is extracted.
+	// $GOPATH/pkg/mod/cache/download/<path>/@v/<version>.partial
 	partialPath, err := CachePath(m, "partial")
 	if err != nil {
 		return dir, err
@@ -124,7 +139,7 @@ func DownloadDir(m module.Version) (string, error) {
 // DownloadDirPartialError is returned by DownloadDir if a module directory
 // exists but was not completely populated.
 //
-// DownloadDirPartialError is equivalent to fs.ErrNotExist.
+// DownloadDirPartialError is equivalent to fs.ErrNotExist. (指Is(fs.ErrNotExist)=>true)
 type DownloadDirPartialError struct {
 	Dir string
 	Err error

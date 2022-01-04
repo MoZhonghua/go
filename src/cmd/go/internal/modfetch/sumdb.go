@@ -57,6 +57,7 @@ var (
 	dbErr  error
 )
 
+// GOSUMDB: 完整格式为sum.golang.org+<publickey> https://sum.golang.org
 func dbDial() (dbName string, db *sumdb.Client, err error) {
 	// $GOSUMDB can be "key" or "key url",
 	// and the key can be a full verifier key
@@ -90,7 +91,7 @@ func dbDial() (dbName string, db *sumdb.Client, err error) {
 	name := vkey.Name()
 
 	// No funny business in the database name.
-	direct, err := url.Parse("https://" + name)
+	direct, err := url.Parse("https://" + name) // name必须是一个域名
 	if err != nil || strings.HasSuffix(name, "/") || *direct != (url.URL{Scheme: "https", Host: direct.Host, Path: direct.Path, RawPath: direct.RawPath}) || direct.RawPath != "" || direct.Host == "" {
 		return "", nil, fmt.Errorf("invalid sumdb name (must be host[/path]): %s %+v", name, *direct)
 	}
@@ -110,8 +111,9 @@ func dbDial() (dbName string, db *sumdb.Client, err error) {
 	return name, sumdb.NewClient(&dbClient{key: key[0], name: name, direct: direct, base: base}), nil
 }
 
+// 实现了sumdb.ClentOps接口
 type dbClient struct {
-	key    string
+	key    string // name+pubkey
 	name   string
 	direct *url.URL
 
@@ -128,7 +130,7 @@ func (c *dbClient) ReadRemote(path string) ([]byte, error) {
 
 	var data []byte
 	start := time.Now()
-	targ := web.Join(c.base, path)
+	targ := web.Join(c.base, path) // c.base.Scheme为空时会根据安全策略尝试https/http(fallback)
 	data, err := web.GetBytes(targ)
 	if false {
 		fmt.Fprintf(os.Stderr, "%.3fs %s\n", time.Since(start).Seconds(), targ.Redacted())
@@ -142,7 +144,7 @@ func (c *dbClient) ReadRemote(path string) ([]byte, error) {
 // the database. If everything we need is in the local cache and
 // c.ReadRemote is never called, we will never do this work.
 func (c *dbClient) initBase() {
-	if c.base != nil {
+	if c.base != nil { // GOSUMDB: name+pubkey baseurl
 		return
 	}
 
@@ -176,6 +178,8 @@ func (c *dbClient) initBase() {
 			if err != nil {
 				return err
 			}
+			// If that request returns a successful (HTTP 200) response, then the proxy supports
+			// proxying checksum database requests
 			if _, err := web.GetBytes(web.Join(proxyURL, "sumdb/"+c.name+"/supported")); err != nil {
 				return err
 			}

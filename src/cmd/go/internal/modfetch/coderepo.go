@@ -130,6 +130,8 @@ func (r *codeRepo) ModulePath() string {
 	return r.modPath
 }
 
+// export GOPROXY=direct
+// 比如go download go.uber.org/zap@v1, 此时prefix="v1.", 注意最后面的"."
 func (r *codeRepo) Versions(prefix string) ([]string, error) {
 	// Special case: gopkg.in/macaroon-bakery.v2-unstable
 	// does not use the v2 tags (those are for macaroon-bakery.v2).
@@ -138,6 +140,7 @@ func (r *codeRepo) Versions(prefix string) ([]string, error) {
 		return nil, nil
 	}
 
+	// 一个repo中可能有多个module，则每个module的tag需要是codeDir/vN.N.N
 	p := prefix
 	if r.codeDir != "" {
 		p = r.codeDir + "/" + p
@@ -149,6 +152,9 @@ func (r *codeRepo) Versions(prefix string) ([]string, error) {
 			Err:  err,
 		}
 	}
+
+	fmt.Printf("===codeRepo: versions: repo=%v prefix=%v; %+v\n", r.ModulePath(), prefix, r)
+	fmt.Printf("  tags: %v: %v\n", len(tags), tags)
 
 	var list, incompatible []string
 	for _, tag := range tags {
@@ -163,6 +169,8 @@ func (r *codeRepo) Versions(prefix string) ([]string, error) {
 			continue
 		}
 
+		// 注意正确使用方式是v2以上版本的import path应该有/v2， v0和v1不能出现
+		// 尝试兼容go.mod之前的package版本
 		if err := module.CheckPathMajor(v, r.pathMajor); err != nil {
 			if r.codeDir == "" && r.pathMajor == "" && semver.Major(v) > "v1" {
 				incompatible = append(incompatible, v)
@@ -233,6 +241,7 @@ func (r *codeRepo) appendIncompatibleVersions(list, incompatible []string) ([]st
 		major := semver.Major(v)
 
 		if major != lastMajor {
+			// 检查相同major的最高版本是不是有go.mod，如果有话都不能做为+incompatible
 			rem := incompatible[i:]
 			j := sort.Search(len(rem), func(j int) bool {
 				return semver.Major(rem[j]) != major
