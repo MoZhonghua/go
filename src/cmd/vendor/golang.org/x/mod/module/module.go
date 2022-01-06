@@ -111,6 +111,8 @@ import (
 // These are stored in their plain (unescaped) form.
 type Version struct {
 	// Path is a module path, like "golang.org/x/text" or "rsc.io/quote/v2".
+	// 可能是文件路径，在replace语句中: replace golang.org/x/net v1.2.3 => ./fork/net
+	// 此时{Path="./fork/net", Version=""}
 	Path string
 
 	// Version is usually a semantic version in canonical form.
@@ -603,6 +605,8 @@ func MatchPathMajor(v, pathMajor string) bool {
 // CheckPathMajor returns a non-nil error if the semantic version v
 // does not match the path major version pathMajor.
 // pathMajor指出现在import path中主版本号，gopkg.in的为".vNNN", 普通的为"/vNNN"
+//  - pathMajor为空时: 支持的大版本号为v0和v1，高于这两个的返回err
+//  - pathMajor不为空时: 要求v的大版本必须匹配
 func CheckPathMajor(v, pathMajor string) error {
 	// TODO(jayconrod): return errors or panic for invalid inputs. This function
 	// (and others) was covered by integration tests for cmd/go, and surrounding

@@ -30,6 +30,7 @@ const (
 // matchPackages is like m.MatchPackages, but uses a local variable (rather than
 // a global) for tags, can include or exclude packages in the standard library,
 // and is restricted to the given list of modules.
+// 遍历 GOROOT， main module root, modules 目录树，检查所有可能匹配的package
 func matchPackages(ctx context.Context, m *search.Match, tags map[string]bool, filter stdFilter, modules []module.Version) {
 	m.Pkgs = []string{}
 

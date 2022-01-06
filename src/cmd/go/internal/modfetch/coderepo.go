@@ -52,6 +52,8 @@ type codeRepo struct {
 	// pseudo-versions for this module, derived from the module path. pseudoMajor
 	// is empty if the module path does not include a version suffix (that is,
 	// accepts either v0 or v1).
+	// 比如import "github.com/xyz/abc/v2"，那么生成的pseudo-version应该是v2.0.0-....
+	// 而不是通常看到的v0.0.0-...
 	pseudoMajor string
 }
 
@@ -153,7 +155,7 @@ func (r *codeRepo) Versions(prefix string) ([]string, error) {
 		}
 	}
 
-	fmt.Printf("===codeRepo: versions: repo=%v prefix=%v; %+v\n", r.ModulePath(), prefix, r)
+	fmt.Printf("===codeRepo: versions: repo=%v prefix=%v; pathMajor=%v\n", r.ModulePath(), prefix, r.pathMajor)
 	fmt.Printf("  tags: %v: %v\n", len(tags), tags)
 
 	var list, incompatible []string
@@ -173,6 +175,13 @@ func (r *codeRepo) Versions(prefix string) ([]string, error) {
 		// 尝试兼容go.mod之前的package版本
 		if err := module.CheckPathMajor(v, r.pathMajor); err != nil {
 			if r.codeDir == "" && r.pathMajor == "" && semver.Major(v) > "v1" {
+				// 比如import "github.com/abc/url"
+				// v=v2.0.1, 正常情况下v2.0.1的导入路径必须是 "github.com/abc/url/v2"
+				// 但是如果是在go.mod之前的v2.0.1，不遵守这个规则，也就是使用者import时
+				// 的路径是"github.com/abc/url", 此时pathMajor=""，我们应该允许这个路径指向
+				// v2.0.1版本
+
+				// 注意正常v2 go.mod中的module指令必须也是v2，即module github/abc/url/v2
 				incompatible = append(incompatible, v)
 			}
 			continue
@@ -180,10 +189,14 @@ func (r *codeRepo) Versions(prefix string) ([]string, error) {
 
 		list = append(list, v)
 	}
+	fmt.Printf("  list: %v: %v\n", len(list), list)
+	fmt.Printf("  incompatible: %v: %v\n", len(incompatible), incompatible)
 	semver.Sort(list)
 	semver.Sort(incompatible)
 
-	return r.appendIncompatibleVersions(list, incompatible)
+	list2, err := r.appendIncompatibleVersions(list, incompatible)
+	fmt.Printf("  result: %v: %v\n", len(list2), list2)
+	return list2, err
 }
 
 // appendIncompatibleVersions appends "+incompatible" versions to list if
@@ -199,6 +212,7 @@ func (r *codeRepo) appendIncompatibleVersions(list, incompatible []string) ([]st
 		return list, nil
 	}
 
+	// 这里不检查go.mod中的module .../v2和pathMajor中的.../vNNN匹配
 	versionHasGoMod := func(v string) (bool, error) {
 		_, err := r.code.ReadFile(v, "go.mod", codehost.MaxGoMod)
 		if err == nil {
@@ -353,7 +367,7 @@ func (r *codeRepo) convert(info *codehost.RevInfo, statVers string) (*RevInfo, e
 		// r.findDir verifies both of these conditions. Execute it now so that
 		// r.Stat will correctly return a notExistError if the go.mod location or
 		// declared module path doesn't match.
-		_, _, _, err := r.findDir(info2.Version)
+		_, _, _, err := r.findDir(info2.Version) // v0.0.0-... 或者 v1.3.0
 		if err != nil {
 			// TODO: It would be nice to return an error like "not a module".
 			// Right now we return "missing go.mod", which is a little confusing.
@@ -369,6 +383,9 @@ func (r *codeRepo) convert(info *codehost.RevInfo, statVers string) (*RevInfo, e
 		// If the version is +incompatible, then the go.mod file must not exist:
 		// +incompatible is not an ongoing opt-out from semantic import versioning.
 		if strings.HasSuffix(info2.Version, "+incompatible") {
+			// pseudo version不是都有+incompatible后缀的。只有一种情况下会有+incompatible后缀:
+			//  - import "path": path中没有版本号
+			//  - version的major >= v2, 且version中没有go.mod文件
 			if !canUseIncompatible() {
 				if r.pathMajor != "" {
 					return nil, invalidf("+incompatible suffix not allowed: module path includes a major version suffix, so major version must match")
@@ -385,6 +402,8 @@ func (r *codeRepo) convert(info *codehost.RevInfo, statVers string) (*RevInfo, e
 		return info2, nil
 	}
 
+	fmt.Printf("===convert: %v(%v) %v\n", info.Name, info.Version, statVers)
+
 	// Determine version.
 	//
 	// If statVers is canonical, then the original call was repo.Stat(statVers).
@@ -392,6 +411,7 @@ func (r *codeRepo) convert(info *codehost.RevInfo, statVers string) (*RevInfo, e
 	// itself, possibly with a '+incompatible' annotation: we do not need to do
 	// the work required to look for an arbitrary pseudo-version.
 	if statVers != "" && statVers == module.CanonicalVersion(statVers) {
+		// 比如v1.0.1, 注意v1不满足条件, 因为CanonicalVersion会补齐v1.0.0
 		info2.Version = statVers
 
 		if module.IsPseudoVersion(info2.Version) {
@@ -402,7 +422,7 @@ func (r *codeRepo) convert(info *codehost.RevInfo, statVers string) (*RevInfo, e
 		}
 
 		if err := module.CheckPathMajor(info2.Version, r.pathMajor); err != nil {
-			if canUseIncompatible() {
+			if canUseIncompatible() { // 关键条件是info.Name指定的commit中没有go.mod
 				info2.Version += "+incompatible"
 				return checkGoMod()
 			} else {
@@ -418,6 +438,7 @@ func (r *codeRepo) convert(info *codehost.RevInfo, statVers string) (*RevInfo, e
 		return checkGoMod()
 	}
 
+	// 一般不会到这里，statVers会是生成的pseudo version
 	// statVers is empty or non-canonical, so we need to resolve it to a canonical
 	// version or pseudo-version.
 
@@ -428,6 +449,7 @@ func (r *codeRepo) convert(info *codehost.RevInfo, statVers string) (*RevInfo, e
 		tagPrefix = r.codeDir + "/"
 	}
 
+	// 注意只有statVers不是明确的版本号时才会走到这里
 	isRetracted, err := r.retractedVersions()
 	if err != nil {
 		isRetracted = func(string) bool { return false }
@@ -437,7 +459,7 @@ func (r *codeRepo) convert(info *codehost.RevInfo, statVers string) (*RevInfo, e
 	// If the tag is invalid, retracted, or a pseudo-version, tagToVersion returns
 	// an empty version.
 	tagToVersion := func(tag string) (v string, tagIsCanonical bool) {
-		if !strings.HasPrefix(tag, tagPrefix) {
+		if !strings.HasPrefix(tag, tagPrefix) { // tagPrefix: ""或者"moduledir/"
 			return "", false
 		}
 		trimmed := tag[len(tagPrefix):]
@@ -467,6 +489,7 @@ func (r *codeRepo) convert(info *codehost.RevInfo, statVers string) (*RevInfo, e
 		return v, tagIsCanonical
 	}
 
+	fmt.Printf("  statVers:%v; check info.Version=%v\n", statVers, info.Version)
 	// If the VCS gave us a valid version, use that.
 	if v, tagIsCanonical := tagToVersion(info.Version); tagIsCanonical {
 		info2.Version = v
@@ -618,6 +641,7 @@ func (r *codeRepo) validatePseudoVersion(info *codehost.RevInfo, version string)
 		return err
 	}
 	if base == "" {
+		// 没有base的应该是v0.0.0-...或者v2.0.0-...(如果path中/v2)
 		if r.pseudoMajor == "" && semver.Major(version) == "v1" {
 			return fmt.Errorf("major version without preceding tag must be v0, not v1")
 		}
@@ -714,7 +738,7 @@ func (r *codeRepo) versionToRev(version string) (rev string, err error) {
 // If r.pathMajor is non-empty, this can be either r.codeDir or — if a go.mod
 // file exists — r.codeDir/r.pathMajor[1:].
 func (r *codeRepo) findDir(version string) (rev, dir string, gomod []byte, err error) {
-	rev, err = r.versionToRev(version)
+	rev, err = r.versionToRev(version) // semver=> tag or commit
 	if err != nil {
 		return "", "", nil, err
 	}
@@ -898,6 +922,7 @@ func (r *codeRepo) modPrefix(rev string) string {
 	return r.modPath + "@" + rev
 }
 
+// 取最高的版本号，然后读取go.mod中retract字段
 func (r *codeRepo) retractedVersions() (func(string) bool, error) {
 	versions, err := r.Versions("")
 	if err != nil {

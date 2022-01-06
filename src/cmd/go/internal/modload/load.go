@@ -38,7 +38,7 @@ package modload
 // 	- it is imported by any test in the main module, or
 // 	- it is imported by another package in "all", or
 // 	- the main module specifies a go version ≤ 1.15, and the package is imported
-// 	  by a *test of* another package in "all".
+// 	  by a *test of* another package in "all". (go1.15后行为改变，需要兼容)
 //
 // When we implement lazy loading, we will record the modules providing packages
 // in "all" even when we are only loading individual packages, so we set the

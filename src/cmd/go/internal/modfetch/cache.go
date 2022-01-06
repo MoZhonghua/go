@@ -48,11 +48,11 @@ func cacheDir(path string) (string, error) {
 
 // $GOPATH/pkg/mod/cache/download/<path>/@v/<version>.suffix
 // suffix:
-//  - info: RevInfo
-//  - mod: go.mod
-//  - lock
-//  - zip
-//  - ziphash: dirhash of zip
+//  - vNN.info: RevInfo
+//  - vNN.mod: go.mod
+//  - vNN.lock
+//  - vNN.zip
+//  - vNN.ziphash: dirhash of zip
 func CachePath(m module.Version, suffix string) (string, error) {
 	dir, err := cacheDir(m.Path)
 	if err != nil {

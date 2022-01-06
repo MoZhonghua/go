@@ -390,7 +390,7 @@ func RemoveAll(dir string) error {
 	return robustio.RemoveAll(dir)
 }
 
-// root module中的go.sum?
+// root module中的go.sum, modload.Init()设置
 var GoSumFile string // path to go.sum; set by package modload
 
 type modSum struct {

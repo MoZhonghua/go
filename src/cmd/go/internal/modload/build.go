@@ -39,8 +39,8 @@ func findStandardImportPath(path string) string {
 	if path == "" {
 		panic("findStandardImportPath called with empty path")
 	}
-	if search.IsStandardImportPath(path) {
-		if goroot.IsStandardPackage(cfg.GOROOT, cfg.BuildContext.Compiler, path) {
+	if search.IsStandardImportPath(path) { // path第一个字段中没有"."
+		if goroot.IsStandardPackage(cfg.GOROOT, cfg.BuildContext.Compiler, path) { // $GOROOT/src/path 目录存在
 			return filepath.Join(cfg.GOROOT, "src", path)
 		}
 	}
@@ -70,6 +70,7 @@ func ModuleInfo(ctx context.Context, path string) *modinfo.ModulePublic {
 	}
 
 	if i := strings.Index(path, "@"); i >= 0 {
+		// 指定了版本，不考虑requirements
 		m := module.Version{Path: path[:i], Version: path[i+1:]}
 		return moduleInfo(ctx, nil, m, 0)
 	}
@@ -294,7 +295,7 @@ func moduleInfo(ctx context.Context, rs *Requirements, m module.Version, mode Li
 	}
 
 	r := Replacement(m)
-	if r.Path == "" {
+	if r.Path == "" { // 什么情况下replace的path为空？
 		if cfg.BuildMod == "vendor" {
 			// It's tempting to fill in the "Dir" field to point within the vendor
 			// directory, but that would be misleading: the vendor directory contains
@@ -318,7 +319,7 @@ func moduleInfo(ctx context.Context, rs *Requirements, m module.Version, mode Li
 	if v, ok := rawGoVersion.Load(m); ok {
 		info.Replace.GoVersion = v.(string)
 	}
-	if r.Version == "" {
+	if r.Version == "" { // filepath replacement
 		if filepath.IsAbs(r.Path) {
 			info.Replace.Dir = r.Path
 		} else {
@@ -327,6 +328,7 @@ func moduleInfo(ctx context.Context, rs *Requirements, m module.Version, mode Li
 		info.Replace.GoMod = filepath.Join(info.Replace.Dir, "go.mod")
 	}
 	if cfg.BuildMod != "vendor" {
+		// 注意这里用replacement的信息填充
 		completeFromModCache(info.Replace)
 		info.Dir = info.Replace.Dir
 		info.GoMod = info.Replace.GoMod
@@ -339,7 +341,7 @@ func moduleInfo(ctx context.Context, rs *Requirements, m module.Version, mode Li
 // PackageBuildInfo returns a string containing module version information
 // for modules providing packages named by path and deps. path and deps must
 // name packages that were resolved successfully with LoadPackages.
-func PackageBuildInfo(path string, deps []string) string {
+func PackageBuildInfo(path string, deps []string) string { // runtime.buildinfo
 	if isStandardImportPath(path) || !Enabled() {
 		return ""
 	}

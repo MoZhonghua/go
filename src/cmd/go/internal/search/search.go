@@ -519,6 +519,7 @@ func ImportPathsQuiet(patterns []string) []*Match {
 // canonicalizes the patterns but does not evaluate any matches. For patterns
 // that are not local or absolute paths, it preserves text after '@' to avoid
 // modifying version queries.
+// 注意为空时返回["."]
 func CleanPatterns(patterns []string) []string {
 	if len(patterns) == 0 {
 		return []string{"."}

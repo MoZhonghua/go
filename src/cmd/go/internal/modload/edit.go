@@ -44,6 +44,7 @@ func editRequirements(ctx context.Context, rs *Requirements, tryUpgrade, mustSel
 
 	var conflicts []Conflict
 	for _, m := range mustSelect {
+		// 递归检查m和m的所有依赖的最高版本没有超过限制
 		conflict, err := limiter.Select(m)
 		if err != nil {
 			return rs, false, err
@@ -145,6 +146,7 @@ func limiterForEdit(ctx context.Context, rs *Requirements, tryUpgrade, mustSelec
 	restrictTo := func(m module.Version) {
 		v, ok := maxVersion[m.Path]
 		if !ok || cmpVersion(v, m.Version) > 0 {
+			// 注意选的是版本低的那个
 			maxVersion[m.Path] = m.Version
 		}
 	}
@@ -209,7 +211,7 @@ func raiseLimitsForUpgrades(ctx context.Context, maxVersion map[string]string, d
 			return // m.Path is unrestricted.
 		}
 		if cmpVersion(v, m.Version) < 0 {
-			maxVersion[m.Path] = m.Version
+			maxVersion[m.Path] = m.Version // 更新为更高版本
 		}
 	}
 
@@ -589,7 +591,7 @@ func (l *versionLimiter) check(m module.Version, depth modDepth) dqState {
 	if summary.depth == eager {
 		depth = eager
 	}
-	for _, r := range summary.require {
+	for _, r := range summary.require { // 注意只有main module的热replace语句有效, 所以这里是直接检查require
 		if depth == lazy {
 			if _, restricted := l.max[r.Path]; !restricted {
 				// r.Path is unrestricted, so we don't care at what version it is

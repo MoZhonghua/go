@@ -81,6 +81,7 @@ func modFileGoVersion() string {
 
 // A modFileIndex is an index of data corresponding to a modFile
 // at a specific point in time.
+// 因为modfile.File中都是数组，这里转换为map，方便快速查找
 type modFileIndex struct {
 	data            []byte
 	dataNeedsFix    bool // true if fixVersion applied a change while parsing data
@@ -93,6 +94,7 @@ type modFileIndex struct {
 }
 
 // index is the index of the go.mod file as of when it was last read or written.
+// 在loadModFile()中设置
 var index *modFileIndex
 
 type requireMeta struct {
@@ -107,6 +109,8 @@ const (
 	eager                 // load all transitive dependencies eagerly
 )
 
+// go1.17版本后默认只加载main module中test导入的pacakge(lazy)，老版本是
+// 会加载所有package中test导入的包(eager)
 func modDepthFromGoVersion(goVersion string) modDepth {
 	if !go117EnableLazyLoading {
 		return eager
@@ -295,6 +299,7 @@ func CheckDeprecation(ctx context.Context, m module.Version) (deprecation string
 		return "", nil
 	}
 
+	// 注意检查的是最新版本的go.mod中是否有deprecated注释
 	latest, err := queryLatestVersionIgnoringRetractions(ctx, m.Path)
 	if err != nil {
 		return "", err
@@ -314,6 +319,7 @@ func Replacement(mod module.Version) module.Version {
 		if r, ok := index.replace[mod]; ok {
 			return r
 		}
+		// wildcard replacement: 只指定path，任意verison都会被替换
 		if r, ok := index.replace[module.Version{Path: mod.Path}]; ok {
 			return r
 		}
@@ -629,6 +635,7 @@ func rawGoModSummary(m module.Version) (*modFileSummary, error) {
 				})
 			}
 		}
+		// 注意没有记录replace语句
 
 		return cached{summary, nil}
 	}).(cached)
@@ -648,6 +655,7 @@ var rawGoModSummaryCache par.Cache // module.Version → rawGoModSummary result
 func rawGoModData(m module.Version) (name string, data []byte, err error) {
 	if m.Version == "" {
 		// m is a replacement module with only a file path.
+		// 指用一个路径来代替module: replace golang.org/x/net v1.2.3 => ./fork/net
 		dir := m.Path
 		if !filepath.IsAbs(dir) {
 			dir = filepath.Join(ModRoot(), dir)

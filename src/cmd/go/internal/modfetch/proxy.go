@@ -27,6 +27,26 @@ import (
 	"golang.org/x/mod/semver"
 )
 
+// off/direct/noproxy有啥区别 lookup()函数
+// path匹配GONOPROXY:
+//   - noproxy, direct: 正常处理，一个意思不走proxy
+//   - 其他值都是报错
+//
+// path不匹配GONOPROXY:
+//  - noproxy: 报错
+//  - <proxy>: 走proxy
+//  - direct: 正常处理，不走proxy
+//  - off: 报错
+//
+// noproxy: 只要GOPROXY不是仅有direct，则会添加到proxy list头。noproxy和direct的区别
+// 就是当path不匹配GONOPROXY时, noproxy报错，而direct不报错。
+//
+// 添加noproxy是为了保证GONOPROXY能走direct方式: 不能直接添加direct，会导致非GONOPROXY的
+// 也走direct模式。感觉正确逻辑是: 如果proxy list没有direct时添加noproxy，而不是只要proxy
+// list != direct 就添加
+//
+// 查询的时候是依次检查proxy list，只要有一个不报错且返回查询结果即可
+
 var HelpGoproxy = &base.Command{
 	UsageLine: "goproxy",
 	Short:     "module proxy protocol",
@@ -49,7 +69,6 @@ var proxyOnce struct {
 
 type proxySpec struct {
 	// url is the proxy URL or one of "off", "direct", "noproxy".
-	// TODO(mzh): off/direct/noproxy有啥区别?
 	url string
 
 	// fallBackOnError is true if a request should be attempted on the next proxy

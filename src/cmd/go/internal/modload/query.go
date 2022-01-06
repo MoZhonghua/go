@@ -96,6 +96,10 @@ func (queryDisabledError) Error() string {
 	return fmt.Sprintf("cannot query module due to -mod=%s\n\t(%s)", cfg.BuildMod, cfg.BuildModReason)
 }
 
+// path: module path
+// query: latest, v1.2.3, patch, upgrade, commit, >=v1.2.3, branchname, ...
+//        比如go mod download xyz@dev: 此时query=dev
+// current: "", "none", semver
 func queryProxy(ctx context.Context, proxy, path, query, current string, allowed AllowedFunc) (*modfetch.RevInfo, error) {
 	ctx, span := trace.StartSpan(ctx, "modload.queryProxy "+path+" "+query)
 	defer span.Done()
@@ -130,6 +134,7 @@ func queryProxy(ctx context.Context, proxy, path, query, current string, allowed
 	// before any network I/O.
 	qm, err := newQueryMatcher(path, query, current, allowed)
 	if (err == nil && qm.canStat) || err == errRevQuery {
+		// 直接查询指定的commit，比如query是master, commit_id, v1.2.3, v0.0.0-....
 		// Direct lookup of a commit identifier or complete (non-prefix) semantic
 		// version.
 
@@ -166,6 +171,7 @@ func queryProxy(ctx context.Context, proxy, path, query, current string, allowed
 	if err != nil {
 		return nil, err
 	}
+
 	releases, prereleases, err := qm.filterVersions(ctx, versions)
 	if err != nil {
 		return nil, err
@@ -250,13 +256,13 @@ func queryProxy(ctx context.Context, proxy, path, query, current string, allowed
 // a particular version or revision in a repository like "v1.0.0", "master",
 // or "0123abcd". IsRevisionQuery returns false if vers is a query that
 // chooses from among available versions like "latest" or ">v1.0.0".
-func IsRevisionQuery(vers string) bool {
+func IsRevisionQuery(vers string) bool { // 也就是说vers指定了一个特定commit，而不是从一个范围中选择
 	if vers == "latest" ||
 		vers == "upgrade" ||
 		vers == "patch" ||
 		strings.HasPrefix(vers, "<") ||
 		strings.HasPrefix(vers, ">") ||
-		(semver.IsValid(vers) && isSemverPrefix(vers)) {
+		(semver.IsValid(vers) && isSemverPrefix(vers)) { // v1.0.1是特定commit，但是v1不是
 		return false
 	}
 	return true
@@ -392,6 +398,7 @@ func newQueryMatcher(path string, query, current string, allowed AllowedFunc) (*
 		}
 
 	case semver.IsValid(query):
+		// 正常的版本号，比如xyz@v1, xyz@v1.1.3
 		if isSemverPrefix(query) {
 			qm.prefix = query + "."
 			// Do not allow the query "v1.2" to match versions lower than "v1.2.0",
@@ -400,13 +407,16 @@ func newQueryMatcher(path string, query, current string, allowed AllowedFunc) (*
 		} else {
 			qm.canStat = true
 			qm.filter = func(mv string) bool { return semver.Compare(mv, query) == 0 }
-			qm.prefix = semver.Canonical(query)
+			qm.prefix = semver.Canonical(query) // 去掉了+build, 比如+incompatible
 		}
 		if !matchesMajor(query) {
+			// xyz/v2@v1.3.5 ?
+			// xyz@v2.3.5 ?
 			qm.preferIncompatible = true
 		}
 
 	default:
+		// 到这里的一般是commit或者branch
 		return nil, errRevQuery
 	}
 
@@ -467,6 +477,12 @@ func (qm *queryMatcher) filterVersions(ctx context.Context, versions []string) (
 			if !strings.HasSuffix(v, "+incompatible") {
 				lastCompatible = v
 			} else if lastCompatible != "" {
+				// 比如此时lastCompatible=v1.5.2, v=v2.0.0+incompatible
+				// 出现这种情况的场景:
+				//  v1.5.1: no go.mod, v1.5.2 add go.mod
+				//  v2.0.0: no go.mod, v2.0.1 add go.mod
+				// 因为v2.0.0没有go.mod，所以从v1.5.2升级时认为v2.0.0也是合法的
+
 				// If the latest compatible version is allowed and has a go.mod file,
 				// ignore any version with a higher (+incompatible) major version. (See
 				// https://golang.org/issue/34165.) Note that we even prefer a
@@ -538,6 +554,7 @@ func QueryPackages(ctx context.Context, pattern, query string, current func(stri
 //
 // QueryPattern always returns at least one QueryResult (which may be only
 // modOnly) or a non-nil error.
+// pattern=github.com/abc/xyz/... query=latest,upgrade,...
 func QueryPattern(ctx context.Context, pattern, query string, current func(string) string, allowed AllowedFunc) (pkgMods []QueryResult, modOnly *QueryResult, err error) {
 	ctx, span := trace.StartSpan(ctx, "modload.QueryPattern "+pattern+" "+query)
 	defer span.Done()
@@ -560,7 +577,7 @@ func QueryPattern(ctx context.Context, pattern, query string, current func(strin
 			return nil, nil, &WildcardInFirstElementError{Pattern: pattern, Query: query}
 		}
 		match = func(mod module.Version, root string, isLocal bool) *search.Match {
-			m := search.NewMatch(pattern)
+			m := search.NewMatch(pattern) // m的结果还没有计算
 			matchPackages(ctx, m, imports.AnyTags(), omitStd, []module.Version{mod})
 			return m
 		}
@@ -603,7 +620,6 @@ func QueryPattern(ctx context.Context, pattern, query string, current func(strin
 		if err := firstError(m); err != nil {
 			return nil, nil, err
 		}
-
 		if matchPattern(Target.Path) {
 			queryMatchesMainModule = true
 		}
@@ -639,12 +655,13 @@ func QueryPattern(ctx context.Context, pattern, query string, current func(strin
 		}
 	}
 
+	// 不会合并多个proxy的结果，而是返回第一个不报错的proxy的结果
 	err = modfetch.TryProxies(func(proxy string) error {
 		queryModule := func(ctx context.Context, path string) (r QueryResult, err error) {
 			ctx, span := trace.StartSpan(ctx, "modload.QueryPattern.queryModule ["+proxy+"] "+path)
 			defer span.Done()
 
-			pathCurrent := current(path)
+			pathCurrent := current(path) // path的当前版本
 			r.Mod.Path = path
 			r.Rev, err = queryProxy(ctx, proxy, path, query, pathCurrent, allowed)
 			if err != nil {
@@ -698,6 +715,7 @@ func QueryPattern(ctx context.Context, pattern, query string, current func(strin
 // itself, sorted by descending length. Prefixes that are not valid module paths
 // but are valid package paths (like "m" or "example.com/.gen") are included,
 // since they might be replaced.
+// github.com/a/b/c => github.com/a github.com/a/b github.com/a/b/c
 func modulePrefixesExcludingTarget(path string) []string {
 	prefixes := make([]string, 0, strings.Count(path, "/")+1)
 
@@ -963,8 +981,13 @@ func versionHasGoMod(_ context.Context, m module.Version) (bool, error) {
 // available versions, but cannot fetch specific source files.
 type versionRepo interface {
 	ModulePath() string
+
+	// Versions返回的tag的版本
 	Versions(prefix string) ([]string, error)
+
 	Stat(rev string) (*modfetch.RevInfo, error)
+
+	// Latest返回的HEAD对应的commit
 	Latest() (*modfetch.RevInfo, error)
 }
 
@@ -1025,8 +1048,10 @@ func (rr *replacementRepo) Versions(prefix string) ([]string, error) {
 
 	versions := repoVersions
 	if index != nil && len(index.replace) > 0 {
+		// replace old.oldver => new.newver
+		// 这样应该允许 require old.oldver，即使oldver不存在，可以替换为new newver
 		path := rr.ModulePath()
-		for m, _ := range index.replace {
+		for m := range index.replace { // map[Old]New, m=Old
 			if m.Path == path && strings.HasPrefix(m.Version, prefix) && m.Version != "" && !module.IsPseudoVersion(m.Version) {
 				versions = append(versions, m.Version)
 			}
@@ -1060,6 +1085,9 @@ func (rr *replacementRepo) Stat(rev string) (*modfetch.RevInfo, error) {
 	path := rr.ModulePath()
 	_, pathMajor, ok := module.SplitPathVersion(path)
 	if ok && pathMajor == "" {
+		// path="github.com/abc/xyz"
+		// v=rev="v2.0.0"
+		// v可能是pre go.mod version，可能能够做为import path的解析结果
 		if err := module.CheckPathMajor(v, pathMajor); err != nil && semver.Build(v) == "" {
 			v += "+incompatible"
 		}
@@ -1077,6 +1105,7 @@ func (rr *replacementRepo) Latest() (*modfetch.RevInfo, error) {
 	if index != nil {
 		path := rr.ModulePath()
 		if v, ok := index.highestReplaced[path]; ok {
+			// 注意仅有一个wildcard replace时才会v=""
 			if v == "" {
 				// The only replacement is a wildcard that doesn't specify a version, so
 				// synthesize a pseudo-version with an appropriate major version and a
@@ -1090,6 +1119,8 @@ func (rr *replacementRepo) Latest() (*modfetch.RevInfo, error) {
 				}
 			}
 
+			// replace指定的oldver大于old的最新版本时才需要替换. 因为返回的Latest是old的版本，
+			// 所以等于的情况下不需要走replacementStat()构造一个fake rev
 			if err != nil || semver.Compare(v, info.Version) > 0 {
 				return rr.replacementStat(v)
 			}

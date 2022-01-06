@@ -51,18 +51,27 @@ func readVendorList() {
 
 		var mod module.Version
 		for _, line := range strings.Split(string(data), "\n") {
+			/*
+			# github.com/allegro/bigcache/v2 v2.2.5
+			## explicit; go 1.12
+			github.com/allegro/bigcache/v2
+			github.com/allegro/bigcache/v2/queue
+			*/
 			if strings.HasPrefix(line, "# ") {
+				// # path [version] [=> path [version]]
 				f := strings.Fields(line)
 
 				if len(f) < 3 {
 					continue
 				}
 				if semver.IsValid(f[2]) {
+					// # module version => ..
 					// A module, but we don't yet know whether it is in the build list or
 					// only included to indicate a replacement.
 					mod = module.Version{Path: f[1], Version: f[2]}
 					f = f[3:]
 				} else if f[2] == "=>" {
+					// # module => ..
 					// A wildcard replacement found in the main module's go.mod file.
 					mod = module.Version{Path: f[1]}
 					f = f[2:]
@@ -101,6 +110,7 @@ func readVendorList() {
 				// Metadata. Take the union of annotations across multiple lines, if present.
 				meta := vendorMeta[mod]
 				for _, entry := range strings.Split(strings.TrimPrefix(line, "## "), ";") {
+					// ## explicit; go 1.12
 					entry = strings.TrimSpace(entry)
 					if entry == "explicit" {
 						meta.Explicit = true
@@ -123,6 +133,7 @@ func readVendorList() {
 				// is in the build list and is the selected version of its path.
 				// If this information is new, record it.
 				if v, ok := vendorVersion[mod.Path]; !ok || semver.Compare(v, mod.Version) < 0 {
+					// 同一个module path在vendorList可能多次出现. vendorVersion总是记录最新的版本号
 					vendorList = append(vendorList, mod)
 					vendorVersion[mod.Path] = mod.Version
 				}
@@ -131,6 +142,7 @@ func readVendorList() {
 	})
 }
 
+// 就是检查go.mod中的require列表和vendor/modules.txt相同
 // checkVendorConsistency verifies that the vendor/modules.txt file matches (if
 // go 1.14) or at least does not contradict (go 1.13 or earlier) the
 // requirements and replacements listed in the main module's go.mod file.
@@ -158,7 +170,7 @@ func checkVendorConsistency() {
 	// Iterate over the Require directives in their original (not indexed) order
 	// so that the errors match the original file.
 	for _, r := range modFile.Require {
-		if !vendorMeta[r.Mod].Explicit {
+		if !vendorMeta[r.Mod].Explicit { // 在go.mod中出现的(不管是不是indirect)，在modules.txt中需要标记为explicit
 			if pre114 {
 				// Before 1.14, modules.txt did not indicate whether modules were listed
 				// explicitly in the main module's go.mod file.

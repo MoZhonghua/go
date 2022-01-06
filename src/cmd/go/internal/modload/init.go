@@ -36,6 +36,7 @@ import (
 // TODO(#40775): See if these can be plumbed as explicit parameters.
 var (
 	// RootMode determines whether a module root is needed.
+	// 注意module-aware mode总是打开的，只是决定了是否需要main module
 	RootMode Root
 
 	// ForceUseModules may be set to force modules to be enabled when
@@ -54,6 +55,8 @@ var (
 
 // Variables set in initTarget (during {Load,Create}ModFile).
 var (
+	// 和main module匹配, 在loadModFile()中设置。如果没有main module会设置特殊值
+	// {Path: "command-line-arguments"}
 	Target module.Version
 
 	// targetPrefix is the path prefix for packages in Target, without a trailing
@@ -92,7 +95,7 @@ const (
 // will be lost at the next call to WriteGoMod.
 // To make permanent changes to the require statements
 // in go.mod, edit it before loading.
-func ModFile() *modfile.File {
+func ModFile() *modfile.File { // 对应main module的go.mod
 	Init()
 	if modFile == nil {
 		die()
@@ -114,6 +117,9 @@ func Init() {
 		return
 	}
 	initialized = true
+	defer func() {
+		fmt.Fprintf(os.Stderr, "modload.Init() result: modRoot='%v' cfg.ModulesEnabled=%v\n", modRoot, cfg.ModulesEnabled)
+	}()
 
 	// Keep in sync with WillBeEnabled. We perform extra validation here, and
 	// there are lots of diagnostics and side effects, so we can't use
@@ -132,6 +138,7 @@ func Init() {
 			base.Fatalf("go: modules disabled by GO111MODULE=off; see 'go help modules'")
 		}
 		mustUseModules = false
+		// 只有这里可能出现modRoot!="" && cfg.ModulesEnabled==false
 		return
 	}
 
@@ -171,15 +178,16 @@ func Init() {
 	}
 
 	if modRoot != "" {
+		// CreateModFile()中设置, modRoot = base.Cwd()
 		// modRoot set before Init was called ("go mod init" does this).
 		// No need to search for go.mod.
 	} else if RootMode == NoRoot {
-		if cfg.ModFile != "" && !base.InGOFLAGS("-modfile") {
+		if cfg.ModFile != "" && !base.InGOFLAGS("-modfile") { // 注意如果是GOFLAGS中设置的不报错
 			base.Fatalf("go: -modfile cannot be used with commands that ignore the current module")
 		}
 		modRoot = ""
 	} else {
-		modRoot = findModuleRoot(base.Cwd())
+		modRoot = findModuleRoot(base.Cwd()) // 向上遍历找go.mod
 		if modRoot == "" {
 			if cfg.ModFile != "" {
 				base.Fatalf("go: cannot find main module, but -modfile was set.\n\t-modfile cannot be used to set the module root directory.")
@@ -211,7 +219,7 @@ func Init() {
 
 	// We're in module mode. Set any global variables that need to be set.
 	cfg.ModulesEnabled = true
-	setDefaultBuildMod()
+	setDefaultBuildMod() // cfg.BuildMod=mod/readonly/vendor
 	list := filepath.SplitList(cfg.BuildContext.GOPATH)
 	if len(list) == 0 || list[0] == "" {
 		base.Fatalf("missing $GOPATH")
@@ -254,6 +262,7 @@ func Init() {
 // of 'go get', but Init reads the -modfile flag in 'go get', so it shouldn't
 // be called until the command is installed and flags are parsed. Instead of
 // calling Init and Enabled, the main package can call this function.
+// 指的是在go/main.go中，如果是go get，需要判断走GOPATH mode还是module-aware mode
 func WillBeEnabled() bool {
 	if modRoot != "" || cfg.ModulesEnabled {
 		// Already enabled.
@@ -321,6 +330,7 @@ func HasModRoot() bool {
 // "go.mod" in the directory returned by ModRoot, but the -modfile flag may
 // change its location. ModFilePath calls base.Fatalf if there is no main
 // module, even if -modfile is set.
+// 注意设置-modfile=xxx不会影响main module的查找过程
 func ModFilePath() string {
 	if !HasModRoot() {
 		die()
@@ -427,7 +437,7 @@ func loadModFile(ctx context.Context) (rs *Requirements, needCommit bool) {
 	}
 
 	var fixed bool
-	f, err := modfile.Parse(gomod, data, fixVersion(ctx, &fixed))
+	f, err := modfile.Parse(gomod, data, fixVersion(ctx, &fixed)) // 会调用Query来fix version
 	if err != nil {
 		// Errors returned by modfile.Parse begin with file:line.
 		base.Fatalf("go: errors parsing go.mod:\n%s\n", err)

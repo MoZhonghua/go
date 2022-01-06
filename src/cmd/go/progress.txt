@@ -68,10 +68,22 @@ internal/modfetch/codehost/shell.go
 internal/modfetch/codehost/svn.go
 internal/modfetch/codehost/vcs.go
 
+2022-01-05
+internal/modfetch/coderepo.go
+internal/modinfo/info.go
+internal/modload/buildlist.go
+internal/modload/help.go
+internal/modload/modfile.go
+internal/modload/mvs.go
+internal/modload/vendor.go
+internal/modload/build.go
+internal/modload/edit.go
+internal/modload/import.go
+internal/modload/init.go
 
 2022-01-05
-internal/modfetch/coderepo.go ?
-internal/modinfo/info.go ?
+internal/modload/query.go ?
+internal/modload/load.go ?
 
 
 internal/modcmd/init.go ?

@@ -34,9 +34,10 @@ type Requirements struct {
 	//
 	// If eager, the graph includes all transitive requirements regardless of depth.
 	//
-	// If lazy, the graph includes only the root modules, the explicit
+	// If lazy, the graph includes only the root modules, the explicit (指在go.mod中require)
 	// requirements of those root modules, and the transitive requirements of only
 	// the *non-lazy* root modules.
+	// 根据go.mod中的"go v1.NNN"版本号设置
 	depth modDepth
 
 	// rootModules is the set of module versions explicitly required by the main
@@ -44,6 +45,10 @@ type Requirements struct {
 	// contain multiple versions for a given module path.
 	rootModules    []module.Version
 	maxRootVersion map[string]string
+
+	// 注意explict和direct两个属性的不同含义:
+	//  - explicit: 在go.mod中require
+	//  - direct: 在main module代码中import "module/pkg", 对应require的//indirect注释
 
 	// direct is the set of module paths for which we believe the module provides
 	// a package directly imported by a package or test in the main module.
@@ -85,7 +90,7 @@ type cachedGraph struct {
 // only be written in the loadModFile and commitRequirements functions.
 // All other functions that need or produce a *Requirements should
 // accept and/or return an explicit parameter.
-var requirements *Requirements
+var requirements *Requirements // loadModFile()中设置
 
 // newRequirements returns a new requirement set with the given root modules.
 // The dependencies of the roots will be loaded lazily at the first call to the
@@ -97,15 +102,17 @@ var requirements *Requirements
 //
 // If vendoring is in effect, the caller must invoke initVendor on the returned
 // *Requirements before any other method.
+// 注意这里的rootModules一般是main module的go.mod中直接require的module列表
 func newRequirements(depth modDepth, rootModules []module.Version, direct map[string]bool) *Requirements {
 	for i, m := range rootModules {
 		if m == Target {
 			panic(fmt.Sprintf("newRequirements called with untrimmed build list: rootModules[%v] is Target", i))
 		}
-		if m.Path == "" || m.Version == "" {
+		if m.Path == "" || m.Version == "" { // version不能为空，因此filepath replacement不能出现
 			panic(fmt.Sprintf("bad requirement: rootModules[%v] = %v", i, m))
 		}
 		if i > 0 {
+			// 必须是排好序的
 			prev := rootModules[i-1]
 			if prev.Path > m.Path || (prev.Path == m.Path && semver.Compare(prev.Version, m.Version) > 0) {
 				panic(fmt.Sprintf("newRequirements called with unsorted roots: %v", rootModules))
@@ -289,6 +296,10 @@ func readModGraph(ctx context.Context, depth modDepth, roots []module.Version) (
 	// m's go.mod file indicates eager loading.
 	loadOne := func(m module.Version) (*modFileSummary, error) {
 		cached := mg.loadCache.Do(m, func() interface{} {
+			// 三个地方读go.mod:
+			//  - vendor/github.com/xx/go.mod
+			//  - ../fork/net/go.mod
+			//  - modfetch.GoModFile()
 			summary, err := goModSummary(m)
 
 			mu.Lock()
@@ -390,6 +401,7 @@ func (mg *ModuleGraph) BuildList() []module.Version {
 }
 
 func (mg *ModuleGraph) findError() error {
+	// 找到第一个加载过程中报错的module，并且给出最短路径
 	errStack := mg.g.FindPath(func(m module.Version) bool {
 		cached := mg.loadCache.Get(m)
 		return cached != nil && cached.(summaryError).err != nil
@@ -574,6 +586,8 @@ func updateRoots(ctx context.Context, direct map[string]bool, rs *Requirements, 
 // To ensure that the loading process eventually converges, the caller should
 // add any needed roots from the tidy root set (without removing existing untidy
 // roots) until the set of roots has converged.
+// 问题描述: 给定一个pkg列表，输出一个Requirements，要求计算后的依赖图包含所有
+// pkg.Mod，且版本大于等于每个pkg.Mod.Version
 func tidyLazyRoots(ctx context.Context, direct map[string]bool, pkgs []*loadPkg) (*Requirements, error) {
 	var (
 		roots        []module.Version
@@ -632,6 +646,7 @@ func tidyLazyRoots(ctx context.Context, direct map[string]bool, pkgs []*loadPkg)
 				queued[pkg.test] = true
 			}
 			if !pathIncluded[m.Path] {
+				// Graph中有pkg.Mod，但是版本低
 				if s := mg.Selected(m.Path); cmpVersion(s, m.Version) < 0 {
 					roots = append(roots, m)
 				}

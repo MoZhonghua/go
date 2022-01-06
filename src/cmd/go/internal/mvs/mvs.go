@@ -256,7 +256,7 @@ func Req(target module.Version, base []string, reqs Reqs) ([]module.Version, err
 		}
 		m := module.Version{Path: path, Version: max[path]}
 		min = append(min, m)
-		// 把base中的都标记为直接依赖, 并地柜标记
+		// 把base中的都标记为直接依赖, 并递归标记
 		walk(m)
 		haveBase[path] = true
 	}

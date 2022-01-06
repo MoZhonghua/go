@@ -22,7 +22,7 @@ import (
 // the version "" is considered higher than all other versions.
 // The main module (also known as the target) has no version and must be chosen
 // over other versions of the same module in the module dependency graph.
-func cmpVersion(v1, v2 string) int {
+func cmpVersion(v1, v2 string) int { // ""是最高版本
 	if v2 == "" {
 		if v1 == "" {
 			return 0

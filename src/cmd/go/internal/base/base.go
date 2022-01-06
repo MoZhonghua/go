@@ -13,6 +13,7 @@ import (
 	exec "internal/execabs"
 	"log"
 	"os"
+	"runtime/debug"
 	"strings"
 	"sync"
 
@@ -118,6 +119,7 @@ func Exit() {
 }
 
 func Fatalf(format string, args ...interface{}) {
+	debug.PrintStack()
 	Errorf(format, args...)
 	Exit()
 }
