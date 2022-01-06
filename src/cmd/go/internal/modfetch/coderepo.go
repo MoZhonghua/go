@@ -155,9 +155,6 @@ func (r *codeRepo) Versions(prefix string) ([]string, error) {
 		}
 	}
 
-	fmt.Printf("===codeRepo: versions: repo=%v prefix=%v; pathMajor=%v\n", r.ModulePath(), prefix, r.pathMajor)
-	fmt.Printf("  tags: %v: %v\n", len(tags), tags)
-
 	var list, incompatible []string
 	for _, tag := range tags {
 		if !strings.HasPrefix(tag, p) {
@@ -189,13 +186,10 @@ func (r *codeRepo) Versions(prefix string) ([]string, error) {
 
 		list = append(list, v)
 	}
-	fmt.Printf("  list: %v: %v\n", len(list), list)
-	fmt.Printf("  incompatible: %v: %v\n", len(incompatible), incompatible)
 	semver.Sort(list)
 	semver.Sort(incompatible)
 
 	list2, err := r.appendIncompatibleVersions(list, incompatible)
-	fmt.Printf("  result: %v: %v\n", len(list2), list2)
 	return list2, err
 }
 
@@ -402,8 +396,6 @@ func (r *codeRepo) convert(info *codehost.RevInfo, statVers string) (*RevInfo, e
 		return info2, nil
 	}
 
-	fmt.Printf("===convert: %v(%v) %v\n", info.Name, info.Version, statVers)
-
 	// Determine version.
 	//
 	// If statVers is canonical, then the original call was repo.Stat(statVers).
@@ -489,7 +481,6 @@ func (r *codeRepo) convert(info *codehost.RevInfo, statVers string) (*RevInfo, e
 		return v, tagIsCanonical
 	}
 
-	fmt.Printf("  statVers:%v; check info.Version=%v\n", statVers, info.Version)
 	// If the VCS gave us a valid version, use that.
 	if v, tagIsCanonical := tagToVersion(info.Version); tagIsCanonical {
 		info2.Version = v
