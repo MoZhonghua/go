@@ -683,7 +683,7 @@ func (gcToolchain) ld(b *Builder, root *Action, out, importcfg, mainpkg string) 
 	if cfg.BuildTrimpath {
 		env = append(env, "GOROOT_FINAL="+trimPathGoRootFinal)
 	}
-	// 注意输入参数只有mainpkg.a，会从.a中读取依赖关系，然后从$GOPATH/pkg/linux_amd64中读取对应的.a
+	// 注意输入参数只有mainpkg.a，会从.a中读取依赖关系，然后从-importcfg读取package对应的.a文件路径
 	return b.run(root, dir, root.Package.ImportPath, env, cfg.BuildToolexec, base.Tool("link"), "-o", out, "-importcfg", importcfg, ldflags, mainpkg)
 }
 
@@ -713,6 +713,7 @@ func (gcToolchain) ldShared(b *Builder, root *Action, toplevelactions []*Action,
 		if !strings.HasSuffix(d.Target, ".a") { // omit unsafe etc and actions for other shared libraries
 			continue
 		}
+		// shared有多个输入文件
 		ldflags = append(ldflags, d.Package.ImportPath+"="+d.Target)
 	}
 	return b.run(root, ".", out, nil, cfg.BuildToolexec, base.Tool("link"), "-o", out, "-importcfg", importcfg, ldflags)

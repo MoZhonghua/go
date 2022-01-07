@@ -40,6 +40,7 @@ import (
 	],
 	"CompiledGoFiles": [
 		"normal.go",
+		// main.cgo1.go
 		"/home/mozhonghua/.cache/go-build/72/72966f514f249da9d3688aa26e41023e21668dc6a295329a47c0a0ff568f97dd-d",
 		"/home/mozhonghua/.cache/go-build/c4/c47b618e80f88a6d0f0d5871107d7388ca40c6219416fa661ca2b104fe7c6ffe-d",
 		"/home/mozhonghua/.cache/go-build/b2/b2734c50d8c611eef12b3a04550408e733d8595d2414cb342548e24c364b705f-d",
@@ -53,6 +54,11 @@ import (
 		"hello.h"
 	],
 */
+
+// 整体来说就是根据是否-m调用
+//	- modload.ListModules => module列表
+//	- load.PackagesAndErrors => Package列表
+
 
 var CmdList = &base.Command{
 	// Note: -f -json -m are listed explicitly because they are the most common list flags.
@@ -478,6 +484,7 @@ func runList(ctx context.Context, cmd *base.Command, args []string) {
 			}
 		}
 
+		// 是否需要填充Module.Versions等字段
 		var mode modload.ListMode
 		if *listU {
 			mode |= modload.ListU | modload.ListRetracted | modload.ListDeprecated
@@ -566,6 +573,7 @@ func runList(ctx context.Context, cmd *base.Command, args []string) {
 				var pmain, ptest, pxtest *load.Package
 				var err error
 				if *listE {
+					// xxx => main(构造main.go), xxx.test, xxx_test 三个package
 					pmain, ptest, pxtest = load.TestPackagesAndErrors(ctx, pkgOpts, p, nil)
 				} else {
 					pmain, ptest, pxtest, err = load.TestPackagesFor(ctx, pkgOpts, p, nil)
@@ -628,6 +636,8 @@ func runList(ctx context.Context, cmd *base.Command, args []string) {
 				a.Deps = append(a.Deps, b.AutoAction(work.ModeInstall, work.ModeInstall, p))
 			}
 		}
+		// 注意没有设置cfg.BuildN，也就是真正执行了编译过程
+		// IsCmdList=true因此不会真正执行link操作，而是pkg.a
 		b.Do(ctx, a)
 	}
 

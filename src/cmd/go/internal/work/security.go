@@ -27,6 +27,13 @@
 // So out of paranoia, we reject @ at the beginning of every
 // flag argument that might be split into its own argument.
 
+// man gcc
+// -Wl,option
+//	 Pass option as an option to the linker. If option contains commas, it is split into multiple
+//	 options at the commas. You can use this syntax to pass an argument to the option. For example,
+//	 -Wl,-Map,output.map passes -Map output.map to the linker. When using the GNU linker, you can
+//	 also get the same effect with -Wl,-Map=output.map
+
 package work
 
 import (

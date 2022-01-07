@@ -40,9 +40,9 @@ type Builder struct {
 	Print       func(args ...interface{}) (int, error)
 
 	IsCmdList           bool // running as part of go list; set p.Stale and additional fields below
-	NeedError           bool // list needs p.Error
-	NeedExport          bool // list needs p.Export
-	NeedCompiledGoFiles bool // list needs p.CompiledGoFiles
+	NeedError           bool // list needs p.Error: go list -e
+	NeedExport          bool // list needs p.Export: go list -export
+	NeedCompiledGoFiles bool // list needs p.CompiledGoFiles: go list -compiled
 
 	objdirSeq int // counter for NewObjdir  // $WORK/b0001, $WORK/b0002, ...
 	pkgSeq    int
@@ -169,7 +169,7 @@ type actionJSON struct {
 
 // cacheKey is the key for the action cache.
 type cacheKey struct {
-	mode string  // cacheAction(): build, vet, link
+	mode string // cacheAction(): build, vet, link
 	p    *load.Package
 }
 
@@ -387,6 +387,8 @@ func (b *Builder) AutoAction(mode, depMode BuildMode, p *load.Package) *Action {
 // for building packages (archives), never for linking executables.
 // depMode is the action (build or install) to use when building dependencies.
 // To turn package main into an executable, call b.Link instead.
+//
+// 比如go install pkg的时候mode是ModeInstall。此时会先创建一个build.X，然后再创建一个install.X
 func (b *Builder) CompileAction(mode, depMode BuildMode, p *load.Package) *Action {
 	vetOnly := mode&ModeVetOnly != 0
 	mode &^= ModeVetOnly
@@ -517,6 +519,8 @@ func (b *Builder) vetAction(mode, depMode BuildMode, p *load.Package) *Action {
 // LinkAction returns the action for linking p into an executable
 // and possibly installing the result (according to mode).
 // depMode is the action (build or install) to use when compiling dependencies.
+//
+// 比如go install exe的时候mode是ModeInstall。此时会先创建一个build.X, 然后link.X，然后再创建一个install.X
 func (b *Builder) LinkAction(mode, depMode BuildMode, p *load.Package) *Action {
 	// Construct link action.
 	a := b.cacheAction("link", p, func() *Action {

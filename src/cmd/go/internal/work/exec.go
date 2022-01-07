@@ -4,6 +4,17 @@
 
 // Action graph execution.
 
+// Action.Target, Action.built, Action.Package.Target:
+// - 创建Action的时候
+//    * 设置Action.Objdir=$WORK/b0001/
+//    * link和link-install，设置为对应的目标
+//    * build时没有设置Action.Target, 用Action.Package.Target检查
+// - 真正编译(compile)时
+//    * 检查是否在cache中，如果在， Action.built=cached_file, Action.Target="DO NOT USE ..."
+//    * 否则Action.built=Action.Package.Target
+// go list -export: 设置Package.Export = Action.built，注意go list总是对应build action，因此
+// Package.Export总是指向.a文件，而不是executable
+
 package work
 
 import (
@@ -107,12 +118,15 @@ func (b *Builder) Do(ctx context.Context, root *Action) {
 	// Initialize per-action execution state.
 	for _, a := range all {
 		for _, a1 := range a.Deps {
+			// 设置反向链接
 			a1.triggers = append(a1.triggers, a)
 		}
 		a.pending = len(a.Deps)
+
+		// 把那些没有依赖关系的任务加入到ready队列中
 		if a.pending == 0 {
-			b.ready.push(a)
-			b.readySema <- true
+			b.ready.push(a)     // priority queue
+			b.readySema <- true // size of chan is len(all)
 		}
 	}
 
@@ -123,6 +137,8 @@ func (b *Builder) Do(ctx context.Context, root *Action) {
 			a.json.TimeStart = time.Now()
 		}
 		var err error
+
+		// 子任务失败时会设置parent.Failed=true，因此不会执行a.Func
 		if a.Func != nil && (!a.Failed || a.IgnoreFail) {
 			// TODO(matloob): Better action descriptions
 			desc := "Executing action "
@@ -159,6 +175,7 @@ func (b *Builder) Do(ctx context.Context, root *Action) {
 			if a.Failed {
 				a0.Failed = true
 			}
+			// 失败也算完成
 			if a0.pending--; a0.pending == 0 {
 				b.ready.push(a0)
 				b.readySema <- true
@@ -177,18 +194,18 @@ func (b *Builder) Do(ctx context.Context, root *Action) {
 	// drop the parallelism to 1, both to make the output
 	// deterministic and because there is no real work anyway.
 	par := cfg.BuildP
-	if cfg.BuildN {
+	if cfg.BuildN { // -n, dry run
 		par = 1
 	}
 	for i := 0; i < par; i++ {
 		wg.Add(1)
 		go func() {
-			ctx := trace.StartGoroutine(ctx)
+			ctx := trace.StartGoroutine(ctx) // 分配一个新的tid
 			defer wg.Done()
 			for {
 				select {
 				case _, ok := <-b.readySema:
-					if !ok {
+					if !ok { // chan closed
 						return
 					}
 					// Receiving a value from b.readySema entitles
@@ -212,6 +229,7 @@ func (b *Builder) Do(ctx context.Context, root *Action) {
 }
 
 // buildActionID computes the action ID for a build action.
+// 把compile的所有输入参数合在一起计算一个hash
 func (b *Builder) buildActionID(a *Action) cache.ActionID {
 	p := a.Package
 	h := cache.NewHash("build " + p.ImportPath)
@@ -281,7 +299,7 @@ func (b *Builder) buildActionID(a *Action) cache.ActionID {
 	if p.Internal.CoverMode != "" {
 		fmt.Fprintf(h, "cover %q %q\n", p.Internal.CoverMode, b.toolID("cover"))
 	}
-	fmt.Fprintf(h, "modinfo %q\n", p.Internal.BuildInfo)
+	fmt.Fprintf(h, "modinfo %q\n", p.Internal.BuildInfo) // 有所有依赖的module的hash
 
 	// Configuration specific to compiler toolchain.
 	switch cfg.BuildToolchainName {
@@ -367,11 +385,13 @@ func (b *Builder) buildActionID(a *Action) cache.ActionID {
 		p.EmbedFiles,
 	)
 	for _, file := range inputFiles {
+		// 读取文件内容。不关心文件信息，比如修改时间
 		fmt.Fprintf(h, "file %s %s\n", file, b.fileHash(filepath.Join(p.Dir, file)))
 	}
 	for _, a1 := range a.Deps {
 		p1 := a1.Package
 		if p1 != nil {
+			// 用子任务的ActionID来代替子任务的输出，两者是唯一对应的，也就是等价的
 			fmt.Fprintf(h, "import %s %s\n", p1.ImportPath, contentID(a1.buildID))
 		}
 	}
@@ -392,6 +412,7 @@ func (b *Builder) needCgoHdr(a *Action) bool {
 		for _, t1 := range a.triggers {
 			for _, t2 := range t1.triggers {
 				if t2.Mode == "install header" {
+					// 为什么只向上检查两层?
 					return true
 				}
 			}
@@ -429,9 +450,11 @@ const (
 	needStale
 )
 
+// 注意build的结果(一定是.a文件)总是会放到cache($HOME/.cache/go-build)中，而build-install是复制到
+// $GOPATH/pkg/mod/github.com/abc/xyz.a，两者不是一个概念
 // build is the action for building a single package.
 // Note that any new influence on this logic must be reported in b.buildActionID above as well.
-func (b *Builder) build(ctx context.Context, a *Action) (err error) {
+func (b *Builder) build(ctx context.Context, a *Action) (err error) { // build.X.Func = b.build
 	p := a.Package
 
 	bit := func(x uint32, b bool) uint32 {
@@ -447,7 +470,7 @@ func (b *Builder) build(ctx context.Context, a *Action) (err error) {
 		bit(needVet, a.needVet) |
 		bit(needCompiledGoFiles, b.NeedCompiledGoFiles)
 
-	if !p.BinaryOnly {
+	if !p.BinaryOnly { // binary-only-package，已经废弃 //go:binary-only-package
 		if b.useCache(a, b.buildActionID(a), p.Target) {
 			// We found the main output in the cache.
 			// If we don't need any other outputs, we can stop.
@@ -458,7 +481,7 @@ func (b *Builder) build(ctx context.Context, a *Action) (err error) {
 			a.output = []byte{} // start saving output in case we miss any cache results
 			need &^= needBuild
 			if b.NeedExport {
-				p.Export = a.built
+				p.Export = a.built // built指向输出结果路径，一般就是p.Target
 				p.BuildID = a.buildID
 			}
 			if need&needCompiledGoFiles != 0 {
@@ -550,7 +573,7 @@ func (b *Builder) build(ctx context.Context, a *Action) (err error) {
 	}
 
 	gofiles := str.StringList(a.Package.GoFiles)
-	cgofiles := str.StringList(a.Package.CgoFiles)
+	cgofiles := str.StringList(a.Package.CgoFiles) // CgoFiles指的是import "C"的.go文件，不是.c/.s等
 	cfiles := str.StringList(a.Package.CFiles)
 	sfiles := str.StringList(a.Package.SFiles)
 	cxxfiles := str.StringList(a.Package.CXXFiles)
@@ -659,6 +682,7 @@ OverlayLoop:
 			}
 			sfiles, gccfiles = filter(sfiles, sfiles[:0], gccfiles)
 		} else {
+			// 注意cgo和golang的xxx.s不能在一个package中同时存在
 			for _, sfile := range sfiles {
 				data, err := os.ReadFile(filepath.Join(a.Package.Dir, sfile))
 				if err == nil {
@@ -669,6 +693,7 @@ OverlayLoop:
 					}
 				}
 			}
+
 			gccfiles = append(gccfiles, sfiles...)
 			sfiles = nil
 		}
@@ -894,6 +919,7 @@ OverlayLoop:
 	return nil
 }
 
+// 把objdir/name存放到cache中, key是actionID+name
 func (b *Builder) cacheObjdirFile(a *Action, c *cache.Cache, name string) error {
 	f, err := os.Open(a.Objdir + name)
 	if err != nil {
@@ -912,6 +938,7 @@ func (b *Builder) findCachedObjdirFile(a *Action, c *cache.Cache, name string) (
 	return file, nil
 }
 
+// 从cache中复制文件到objdir/name, key是actionID+name
 func (b *Builder) loadCachedObjdirFile(a *Action, c *cache.Cache, name string) error {
 	cached, err := b.findCachedObjdirFile(a, c, name)
 	if err != nil {
@@ -930,6 +957,7 @@ func (b *Builder) loadCachedCgoHdr(a *Action) error {
 	return b.loadCachedObjdirFile(a, c, "_cgo_install.h")
 }
 
+// 放的是一个文件列表，不是文件内容
 func (b *Builder) cacheSrcFiles(a *Action, srcfiles []string) {
 	c := cache.Default()
 	var buf bytes.Buffer
@@ -1051,7 +1079,7 @@ func buildVetConfig(a *Action, srcfiles []string) {
 		Standard:     make(map[string]bool),
 	}
 	a.vetCfg = vcfg
-	for i, raw := range a.Package.Internal.RawImports {
+	for i, raw := range a.Package.Internal.RawImports { // 注意两者一一对应
 		final := a.Package.Imports[i]
 		vcfg.ImportMap[raw] = final
 	}
@@ -1586,7 +1614,7 @@ func BuildInstallFunc(b *Builder, ctx context.Context, a *Action) (err error) {
 		}
 	}()
 
-	a1 := a.Deps[0]
+	a1 := a.Deps[0] // install.X.Deps[0]=link.X or build.X
 	a.buildID = a1.buildID
 	if a.json != nil {
 		a.json.BuildID = a.buildID
@@ -1666,6 +1694,7 @@ func BuildInstallFunc(b *Builder, ctx context.Context, a *Action) (err error) {
 		defer b.cleanup(a1)
 	}
 
+	// 到这里时a.Target != a1.built
 	return b.moveOrCopyFile(a.Target, a1.built, perm, false)
 }
 
@@ -2698,7 +2727,13 @@ func buildFlags(name, defaults string, fromPackage []string, check func(string, 
 
 var cgoRe = lazyregexp.New(`[/\\:]`)
 
+
+// 执行go tool cgo ...
+// 同时生成.c文件和package本身有的.c都会调用gcc进行编译为.o
 func (b *Builder) cgo(a *Action, cgoExe, objdir string, pcCFLAGS, pcLDFLAGS, cgofiles, gccfiles, gxxfiles, mfiles, ffiles []string) (outGo, outObj []string, err error) {
+	// cgofiles: .go files: import "C"
+	// gccfiles: .c files
+
 	p := a.Package
 	cgoCPPFLAGS, cgoCFLAGS, cgoCXXFLAGS, cgoFFLAGS, cgoLDFLAGS, err := b.CFlags(p)
 	if err != nil {
@@ -2718,7 +2753,7 @@ func (b *Builder) cgo(a *Action, cgoExe, objdir string, pcCFLAGS, pcLDFLAGS, cgo
 	if len(ffiles) > 0 {
 		fc := cfg.Getenv("FC")
 		if fc == "" {
-			fc = "gfortran"
+			fc = "gfortran" // gcc-fortran提供的编译器
 		}
 		if strings.Contains(fc, "gfortran") {
 			cgoLDFLAGS = append(cgoLDFLAGS, "-lgfortran")
@@ -2739,6 +2774,11 @@ func (b *Builder) cgo(a *Action, cgoExe, objdir string, pcCFLAGS, pcLDFLAGS, cgo
 	gofiles := []string{objdir + "_cgo_gotypes.go"}
 	cfiles := []string{"_cgo_export.c"}
 	for _, fn := range cgofiles {
+		// main.go =>  main.cgo1.go 和 main.cgo2.c
+		//  main.cgo1.go: 基本就是原来的main.go, 替换掉C相关的代码
+		//                比如 C.sum(1, 2) => _Cfunc_sum(1, 2)
+		//  main.cgo2.c: C侧的wrapper: go wrapper func() -> crosscall -> c wrapper func() -> c func()
+		//               或者相反: c wrapper func() -> crosscall -> go wrapper func() -> go func()
 		f := strings.TrimSuffix(filepath.Base(fn), ".go")
 		gofiles = append(gofiles, objdir+f+".cgo1.go")
 		cfiles = append(cfiles, f+".cgo2.c")
@@ -2962,6 +3002,22 @@ func (b *Builder) cgo(a *Action, cgoExe, objdir string, pcCFLAGS, pcLDFLAGS, cgo
 
 	return outGo, outObj, nil
 }
+
+// 编译一个空的main.c为main.exe，然后调用go tool cgo -dynimport main.exe
+// 生成_cgo_import.go文件, 会写入到.a文件头，然后link会处理这些cgo指令
+/*
+package main
+//go:cgo_import_dynamic _ITM_deregisterTMCloneTable _ITM_deregisterTMCloneTable ""
+//go:cgo_import_dynamic puts puts#GLIBC_2.2.5 "libc.so.6"
+//go:cgo_import_dynamic __stack_chk_fail __stack_chk_fail#GLIBC_2.4 "libc.so.6"
+//go:cgo_import_dynamic __libc_start_main __libc_start_main#GLIBC_2.2.5 "libc.so.6"
+//go:cgo_import_dynamic __gmon_start__ __gmon_start__ ""
+//go:cgo_import_dynamic _ITM_registerTMCloneTable _ITM_registerTMCloneTable ""
+//go:cgo_import_dynamic __cxa_finalize __cxa_finalize#GLIBC_2.2.5 "libc.so.6"
+//go:cgo_import_dynamic _ _ "libpng16.so.16"
+//go:cgo_import_dynamic _ _ "libpthread.so.0"
+//go:cgo_import_dynamic _ _ "libc.so.6"
+*/
 
 // dynimport creates a Go source file named importGo containing
 // //go:cgo_import_dynamic directives for each symbol or library
