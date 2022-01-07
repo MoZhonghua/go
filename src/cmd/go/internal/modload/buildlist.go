@@ -219,6 +219,7 @@ func (rs *Requirements) hasRedundantRoot() bool {
 //
 // If the requirements of any relevant module fail to load, Graph also
 // returns a non-nil error of type *mvs.BuildListError.
+// 会递归展开所有依赖，形成Graph
 func (rs *Requirements) Graph(ctx context.Context) (*ModuleGraph, error) {
 	rs.graphOnce.Do(func() {
 		mg, mgErr := readModGraph(ctx, rs.depth, rs.rootModules)

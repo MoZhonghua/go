@@ -81,18 +81,26 @@ internal/modload/edit.go
 internal/modload/import.go
 internal/modload/init.go
 
-2022-01-05
-internal/modload/query.go ?
-internal/modload/load.go ?
+2022-01-06
+internal/modload/query.go
+internal/modload/list.go
+internal/modload/load.go
+internal/work/init.go
+internal/work/action.go
+internal/work/build.go
 
+2022-01-07
+internal/work/buildid.go
+internal/work/exec.go ?
+internal/work/gc.go ?
+internal/work/security.go ?
+internal/work/testgo.go ?
 
+internal/list/list.go ?
+internal/get/get.go ?
+internal/modget/query.go ?
+internal/modget/get.go ?
 internal/modcmd/init.go ?
 internal/modcmd/download.go ?
-
-internal/work/build.go ?
-
-// GOPATH-mod
-internal/get/get.go ?
-internal/list/list.go ?
 
 main.go

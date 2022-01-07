@@ -24,6 +24,8 @@ import (
 	"cmd/go/internal/trace"
 )
 
+// 对build过程只能看到Package, 对module无感知
+
 var CmdBuild = &base.Command{
 	UsageLine: "go build [-o output] [build flags] [packages]",
 	Short:     "compile packages and dependencies",
@@ -406,7 +408,7 @@ func runBuild(ctx context.Context, cmd *base.Command, args []string) {
 		cfg.BuildO = ""
 	}
 
-	if cfg.BuildO != "" {
+	if cfg.BuildO != "" { // 会自动设置，不一定必须通过-o设置，特别是go build mainpkg
 		// If the -o name exists and is a directory or
 		// ends with a slash or backslash, then
 		// write all main packages to that directory.
@@ -529,7 +531,7 @@ See also: go build, go get, go clean.
 //	gopkg.in/tomb.v2 -> libgopkg.in-tomb.v2.so
 //	a/... b/... ---> liba/c,b/d.so - all matching import paths
 // Name parts are joined with ','.
-func libname(args []string, pkgs []*load.Package) (string, error) {
+func libname(args []string, pkgs []*load.Package) (string, error) { // 多个pkg合并生成一个.so，文件名=>pkga,pkgb,pkgc.so
 	var libname string
 	appendName := func(arg string) {
 		if libname == "" {
@@ -578,6 +580,8 @@ func runInstall(ctx context.Context, cmd *base.Command, args []string) {
 	// 'go install -i' when bootstrapping, and we don't want to show deprecation
 	// messages in that case.
 	for _, arg := range args {
+		// go install github.com/abc/xyz@v1.0.0
+		// 需要特殊处理，最关键的区别是不会修改go.mod，或者说等价于cd /tmp/ && go install ...
 		if strings.Contains(arg, "@") && !build.IsLocalImport(arg) && !filepath.IsAbs(arg) {
 			if cfg.BuildI {
 				fmt.Fprint(os.Stderr, "go install: -i flag is deprecated\n")
@@ -589,7 +593,7 @@ func runInstall(ctx context.Context, cmd *base.Command, args []string) {
 
 	BuildInit()
 	pkgs := load.PackagesAndErrors(ctx, load.PackageOpts{}, args)
-	if cfg.ModulesEnabled && !modload.HasModRoot() {
+	if cfg.ModulesEnabled && !modload.HasModRoot() { // 比如在/tmp中执行go install github.com/abc/xyz
 		haveErrors := false
 		allMissingErrors := true
 		for _, pkg := range pkgs {
@@ -602,6 +606,8 @@ func runInstall(ctx context.Context, cmd *base.Command, args []string) {
 				break
 			}
 		}
+
+		// 全部都是ImportMissingError，给出更好的提示
 		if haveErrors && allMissingErrors {
 			latestArgs := make([]string, len(args))
 			for i := range args {
@@ -611,7 +617,7 @@ func runInstall(ctx context.Context, cmd *base.Command, args []string) {
 			base.Fatalf("go install: version is required when current directory is not in a module\n\tTry 'go install %s' to install the latest version", hint)
 		}
 	}
-	load.CheckPackageErrors(pkgs)
+	load.CheckPackageErrors(pkgs) // exit if error
 	if cfg.BuildI {
 		allGoroot := true
 		for _, pkg := range pkgs {
@@ -666,7 +672,7 @@ func InstallPackages(ctx context.Context, patterns []string, pkgs []*load.Packag
 				// or else something is wrong and worth reporting (like a ConflictDir).
 			case p.Name != "main" && p.Module != nil:
 				// Non-executables have no target (except the cache) when building with modules.
-			case p.Internal.GobinSubdir:
+			case p.Internal.GobinSubdir: // 比如$GOBIN/windows_amd64
 				base.Errorf("go %s: cannot install cross-compiled binaries when GOBIN is set", cfg.CmdName)
 			case p.Internal.CmdlineFiles:
 				base.Errorf("go %s: no install location for .go files listed on command line (GOBIN not set)", cfg.CmdName)
@@ -692,7 +698,7 @@ func InstallPackages(ctx context.Context, patterns []string, pkgs []*load.Packag
 		// If p is a tool, delay the installation until the end of the build.
 		// This avoids installing assemblers/compilers that are being executed
 		// by other steps in the build.
-		a1 := b.AutoAction(ModeInstall, depMode, p)
+		a1 := b.AutoAction(ModeInstall, depMode, p) // 注意install.a1.Deps[0]=build.a1
 		if load.InstallTargetDir(p) == load.ToTool {
 			a.Deps = append(a.Deps, a1.Deps...)
 			a1.Deps = append(a1.Deps, a)
@@ -701,6 +707,7 @@ func InstallPackages(ctx context.Context, patterns []string, pkgs []*load.Packag
 		}
 		a.Deps = append(a.Deps, a1)
 	}
+	// root -> tools -> other_pkgs + build_tools
 	if len(tools) > 0 {
 		a = &Action{
 			Mode: "go install (tools)",
@@ -730,6 +737,8 @@ func InstallPackages(ctx context.Context, patterns []string, pkgs []*load.Packag
 	// runs 'go build' and the moves the generated file to the install dir.
 	// See issue 9645.
 	if len(patterns) == 0 && len(pkgs) == 1 && pkgs[0].Name == "main" {
+		// 比如 cd toolx, go build ., go install .
+		// 第二步会生成./toolx, 第三步会复制./toolx到GOBIN, 然后删除./toolx
 		// Compute file 'go build' would have created.
 		// If it exists and is an executable file, remove it.
 		targ := pkgs[0].DefaultExecName()
@@ -756,7 +765,7 @@ func InstallPackages(ctx context.Context, patterns []string, pkgs []*load.Packag
 func installOutsideModule(ctx context.Context, args []string) {
 	modload.ForceUseModules = true
 	modload.RootMode = modload.NoRoot
-	modload.AllowMissingModuleImports()
+	modload.AllowMissingModuleImports() // 指在没有main module是也允许下载缺少的依赖
 	modload.Init()
 	BuildInit()
 

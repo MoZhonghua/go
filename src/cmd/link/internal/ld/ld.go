@@ -210,6 +210,7 @@ func addlib(ctxt *Link, src, obj, lib string, fingerprint goobj.FingerprintType)
  */
  // 只记录，还没真正读取.a/.so文件
 func addlibpath(ctxt *Link, srcref, objref, file, pkg, shlib string, fingerprint goobj.FingerprintType) *sym.Library {
+	// file是.a文件路径，一般是通过-importcfg文件指定
 	// 被多个package引用时只会添加一次，Library.Objref/Srcref是第一个引用者
 	if l := ctxt.LibraryByPkg[pkg]; l != nil {
 		return l

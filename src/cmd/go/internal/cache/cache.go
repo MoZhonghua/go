@@ -22,6 +22,10 @@ import (
 	"cmd/go/internal/lockedfile"
 )
 
+// 在$HOME/.cache/go-build/中
+// 基本假设是: AcitonID唯一确定了OutputID, ActionID是将所有input合在一起求的哈希，两个操作的ActionID
+// 一样说明input一样，那么就应该输出完全一样的output，也就是唯一确定了OutputID
+
 // "xxx-a": action entry file
 // "xxx-d": output file
 // ActionID -> OutputID

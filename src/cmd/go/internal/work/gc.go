@@ -42,6 +42,8 @@ func (gcToolchain) linker() string {
 }
 
 func pkgPath(a *Action) string {
+	// 注意即使是main package，p.ImportPath也是实际路径
+	// $GOPATH/github.com/abc/xyz/main.go => p.ImportPath=github.com/abc/xyz
 	p := a.Package
 	ppath := p.ImportPath
 	if cfg.BuildBuildmode == "plugin" {
@@ -121,7 +123,7 @@ func (gcToolchain) gc(b *Builder, a *Action, archive string, importcfg, embedcfg
 	if cfg.BuildContext.InstallSuffix != "" {
 		gcargs = append(gcargs, "-installsuffix", cfg.BuildContext.InstallSuffix)
 	}
-	if a.buildID != "" {
+	if a.buildID != "" { // 注意此时buildID为aid/aid，编译完成后，在通过go tool buildid -w更新oid部分
 		gcargs = append(gcargs, "-buildid", a.buildID)
 	}
 	if p.Internal.OmitDebug || cfg.Goos == "plan9" || cfg.Goarch == "wasm" {
@@ -201,6 +203,9 @@ func (gcToolchain) gc(b *Builder, a *Action, archive string, importcfg, embedcfg
 	return ofile, output, err
 }
 
+// 注意并发发生在两个层面上：
+//  - process层面: 每个package启动一个compile进程编译，可以同时启动多少个compile进程
+//  - thread层面: compile在编译一个package时可以有多少个thread(?)同时进行，每个对应一个go文件?
 // gcBackendConcurrency returns the backend compiler concurrency level for a package compilation.
 func gcBackendConcurrency(gcflags []string) int {
 	// First, check whether we can use -c at all for this compilation.
@@ -277,6 +282,7 @@ CheckFlags:
 
 // trimpath returns the -trimpath argument to use
 // when compiling the action.
+// 多个old => rewritten，用";"分隔
 func (a *Action) trimpath() string {
 	// Keep in sync with Builder.ccompile
 	// The trimmed paths are a little different, but we need to trim in the
@@ -285,13 +291,13 @@ func (a *Action) trimpath() string {
 	// Strip the object directory entirely.
 	objdir := a.Objdir
 	if len(objdir) > 1 && objdir[len(objdir)-1] == filepath.Separator {
-		objdir = objdir[:len(objdir)-1]
+		objdir = objdir[:len(objdir)-1] // 去掉最后的"/"
 	}
 	rewrite := ""
 
 	rewriteDir := a.Package.Dir
 	if cfg.BuildTrimpath {
-		importPath := a.Package.Internal.OrigImportPath
+		importPath := a.Package.Internal.OrigImportPath // 比如在增加_test后缀前的ImportPath
 		if m := a.Package.Module; m != nil && m.Version != "" {
 			rewriteDir = m.Path + "@" + m.Version + strings.TrimPrefix(importPath, m.Path)
 		} else {
@@ -344,7 +350,7 @@ func (a *Action) trimpath() string {
 	if hasCgoOverlay {
 		rewrite += overlayNonGoRewrites
 	}
-	rewrite += objdir + "=>"
+	rewrite += objdir + "=>" // 总是删除objdir前缀
 
 	return rewrite
 }
@@ -362,6 +368,7 @@ func asmArgs(a *Action, p *load.Package) []interface{} {
 		}
 	}
 	if objabi.IsRuntimePackagePath(pkgpath) {
+		// asm会自动增加-D GOEXPERIMENT_XXX 0/1, 方便runtime根据这些macro来区别处理
 		args = append(args, "-compiling-runtime")
 	}
 
@@ -395,6 +402,11 @@ func (gcToolchain) asm(b *Builder, a *Action, sfiles []string) ([]string, error)
 	return ofiles, nil
 }
 
+
+// ABIInternal仅在runtime中有效，也就是必须有-compiling-runtime参数才能正常解析
+// 简单遍历.s中的每条语句
+//  - TEXT pkg.xxx输出: def pkg.xxx ABIInternal
+//  - call pkg.xxx输出: ref pkg.xxx ABI0
 func (gcToolchain) symabis(b *Builder, a *Action, sfiles []string) (string, error) {
 	mkSymabis := func(p *load.Package, sfiles []string, path string) error {
 		args := asmArgs(a, p)
@@ -410,6 +422,7 @@ func (gcToolchain) symabis(b *Builder, a *Action, sfiles []string) (string, erro
 		// Supply an empty go_asm.h as if the compiler had been run.
 		// -gensymabis parsing is lax enough that we don't need the
 		// actual definitions that would appear in go_asm.h.
+		// 因为xxx.s中会#include "go_asm.h"，需要保证lex正常处理
 		if err := b.writeFile(a.Objdir+"go_asm.h", nil); err != nil {
 			return err
 		}
@@ -486,6 +499,7 @@ func (gcToolchain) pack(b *Builder, a *Action, afile string, ofiles []string) er
 }
 
 func packInternal(afile string, ofiles []string) error {
+	// 注意是Append方式打开的，已经有文件头!<arch>
 	dst, err := os.OpenFile(afile, os.O_WRONLY|os.O_APPEND, 0)
 	if err != nil {
 		return err
@@ -669,6 +683,7 @@ func (gcToolchain) ld(b *Builder, root *Action, out, importcfg, mainpkg string) 
 	if cfg.BuildTrimpath {
 		env = append(env, "GOROOT_FINAL="+trimPathGoRootFinal)
 	}
+	// 注意输入参数只有mainpkg.a，会从.a中读取依赖关系，然后从$GOPATH/pkg/linux_amd64中读取对应的.a
 	return b.run(root, dir, root.Package.ImportPath, env, cfg.BuildToolexec, base.Tool("link"), "-o", out, "-importcfg", importcfg, ldflags, mainpkg)
 }
 

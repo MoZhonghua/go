@@ -295,7 +295,7 @@ func moduleInfo(ctx context.Context, rs *Requirements, m module.Version, mode Li
 	}
 
 	r := Replacement(m)
-	if r.Path == "" { // 什么情况下replace的path为空？
+	if r.Path == "" { // 什么情况下replace的path为空, std?
 		if cfg.BuildMod == "vendor" {
 			// It's tempting to fill in the "Dir" field to point within the vendor
 			// directory, but that would be misleading: the vendor directory contains

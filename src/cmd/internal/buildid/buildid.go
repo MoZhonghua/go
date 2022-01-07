@@ -328,6 +328,8 @@ func readRaw(name string, data []byte) (id string, err error) {
 // so cutting to 20 bytes is a significant savings when build IDs are displayed.
 // (20*4+3 = 83 bytes compared to 64*4+3 = 259 bytes for the
 // more straightforward option of printing the entire h in base64).
+// buildid最多有4个hash+3个"/"，也就是最多83字节
+// actionID(binary)/actionID(main.a)/contentID(main.a)/contentID(binary)
 func HashToString(h [32]byte) string {
 	const b64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
 	const chunks = 5

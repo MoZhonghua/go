@@ -169,7 +169,7 @@ type actionJSON struct {
 
 // cacheKey is the key for the action cache.
 type cacheKey struct {
-	mode string
+	mode string  // cacheAction(): build, vet, link
 	p    *load.Package
 }
 
@@ -391,6 +391,7 @@ func (b *Builder) CompileAction(mode, depMode BuildMode, p *load.Package) *Actio
 	vetOnly := mode&ModeVetOnly != 0
 	mode &^= ModeVetOnly
 
+	// 注意是build和install区别，不是compile和link的区别
 	if mode != ModeBuild && (p.Internal.Local || p.Module != nil) && p.Target == "" {
 		// Imported via local path or using modules. No permanent target.
 		mode = ModeBuild
@@ -444,7 +445,7 @@ func (b *Builder) CompileAction(mode, depMode BuildMode, p *load.Package) *Actio
 	case "build", "built-in package", "gccgo stdlib":
 		// ok
 	case "build-install":
-		buildAction = a.Deps[0]
+		buildAction = a.Deps[0] // 什么情况出现？
 	default:
 		panic("lost build action: " + buildAction.Mode)
 	}
@@ -551,6 +552,7 @@ func (b *Builder) LinkAction(mode, depMode BuildMode, p *load.Package) *Action {
 		}
 		a.Target = a.Objdir + filepath.Join("exe", name) + cfg.ExeSuffix
 		a.built = a.Target
+		// link.X.Deps: [build.X, all Deps of build.X]
 		b.addTransitiveLinkDeps(a, a1, "")
 
 		// Sequence the build of the main package (a1) strictly after the build
@@ -560,7 +562,7 @@ func (b *Builder) LinkAction(mode, depMode BuildMode, p *load.Package) *Action {
 		// In order for that linkActionID call to compute the right action ID, all the
 		// dependencies of a (except a1) must have completed building and have
 		// recorded their build IDs.
-		a1.Deps = append(a1.Deps, &Action{Mode: "nop", Deps: a.Deps[1:]})
+		a1.Deps = append(a1.Deps, &Action{Mode: "nop", Deps: a.Deps[1:]}) // a.Deps[0]是a1
 		return a
 	})
 
@@ -657,7 +659,7 @@ func (b *Builder) addTransitiveLinkDeps(a, a1 *Action, shlib string) {
 			}
 			haveDep[a2.Package.ImportPath] = true
 			a.Deps = append(a.Deps, a2)
-			if a2.Mode == "build-install" {
+			if a2.Mode == "build-install" { // install.X.Deps[0] = build.X
 				a2 = a2.Deps[0] // walk children of "build" action
 			}
 			workq = append(workq, a2)

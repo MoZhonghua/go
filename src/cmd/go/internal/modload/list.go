@@ -40,6 +40,7 @@ func ListModules(ctx context.Context, args []string, mode ListMode) ([]*modinfo.
 	type token struct{}
 	sem := make(chan token, runtime.GOMAXPROCS(0))
 	if mode != 0 {
+		// 对每个module补充其他信息
 		for _, m := range mods {
 			add := func(m *modinfo.ModulePublic) {
 				sem <- token{}
@@ -126,6 +127,7 @@ func listModules(ctx context.Context, rs *Requirements, args []string, mode List
 	matchedModule := map[module.Version]bool{}
 	for _, arg := range args {
 		if i := strings.Index(arg, "@"); i >= 0 {
+			// 如果用户指定了版本则查询指定版本, 可以是特殊版本，比如latest
 			path := arg[:i]
 			vers := arg[i+1:]
 
@@ -150,6 +152,8 @@ func listModules(ctx context.Context, rs *Requirements, args []string, mode List
 				// specific revision or used 'go list -retracted'.
 				allowed = nil
 			}
+			// 注意vers是用户希望查询的版本
+			fmt.Printf("==List: vers=%v; current=%v\n", vers, current)
 			info, err := Query(ctx, path, vers, current, allowed)
 			if err != nil {
 				mods = append(mods, &modinfo.ModulePublic{

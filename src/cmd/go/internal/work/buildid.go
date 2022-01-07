@@ -86,6 +86,7 @@ import (
 // the same binary: if the action ID for main.a's inputs matches and then
 // the action ID for the link step matches when assuming the given main.a
 // content ID, then the binary as a whole is up-to-date and need not be rebuilt.
+// 注意binary的ActionID不仅仅依赖于main.a的ContentID，还有其他，比如-ldflags
 //
 // This is all a bit complex and may be simplified once we can rely on the
 // main cache, but at least at the start we will be using the content-based
@@ -168,7 +169,7 @@ func (b *Builder) toolID(name string) string {
 		base.Fatalf("%s: %v\n%s%s", desc, err, stdout.Bytes(), stderr.Bytes())
 	}
 
-	line := stdout.String()
+	line := stdout.String()  // "asm version go1.17.2"
 	f := strings.Fields(line)
 	if len(f) < 3 || f[0] != name && path != VetTool || f[1] != "version" || f[2] == "devel" && !strings.HasPrefix(f[len(f)-1], "buildID=") {
 		base.Fatalf("%s -V=full: unexpected output:\n\t%s", desc, line)
@@ -396,6 +397,8 @@ func (b *Builder) fileHash(file string) string {
 // during a's work. The caller should defer b.flushOutput(a), to make sure
 // that flushOutput is eventually called regardless of whether the action
 // succeeds. The flushOutput call must happen after updateBuildID.
+//
+// target就是输出路径，比如$GOPATH/pkg/linux_amd64/xxx/yyy.a
 func (b *Builder) useCache(a *Action, actionHash cache.ActionID, target string) bool {
 	// The second half of the build ID here is a placeholder for the content hash.
 	// It's important that the overall buildID be unlikely verging on impossible
@@ -408,12 +411,12 @@ func (b *Builder) useCache(a *Action, actionHash cache.ActionID, target string) 
 		a.json.ActionID = actionID
 	}
 	contentID := actionID // temporary placeholder, likely unique
-	a.buildID = actionID + buildIDSeparator + contentID
+	a.buildID = actionID + buildIDSeparator + contentID // actionID/actionID
 
 	// Executable binaries also record the main build ID in the middle.
 	// See "Build IDs" comment above.
 	if a.Mode == "link" {
-		mainpkg := a.Deps[0]
+		mainpkg := a.Deps[0] // link.X.Deps[0] = build.X
 		a.buildID = actionID + buildIDSeparator + mainpkg.buildID + buildIDSeparator + contentID
 	}
 
@@ -440,8 +443,16 @@ func (b *Builder) useCache(a *Action, actionHash cache.ActionID, target string) 
 	// as up-to-date as well. See "Build IDs" comment above.
 	// TODO(rsc): Rewrite this code to use a TryCache func on the link action.
 	if target != "" && !cfg.BuildA && !b.NeedExport && a.Mode == "build" && len(a.triggers) == 1 && a.triggers[0].Mode == "link" {
+		// a.Mode == "build" && len(a.triggers) == 1 && a.triggers[0].Mode == "link" => a是build.mainX
 		buildID, err := buildid.ReadFile(target)
 		if err == nil {
+			// 问题描述: 已知binary的buildID => link.aid/build.aid/build.oid/link.oid
+			//           main.a的buildID => build.aid'/?
+			// 满足什么条件时不需要重新build和link生成binary?
+			//  - build.aid == build.aid'
+			//  - link.aid == compute_link_id(build.aid'/build.oid + other_inputs)
+			// 假设aid = aid' => oid = oid'，也就是相同的aid(即相同的input)会生成相同的oid(ouptut)
+			// 注意main.a的buildID的oid部分用的是build.oid
 			id := strings.Split(buildID, buildIDSeparator)
 			if len(id) == 4 && id[1] == actionID {
 				// Temporarily assume a.buildID is the package build ID
@@ -462,6 +473,7 @@ func (b *Builder) useCache(a *Action, actionHash cache.ActionID, target string) 
 					// If it doesn't work, it doesn't work: reusing the cached binary is more
 					// important than reprinting diagnostic information.
 					if c := cache.Default(); c != nil {
+						// 假装执行了compile和link命令，实际上是把上次执行缓存的输出日志打印出来
 						showStdout(b, c, a.actionID, "stdout")      // compile output
 						showStdout(b, c, a.actionID, "link-stdout") // link output
 					}
@@ -486,6 +498,8 @@ func (b *Builder) useCache(a *Action, actionHash cache.ActionID, target string) 
 	// We avoid the nested build ID problem in the previous special case
 	// by recording the test results in the cache under the action ID half.
 	if !cfg.BuildA && len(a.triggers) == 1 && a.triggers[0].TryCache != nil && a.triggers[0].TryCache(b, a.triggers[0]) {
+		// 注意这里没有限定a.Mode == build, a.triggers[0].Mode == link
+		//
 		// Best effort attempt to display output from the compile and link steps.
 		// If it doesn't work, it doesn't work: reusing the test result is more
 		// important than reprinting diagnostic information.
@@ -500,6 +514,7 @@ func (b *Builder) useCache(a *Action, actionHash cache.ActionID, target string) 
 		return true
 	}
 
+	// 注意执行到这里说明不能用cache，也就是需要重新编译，填写StaleReason
 	if b.IsCmdList {
 		// Invoked during go list to compute and record staleness.
 		if p := a.Package; p != nil && !p.Stale {
@@ -507,7 +522,7 @@ func (b *Builder) useCache(a *Action, actionHash cache.ActionID, target string) 
 			if cfg.BuildA {
 				p.StaleReason = "build -a flag in use"
 			} else {
-				p.StaleReason = "build ID mismatch"
+				p.StaleReason = "build ID mismatch" // target可能根本不存在, 也算mismatch
 				for _, p1 := range p.Internal.Imports {
 					if p1.Stale && p1.StaleReason != "" {
 						if strings.HasPrefix(p1.StaleReason, "stale dependency: ") {
@@ -531,6 +546,8 @@ func (b *Builder) useCache(a *Action, actionHash cache.ActionID, target string) 
 	// We treat hits in this cache as being "stale" for the purposes of go list
 	// (in effect, "stale" means whether p.Target is up-to-date),
 	// but we're still happy to use results from the build artifact cache.
+	// 注意cache和Target的区别: Stale检查是针对Target的，即使Cache中有最新的也会
+	// 输出为Stale。
 	if c := cache.Default(); c != nil {
 		if !cfg.BuildA {
 			if file, _, err := c.GetFile(actionHash); err == nil {
@@ -590,6 +607,9 @@ func (b *Builder) flushOutput(a *Action) {
 // in the binary.
 //
 // Keep in sync with src/cmd/buildid/buildid.go
+//
+// ContentID是文件的hash，而ContentID本身做为buildID的一部分需要写入到文件中，这就有了
+// 循环依赖的问题。go tool buildid -w用来解决这个问题。
 func (b *Builder) updateBuildID(a *Action, target string, rewrite bool) error {
 	if cfg.BuildX || cfg.BuildN {
 		if rewrite {

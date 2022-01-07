@@ -157,7 +157,7 @@ type PackageOpts struct {
 	//
 	// If empty, the compatible version is the Go version immediately prior to the
 	// 'go' version listed in the go.mod file.
-	TidyCompatibleVersion string
+	TidyCompatibleVersion string // 注意含义是生成的go.mod兼容的最老的go版本
 
 	// VendorModulesInGOROOTSrc indicates that if we are within a module in
 	// GOROOT/src, packages in the module's vendor directory should be resolved as
@@ -239,6 +239,7 @@ func LoadPackages(ctx context.Context, opts PackageOpts, patterns ...string) (ma
 		opts.Tags = imports.Tags()
 	}
 
+	// root的概念: 指patterns直接匹配的package
 	patterns = search.CleanPatterns(patterns)
 	matches = make([]*search.Match, 0, len(patterns))
 	allPatternIsRoot := false
@@ -333,6 +334,7 @@ func LoadPackages(ctx context.Context, opts PackageOpts, patterns ...string) (ma
 		allPatternIsRoot: allPatternIsRoot,
 
 		listRoots: func(rs *Requirements) (roots []string) {
+			// loadFromRoots()会循环多次调用这个函数
 			updateMatches(rs, nil)
 			for _, m := range matches {
 				roots = append(roots, m.Pkgs...)
@@ -557,14 +559,14 @@ func pathInModuleCache(ctx context.Context, dir string, rs *Requirements) string
 	tryMod := func(m module.Version) (string, bool) {
 		var root string
 		var err error
-		if repl := Replacement(m); repl.Path != "" && repl.Version == "" {
+		if repl := Replacement(m); repl.Path != "" && repl.Version == "" { // filepath replacement
 			root = repl.Path
 			if !filepath.IsAbs(root) {
 				root = filepath.Join(ModRoot(), root)
 			}
-		} else if repl.Path != "" {
+		} else if repl.Path != "" { // normal replacement
 			root, err = modfetch.DownloadDir(repl)
-		} else {
+		} else { // no replacement
 			root, err = modfetch.DownloadDir(m)
 		}
 		if err != nil {
@@ -795,7 +797,7 @@ func (ld *loader) errorf(format string, args ...interface{}) {
 type loadPkg struct {
 	// Populated at construction time:
 	path   string // import path
-	testOf *loadPkg
+	testOf *loadPkg  // test_package.testOf=normal_package, normal_package.test=test_package
 
 	// Populated at construction time and updated by (*loader).applyPkgFlags:
 	flags atomicLoadPkgFlags
@@ -1156,8 +1158,10 @@ func (ld *loader) updateRequirements(ctx context.Context) (changed bool, err err
 	// dependencies in ld.requirements as indirect-only. Propagate them as direct.
 	loadedDirect := ld.allPatternIsRoot && reflect.DeepEqual(ld.Tags, imports.AnyTags())
 	if loadedDirect {
+		// 所有package都会import，可以正确判断
 		direct = make(map[string]bool)
 	} else {
+		// 不是所有package都会import，不能正确判断，因此把现有的direct列表保留
 		// TODO(bcmills): It seems like a shame to allocate and copy a map here when
 		// it will only rarely actually vary from rs.direct. Measure this cost and
 		// maybe avoid the copy.
@@ -1334,6 +1338,9 @@ func (ld *loader) resolveMissingImports(ctx context.Context) (modAddedBy map[mod
 				// the problem — so we prefer the latter.
 				pkg.err = err
 			}
+
+			// err=nil, pkg.err!=nil
+			// 不更新pkg.err和pkg.mod字段，因为现在还不确定mod是否会在最终的buildlist中
 
 			// err is nil, but we intentionally leave pkg.err non-nil and pkg.mod
 			// unset: we still haven't satisfied other invariants of a
@@ -1657,7 +1664,7 @@ func (ld *loader) pkgTest(ctx context.Context, pkg *loadPkg, testFlags loadPkgFl
 	createdTest := false
 	pkg.testOnce.Do(func() {
 		pkg.test = &loadPkg{
-			path:   pkg.path,
+			path:   pkg.path, // 注意pkg和对应的testPkg基本是一样的
 			testOf: pkg,
 			mod:    pkg.mod,
 			dir:    pkg.dir,
@@ -1692,6 +1699,7 @@ func (ld *loader) pkgTest(ctx context.Context, pkg *loadPkg, testFlags loadPkgFl
 
 // stdVendor returns the canonical import path for the package with the given
 // path when imported from the standard-library package at parentPath.
+// 处理在GOROOT/src/vendor和GOROOT/cmd/vendor/目录下package
 func (ld *loader) stdVendor(parentPath, path string) string {
 	if search.IsStandardImportPath(path) {
 		return path
@@ -2020,6 +2028,7 @@ func (ld *loader) buildStacks() {
 		pkg.stack = pkg // sentinel to avoid processing in next loop
 		ld.pkgs = append(ld.pkgs, pkg)
 	}
+	// 一个广度优先遍历
 	for i := 0; i < len(ld.pkgs); i++ { // not range: appending to ld.pkgs in loop
 		pkg := ld.pkgs[i]
 		for _, next := range pkg.imports {
