@@ -6,10 +6,12 @@
 
 package test
 
+// 和src/testing.Init()中flag对应
+//
 // passFlagToTest contains the flags that should be forwarded to
 // the test binary with the prefix "test.".
 var passFlagToTest = map[string]bool{
-	"bench":                true,
+	"bench":                true, // go test -bench=xxx => build test as ./main and run: ./main -test.bench=xxx
 	"benchmem":             true,
 	"benchtime":            true,
 	"blockprofile":         true,

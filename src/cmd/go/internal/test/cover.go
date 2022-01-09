@@ -23,6 +23,8 @@ var coverMerge struct {
 // Using this function clears the profile in case it existed from a previous run,
 // or in case it doesn't exist and the test is going to fail to create it (or not run).
 func initCoverProfile() {
+	// -coverprofile, or
+	// -c, only compile
 	if testCoverProfile == "" || testC {
 		return
 	}
@@ -68,6 +70,7 @@ func mergeCoverProfile(ew io.Writer, file string) {
 		fmt.Fprintf(ew, "error: test wrote malformed coverage profile.\n")
 		return
 	}
+	// 注意最开始的mode: xxx已经读取了，不会再写入
 	_, err = io.Copy(coverMerge.f, r)
 	if err != nil {
 		fmt.Fprintf(ew, "error: saving coverage profile: %v\n", err)

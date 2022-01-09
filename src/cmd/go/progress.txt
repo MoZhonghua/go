@@ -111,7 +111,12 @@ internal/modcmd/tidy.go
 internal/modcmd/vendor.go
 internal/modcmd/verify.go
 internal/modcmd/why.go
+internal/run/run.go
 
-internal/run/run.go ?
+internal/test/cover.go
+internal/test/flagdefs.go
+internal/test/genflags.go
+internal/test/testflag.go
+internal/test/test.go ?
 
 main.go

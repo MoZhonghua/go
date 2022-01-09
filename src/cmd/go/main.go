@@ -55,8 +55,8 @@ func init() {
 		modget.CmdGet,        // Done
 		work.CmdInstall,      // Done
 		list.CmdList,         // Done
-		modcmd.CmdMod,
-		run.CmdRun, // ? go run main.go
+		modcmd.CmdMod,        // Done
+		run.CmdRun,           // Done, go run main.go
 		test.CmdTest,
 		tool.CmdTool,       // Done
 		version.CmdVersion, // Done

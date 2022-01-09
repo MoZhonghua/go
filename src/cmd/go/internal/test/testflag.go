@@ -72,6 +72,7 @@ func init() {
 	cf.Var(&testShuffle, "shuffle", "")
 
 	for name := range passFlagToTest {
+		// 也可以go test -test.run=xxx
 		cf.Var(cf.Lookup(name).Value, "test."+name, "")
 	}
 }
@@ -251,6 +252,7 @@ func testFlags(args []string) (packageNames, passToTest []string) {
 	base.SetFromGOFLAGS(&CmdTest.Flag)
 	addFromGOFLAGS := map[string]bool{}
 	CmdTest.Flag.Visit(func(f *flag.Flag) {
+		// 只会遍历设置过的flag
 		if short := strings.TrimPrefix(f.Name, "test."); passFlagToTest[short] {
 			addFromGOFLAGS[f.Name] = true
 		}
