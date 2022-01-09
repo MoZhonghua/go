@@ -56,6 +56,7 @@ type query struct {
 	// canMatchWildcard, if non-nil, reports whether the module with the given
 	// path could lexically contain a package matching pattern, which must be a
 	// wildcard.
+	// 为了快速过滤掉整个module，否则就需要对module中每个package检查是否匹配
 	canMatchWildcardInModule func(mPath string) bool
 
 	// conflict is the first query identified as incompatible with this one.
@@ -153,6 +154,7 @@ func newQuery(raw string) (*query, error) {
 		if getU.version == "" {
 			version = "upgrade"
 		} else {
+			// -u=patch
 			version = getU.version
 		}
 	}

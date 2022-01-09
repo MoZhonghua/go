@@ -31,6 +31,12 @@ import (
 	"golang.org/x/mod/semver"
 )
 
+// go.mod的信息实际在三个地方, 三个全局变量
+//  -index
+//  -modFile
+//  -requirements
+// 前两个总是匹配的，requirements会更新, 在commitRequirements()后才能保证匹配
+
 // Variables set by other packages.
 //
 // TODO(#40775): See if these can be plumbed as explicit parameters.
@@ -43,6 +49,8 @@ var (
 	// GO111MODULE=auto or to report an error when GO111MODULE=off.
 	ForceUseModules bool
 
+	// 可以理解为即使-mod=readonly时，也允许修改go.mod来添加missing module imports
+	// 注意其他需要修改go.mod的情况仍然不允许
 	allowMissingModuleImports bool
 )
 
@@ -395,6 +403,7 @@ var errGoModDirty error = goModDirtyError{}
 func LoadModFile(ctx context.Context) *Requirements {
 	rs, needCommit := loadModFile(ctx)
 	if needCommit {
+		// 可能是第一次读取go.mod然后做了些fix, 此时index和requirements不再匹配
 		commitRequirements(ctx, modFileGoVersion(), rs)
 	}
 	return rs
@@ -406,6 +415,12 @@ func LoadModFile(ctx context.Context) *Requirements {
 // If needCommit is true, after the caller makes any other needed changes to the
 // returned requirements they should invoke commitRequirements to fix any
 // inconsistencies that may be present in the on-disk go.mod file.
+// 只会执行一次, 读取go.mod并写入以下字段:
+//  - index
+//  - modFile
+//  - requirements
+// 然后进行一些常规检查, 更新内存中的requirements, 注意此时index和requirements不再匹配
+// commitRequirements()会写入go.mod
 func loadModFile(ctx context.Context) (rs *Requirements, needCommit bool) {
 	if requirements != nil {
 		return requirements, false
@@ -1025,6 +1040,7 @@ func commitRequirements(ctx context.Context, goVersion string, rs *Requirements)
 	}
 	modFile.Cleanup()
 
+	// 检查是否index和requirements是否匹配
 	dirty := index.modFileIsDirty(modFile)
 	if dirty && cfg.BuildMod != "mod" {
 		// If we're about to fail due to -mod=readonly,
@@ -1056,6 +1072,7 @@ func commitRequirements(ctx context.Context, goVersion string, rs *Requirements)
 	}
 	defer func() {
 		// At this point we have determined to make the go.mod file on disk equal to new.
+		// 更新index
 		index = indexModFile(new, modFile, false)
 
 		// Update go.sum after releasing the side lock and refreshing the index.

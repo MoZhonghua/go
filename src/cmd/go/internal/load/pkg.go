@@ -1116,6 +1116,7 @@ func isDir(path string) bool {
 // First, there is Go 1.5 vendoring (golang.org/s/go15vendor).
 // If vendor expansion doesn't trigger, then the path is also subject to
 // Go 1.11 module legacy conversion (golang.org/issue/25069).
+// parent一般是指import "path"的包, 因为很多情况下parent会影响path的解析，比如parent/vendor的处理
 func ResolveImportPath(parent *Package, path string) (found string) {
 	var parentPath, parentDir, parentRoot string
 	parentIsStd := false
@@ -1125,21 +1126,31 @@ func ResolveImportPath(parent *Package, path string) (found string) {
 		parentRoot = parent.Root
 		parentIsStd = parent.Standard
 	}
+	// path=abc/xyz/def
+	// parentPath=abc/xyz
+	// parentDir=$GOPATh/src/abc/xyz
+	// parentRoot=$GOPATH/src or module root
 	return resolveImportPath(path, parentPath, parentDir, parentRoot, parentIsStd)
 }
 
 func resolveImportPath(path, parentPath, parentDir, parentRoot string, parentIsStd bool) (found string) {
 	// 如果module-aware mode，则走modload流程
 	if cfg.ModulesEnabled {
+		// Lookup直接检查cache，也就是必须已经调用过modload.LoadPackages()
+		// 正常走到这个路径都会调用
 		if _, p, e := modload.Lookup(parentPath, parentIsStd, path); e == nil {
 			return p
 		}
 		return path
 	}
+
+	// 从parentDir遍历到parentRoot，检查各级目录下是否有vendor/path
 	found = vendoredImportPath(path, parentPath, parentDir, parentRoot)
 	if found != path {
 		return found
 	}
+
+	// 到这里说明是GOPATH-mode, 处理xyz/v2/abc这种路径
 	return moduleImportPath(path, parentPath, parentDir, parentRoot)
 }
 
@@ -1314,6 +1325,7 @@ func isVersionElement(s string) bool {
 // x/y/v2/z does not exist and x/y/go.mod says “module x/y/v2”,
 // then go build will read the import as x/y/z instead.
 // See golang.org/issue/25069.
+// 注意一定是运行在GOPATH-mode下
 // 从后向前依次检查path中的vNNN部分:  a/b/x/vNNN/y
 //  - 尝试Import("a/b/x"), 如果失败的跳过。成功时获得了a/b/x的Dir，可能是在GOPATH/GOROOT/modcache中
 //  - 检查Dir/go.mod存在且"module a/b/x/vNNN"，则返回a/b/x/y，即把vNNN部分删掉

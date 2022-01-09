@@ -555,6 +555,8 @@ func QueryPackages(ctx context.Context, pattern, query string, current func(stri
 // QueryPattern always returns at least one QueryResult (which may be only
 // modOnly) or a non-nil error.
 // pattern=github.com/abc/xyz/... query=latest,upgrade,...
+// 由于module path不存在...的概念，实际就是截断package path中不包含...的部分
+// 然后直接尝试查询对应的module path是否存在（需要不断截短path尝试）
 func QueryPattern(ctx context.Context, pattern, query string, current func(string) string, allowed AllowedFunc) (pkgMods []QueryResult, modOnly *QueryResult, err error) {
 	ctx, span := trace.StartSpan(ctx, "modload.QueryPattern "+pattern+" "+query)
 	defer span.Done()

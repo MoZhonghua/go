@@ -331,7 +331,7 @@ func download(arg string, parent *load.Package, stk *load.ImportStack, mode int)
 		// We delay this until after reloadPackage so that the old entry
 		// for p has been replaced in the package cache.
 		if wildcardOkay && strings.Contains(arg, "...") {
-			// 下载完成后再次匹配
+			// 下载完成后再次匹配, 注意会更新args列表
 			match := search.NewMatch(arg)
 			if match.IsLocal() {
 				match.MatchDirs()
@@ -352,6 +352,7 @@ func download(arg string, parent *load.Package, stk *load.ImportStack, mode int)
 
 		pkgs = pkgs[:0]
 		for _, arg := range args {
+			// 此处已经把...转换为具体的匹配package path
 			// Note: load calls loadPackage or loadImport,
 			// which push arg onto stk already.
 			// Do not push here too, or else stk will say arg imports arg.
@@ -394,6 +395,7 @@ func download(arg string, parent *load.Package, stk *load.ImportStack, mode int)
 			// we always pass mode 0 to the recursive calls below.)
 			imports = str.StringList(imports, p.TestImports, p.XTestImports)
 		}
+		// 需要递归下载所有的依赖项
 		for i, path := range imports {
 			if path == "C" {
 				continue

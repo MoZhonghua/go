@@ -223,7 +223,7 @@ var (
 	getFix      = CmdGet.Flag.Bool("fix", false, "")
 	getM        = CmdGet.Flag.Bool("m", false, "")
 	getT        = CmdGet.Flag.Bool("t", false, "")
-	getU        upgradeFlag
+	getU        upgradeFlag // -u=patch/upgrade or -u
 	getInsecure = CmdGet.Flag.Bool("insecure", false, "")
 	// -v is cfg.BuildV
 )
@@ -586,6 +586,8 @@ func (r *resolver) noneForPath(mPath string) (nq *query, found bool) {
 
 // queryModule wraps modload.Query, substituting r.checkAllowedOr to decide
 // allowed versions.
+// 注意mPath是指module path，没有...匹配的概念，或者说module path一定是literal或
+// 者relative(在replace中)
 func (r *resolver) queryModule(ctx context.Context, mPath, query string, selected func(string) string) (module.Version, error) {
 	current := r.initialSelected(mPath)
 	rev, err := modload.Query(ctx, mPath, query, current, r.checkAllowedOr(query, selected))
@@ -598,6 +600,8 @@ func (r *resolver) queryModule(ctx context.Context, mPath, query string, selecte
 // queryPackage wraps modload.QueryPackage, substituting r.checkAllowedOr to
 // decide allowed versions.
 func (r *resolver) queryPackages(ctx context.Context, pattern, query string, selected func(string) string) (pkgMods []module.Version, err error) {
+	// github.com/xyz/... 对应的module path只能是github.com/xyz，也就是module
+	// path不存在...的概念。github.com/xyz/abc这个module不能匹配这个pattern
 	results, err := modload.QueryPackages(ctx, pattern, query, selected, r.checkAllowedOr(query, selected))
 	if len(results) > 0 {
 		pkgMods = make([]module.Version, 0, len(results))

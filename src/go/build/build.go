@@ -671,6 +671,7 @@ func (ctxt *Context) Import(path string, srcDir string, mode ImportMode) (*Packa
 			return p, fmt.Errorf("import %q: cannot import absolute path", path)
 		}
 
+		fmt.Printf("  ==importGo(%q, %q)\n", path, srcDir)
 		if err := ctxt.importGo(p, path, srcDir, mode); err == nil {
 			goto Found
 		} else if err != errNoModules {
