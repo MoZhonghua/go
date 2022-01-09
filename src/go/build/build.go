@@ -609,6 +609,7 @@ func (ctxt *Context) Import(path string, srcDir string, mode ImportMode) (*Packa
 
 	binaryOnly := false
 	if IsLocalImport(path) {
+		// go list 会走这个流程，go/internal/load.loadPackageData, path="."
 		pkga = "" // local imports have no installed path
 		if srcDir == "" {
 			return p, fmt.Errorf("import %q: import relative to unknown directory", path)

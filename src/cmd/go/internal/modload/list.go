@@ -153,7 +153,6 @@ func listModules(ctx context.Context, rs *Requirements, args []string, mode List
 				allowed = nil
 			}
 			// 注意vers是用户希望查询的版本
-			fmt.Printf("==List: vers=%v; current=%v\n", vers, current)
 			info, err := Query(ctx, path, vers, current, allowed)
 			if err != nil {
 				mods = append(mods, &modinfo.ModulePublic{
