@@ -637,7 +637,10 @@ func runList(ctx context.Context, cmd *base.Command, args []string) {
 			}
 		}
 		// 注意没有设置cfg.BuildN，也就是真正执行了编译过程
-		// IsCmdList=true因此不会真正执行link操作，而是pkg.a
+		// IsCmdList=true不会真正执行link操作. 同样的也不会执行install操作.
+		//
+		// pkg.a编译后(build)总是会放到cache中，这个总是会执行
+		// install是指放到$GOPATH/pkg/linux_amd64/modpath.a，这个不会执行
 		b.Do(ctx, a)
 	}
 

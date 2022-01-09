@@ -193,6 +193,8 @@ func runGet(ctx context.Context, cmd *base.Command, args []string) {
 	// everything.
 	load.ClearPackageCache()
 
+	// 里面根据是否module-aware走两套逻辑。这里是GOPATH mode, 也就是走
+	// search.ImportPaths()也就是在GROOT/GPATH/cwd(relative import)中查找
 	pkgs := load.PackagesAndErrors(ctx, load.PackageOpts{}, args)
 	load.CheckPackageErrors(pkgs)
 
@@ -204,6 +206,8 @@ func runGet(ctx context.Context, cmd *base.Command, args []string) {
 		return
 	}
 
+	// 编译和安装和module无关，总是以package为单位的，package列表已经计算好了
+	// 完全不用管是走GOPATH-mode还是module-aware mode查找到的Package数据
 	work.InstallPackages(ctx, args, pkgs)
 }
 
@@ -239,6 +243,7 @@ func downloadPaths(patterns []string) []string {
 		if len(m.Pkgs) == 0 && strings.Contains(m.Pattern(), "...") {
 			pkgs = append(pkgs, m.Pattern())
 		} else {
+			// literal直接返回m.Pkgs=[literal], 不会查找文件系统
 			pkgs = append(pkgs, m.Pkgs...)
 		}
 	}
@@ -274,6 +279,7 @@ func download(arg string, parent *load.Package, stk *load.ImportStack, mode int)
 	}
 
 	p := load1(arg, mode)
+	// 如果是不存在的路径，会返回p.Error，但是p.Error.Hard=false, 继续执行
 	if p.Error != nil && p.Error.Hard {
 		base.Errorf("%s", p.Error)
 		return
@@ -310,6 +316,8 @@ func download(arg string, parent *load.Package, stk *load.ImportStack, mode int)
 	if p.Dir == "" || *getU {
 		// The actual download.
 		stk.Push(arg)
+
+		// 需要根据path解析出repo url，然后git clone
 		err := downloadPackage(p)
 		if err != nil {
 			base.Errorf("%s", &load.PackageError{ImportStack: stk.Copy(), Err: err})
@@ -323,6 +331,7 @@ func download(arg string, parent *load.Package, stk *load.ImportStack, mode int)
 		// We delay this until after reloadPackage so that the old entry
 		// for p has been replaced in the package cache.
 		if wildcardOkay && strings.Contains(arg, "...") {
+			// 下载完成后再次匹配
 			match := search.NewMatch(arg)
 			if match.IsLocal() {
 				match.MatchDirs()
@@ -346,6 +355,7 @@ func download(arg string, parent *load.Package, stk *load.ImportStack, mode int)
 			// Note: load calls loadPackage or loadImport,
 			// which push arg onto stk already.
 			// Do not push here too, or else stk will say arg imports arg.
+			// 再次load看看结果
 			p := load1(arg, mode)
 			if p.Error != nil {
 				base.Errorf("%s", p.Error)
@@ -471,6 +481,7 @@ func downloadPackage(p *load.Package) error {
 			}
 			repo = remote
 			if !*getF && err == nil {
+				// 会查询meta-tag，即# get https://gitlab.qiyi.domain/mozhonghua/modver1/xyz?go-get=1
 				if rr, err := vcs.RepoRootForImportPath(importPrefix, vcs.IgnoreMod, security); err == nil {
 					repo := rr.Repo
 					if rr.VCS.ResolveRepo != nil {

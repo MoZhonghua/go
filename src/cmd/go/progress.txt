@@ -95,13 +95,14 @@ internal/work/gc.go
 internal/work/security.go
 internal/work/testgo.go
 internal/work/exec.go
-
 internal/list/context.go
-internal/list/list.go ?
-internal/get/get.go ?
+internal/list/list.go
 
+2022-01-09
+internal/get/get.go ?
 internal/modget/query.go ?
 internal/modget/get.go ?
+
 internal/modcmd/init.go ?
 internal/modcmd/download.go ?
 

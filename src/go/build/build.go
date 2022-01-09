@@ -566,6 +566,10 @@ func nameExt(name string) string {
 //
 // If an error occurs, Import returns a non-nil error and a non-nil
 // *Package containing partial information.
+// 几条路径:
+//  - relative import: 直接查询srcDir/path
+//  - module-aware: 调用go list命令
+//  - GOPATH mode: 查找GOROOT, GOPATH, srcDir进行路径匹配
 func (ctxt *Context) Import(path string, srcDir string, mode ImportMode) (*Package, error) {
 	p := &Package{
 		ImportPath: path,
@@ -1133,6 +1137,8 @@ var errNoModules = errors.New("not using modules")
 // about the requested package and all dependencies and then only reports about the requested package.
 // Then we reinvoke it for every dependency. But this is still better than not working at all.
 // See golang.org/issue/26504.
+// 执行go list命令，只用来处理module-aware mode的部分。注意这个package不能引用cmd/go/...，因此只能直
+// 接调用go命令。go又依赖这个包，循环是怎么处理的?
 func (ctxt *Context) importGo(p *Package, path, srcDir string, mode ImportMode) error {
 	// To invoke the go command,
 	// we must not being doing special things like AllowBinary or IgnoreVendor,
