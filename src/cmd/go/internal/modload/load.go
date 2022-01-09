@@ -250,7 +250,11 @@ func LoadPackages(ctx context.Context, opts PackageOpts, patterns ...string) (ma
 		}
 	}
 
+	// 重新计算pattern匹配的packages列表，主要是...和all这两个
 	updateMatches := func(rs *Requirements, ld *loader) {
+		// ld 参数只在pattern=all时，根据ld是否为nil走不同流程
+		//  - ld=nil: 在 loadFromRoots() 循环中总是nil
+		//  - loadFromRoots() 循环结束后，再次调用 updateMatches()，此时ld!=nil
 		for _, m := range matches {
 			switch {
 			case m.IsLocal():
@@ -341,10 +345,11 @@ func LoadPackages(ctx context.Context, opts PackageOpts, patterns ...string) (ma
 			}
 			return roots
 		},
-	})
+	}, matches)
+
 
 	// One last pass to finalize wildcards.
-	updateMatches(ld.requirements, ld)
+	updateMatches(ld.requirements, ld) // 只是更新match.Pkgs，没有更加复杂逻辑
 
 	// List errors in matching patterns (such as directory permission
 	// errors for wildcard patterns).
@@ -646,7 +651,7 @@ func ImportFromFiles(ctx context.Context, gofiles []string) {
 			roots = append(roots, testImports...)
 			return roots
 		},
-	})
+	}, nil)
 	commitRequirements(ctx, loaded.GoVersion, loaded.requirements)
 }
 
@@ -796,8 +801,8 @@ func (ld *loader) errorf(format string, args ...interface{}) {
 // A loadPkg records information about a single loaded package.
 type loadPkg struct {
 	// Populated at construction time:
-	path   string // import path
-	testOf *loadPkg  // test_package.testOf=normal_package, normal_package.test=test_package
+	path   string   // import path
+	testOf *loadPkg // test_package.testOf=normal_package, normal_package.test=test_package
 
 	// Populated at construction time and updated by (*loader).applyPkgFlags:
 	flags atomicLoadPkgFlags
@@ -910,7 +915,7 @@ var errMissing = errors.New("cannot find package")
 // The set of root packages is returned by the params.listRoots function, and
 // expanded to the full set of packages by tracing imports (and possibly tests)
 // as needed.
-func loadFromRoots(ctx context.Context, params loaderParams) *loader {
+func loadFromRoots(ctx context.Context, params loaderParams, matches []*search.Match) *loader {
 	ld := &loader{
 		loaderParams: params,
 		work:         par.NewQueue(runtime.GOMAXPROCS(0)),
@@ -956,6 +961,11 @@ func loadFromRoots(ctx context.Context, params loaderParams) *loader {
 		}
 	}
 
+	// 循环过程:
+	//  - 根据pattern给出需要加载哪些pkg, listRoots(), 此时是package path
+	//  - 把新增package path对应的module加入到 requirements.rootModules
+	//  - 如果找不到package path对应的module，需要 resolveMissingImports
+	//  - 直到所有package path都有了对应的module
 	for {
 		ld.reset()
 
@@ -983,8 +993,10 @@ func loadFromRoots(ctx context.Context, params loaderParams) *loader {
 			}
 		}
 
+		// 更新ld.roots为listRoots()给出的，注意是loadPkg，有.mod字段
 		inRoots := map[*loadPkg]bool{}
 		for _, path := range rootPkgs {
+			// path -> *loadPkg, 需要计算出对应的module信息, 可能为空(missing imports)
 			root := ld.pkg(ctx, path, pkgIsRoot)
 			if !inRoots[root] {
 				ld.roots = append(ld.roots, root)
@@ -999,6 +1011,8 @@ func loadFromRoots(ctx context.Context, params loaderParams) *loader {
 		// transitive closure of dependencies has been loaded.
 		<-ld.work.Idle()
 
+		// 注意这里会从roots递归遍历所有pkg，记录在ld.pkgs中，后面可以根据这个列
+		// 表和rootModules对比发现missing和unused module
 		ld.buildStacks()
 
 		changed, err := ld.updateRequirements(ctx)
@@ -1043,6 +1057,7 @@ func loadFromRoots(ctx context.Context, params loaderParams) *loader {
 		// iteration so we don't need to also update it here. (That would waste time
 		// computing a "direct" map that we'll have to recompute later anyway.)
 		direct := ld.requirements.direct
+
 		rs, err := updateRoots(ctx, direct, ld.requirements, noPkgs, toAdd, ld.AssumeRootsImported)
 		if err != nil {
 			// If an error was found in a newly added module, report the package
@@ -1071,6 +1086,7 @@ func loadFromRoots(ctx context.Context, params loaderParams) *loader {
 	// Tidy the build list, if applicable, before we report errors.
 	// (The process of tidying may remove errors from irrelevant dependencies.)
 	if ld.Tidy {
+		// 注意在这里会删除没有使用的root
 		rs, err := tidyRoots(ctx, ld.requirements, ld.pkgs)
 		if err != nil {
 			ld.errorf("go: %v\n", err)

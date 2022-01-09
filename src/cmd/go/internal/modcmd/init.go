@@ -12,6 +12,8 @@ import (
 	"context"
 )
 
+// 主要的问题是如何自动给出合适的module-path
+
 var cmdInit = &base.Command{
 	UsageLine: "go mod init [module-path]",
 	Short:     "initialize new module in current directory",

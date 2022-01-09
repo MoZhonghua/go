@@ -103,6 +103,7 @@ var requirements *Requirements // loadModFile()中设置
 // If vendoring is in effect, the caller must invoke initVendor on the returned
 // *Requirements before any other method.
 // 注意这里的rootModules一般是main module的go.mod中直接require的module列表
+// 不会请求网络，也不会递归遍历，只是用rootModules和direct信息初始化
 func newRequirements(depth modDepth, rootModules []module.Version, direct map[string]bool) *Requirements {
 	for i, m := range rootModules {
 		if m == Target {

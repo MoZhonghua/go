@@ -16,6 +16,14 @@ import (
 	"golang.org/x/mod/module"
 )
 
+// package必须是完整package path，比如
+//  - go.mod中有github.com/xyz/abc v1.1.0
+//  - 代码中import "github.com/xyz/abc/what"
+// 则
+//  - go mod why github.com/xyz/abc/what: ok
+//  - go mod why github.com/xyz: (main module does not need package ...)
+//  - go mod why -m github.com/xyz/abc: ok
+
 var cmdWhy = &base.Command{
 	UsageLine: "go mod why [-m] [-vendor] packages...",
 	Short:     "explain why packages or modules are needed",
@@ -82,6 +90,7 @@ func runWhy(ctx context.Context, cmd *base.Command, args []string) {
 			}
 		}
 
+		// args可能是package path，这里返回的是包含package path args的module
 		mods, err := modload.ListModules(ctx, args, 0)
 		if err != nil {
 			base.Fatalf("go mod why: %v", err)
@@ -90,7 +99,7 @@ func runWhy(ctx context.Context, cmd *base.Command, args []string) {
 		byModule := make(map[module.Version][]string)
 		_, pkgs := modload.LoadPackages(ctx, loadOpts, "all")
 		for _, path := range pkgs {
-			m := modload.PackageModule(path)
+			m := modload.PackageModule(path) // 返回pkg所属的mod
 			if m.Path != "" {
 				byModule[m] = append(byModule[m], path)
 			}
@@ -100,6 +109,7 @@ func runWhy(ctx context.Context, cmd *base.Command, args []string) {
 			best := ""
 			bestDepth := 1000000000
 			for _, path := range byModule[module.Version{Path: m.Path, Version: m.Version}] {
+				// 通过Package.Imports形成的路径, 一定是针对package path的
 				d := modload.WhyDepth(path)
 				if d > 0 && d < bestDepth {
 					best = path

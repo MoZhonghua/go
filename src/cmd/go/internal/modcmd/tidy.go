@@ -63,7 +63,7 @@ func init() {
 	cmdTidy.Flag.BoolVar(&cfg.BuildV, "v", false, "")
 	cmdTidy.Flag.BoolVar(&tidyE, "e", false, "")
 	cmdTidy.Flag.Var(&tidyGo, "go", "")
-	cmdTidy.Flag.Var(&tidyCompat, "compat", "")
+	cmdTidy.Flag.Var(&tidyCompat, "compat", "") // 更新完go.mod之后，用compat版本逻辑再次加载看看module最终版本是否一致
 	base.AddModCommonFlags(&cmdTidy.Flag)
 }
 

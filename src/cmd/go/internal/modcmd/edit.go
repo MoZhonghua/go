@@ -24,6 +24,8 @@ import (
 	"golang.org/x/mod/module"
 )
 
+// 直接更新go.mod，不会校验Graph?
+
 var cmdEdit = &base.Command{
 	UsageLine: "go mod edit [editing flags] [-fmt|-print|-json] [go.mod]",
 	Short:     "edit go.mod from tools or scripts",
