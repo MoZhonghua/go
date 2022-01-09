@@ -79,6 +79,8 @@ func runVendor(ctx context.Context, cmd *base.Command, args []string) {
 		base.Fatalf("go mod vendor: %v", err)
 	}
 
+	os.Exit(0)
+
 	modpkgs := make(map[module.Version][]string)
 	for _, pkg := range pkgs {
 		m := modload.PackageModule(pkg)

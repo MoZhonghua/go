@@ -102,13 +102,12 @@ internal/list/list.go
 internal/get/get.go
 internal/modget/query.go
 internal/modget/get.go
-
 internal/modcmd/mod.go
 internal/modcmd/download.go
 internal/modcmd/edit.go
 internal/modcmd/graph.go
 internal/modcmd/init.go
-internal/modcmd/tidy.go ?
+internal/modcmd/tidy.go
 internal/modcmd/vendor.go ?
 internal/modcmd/verify.go
 internal/modcmd/why.go
