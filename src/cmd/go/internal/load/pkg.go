@@ -2794,6 +2794,7 @@ func GoFilesPackage(ctx context.Context, opts PackageOpts, gofiles []string) *Pa
 	pkg := new(Package)
 	pkg.Internal.Local = true
 	pkg.Internal.CmdlineFiles = true
+	// 会加载所有依赖项 pkg.Internal.Imports
 	pkg.load(ctx, opts, "command-line-arguments", &stk, nil, bp, err)
 	pkg.Internal.LocalPrefix = dirToImportPath(dir)
 	pkg.ImportPath = "command-line-arguments"

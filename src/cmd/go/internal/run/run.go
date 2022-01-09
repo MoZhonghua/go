@@ -103,7 +103,11 @@ func runRun(ctx context.Context, cmd *base.Command, args []string) {
 				base.Fatalf("go run: cannot run *_test.go files (%s)", file)
 			}
 		}
-		// compile阶段只需要知道package，不关心module
+		// 假装当前目录下只有指定的这些.go文件。如果是在module中，还需要go.mod来
+		// 加载依赖项. 注意默认配置一定是module-aware mode，不管有没有go.mod，因此
+		// 如果没有go.mod会报错.
+		//
+		// 否则就是按照GOPATH-aware mode来处理
 		p = load.GoFilesPackage(ctx, pkgOpts, files)
 	} else if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		arg := args[0]
