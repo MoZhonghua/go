@@ -103,6 +103,7 @@ func runRun(ctx context.Context, cmd *base.Command, args []string) {
 				base.Fatalf("go run: cannot run *_test.go files (%s)", file)
 			}
 		}
+		// compile阶段只需要知道package，不关心module
 		p = load.GoFilesPackage(ctx, pkgOpts, files)
 	} else if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		arg := args[0]
