@@ -72,14 +72,15 @@ func runVendor(ctx context.Context, cmd *base.Command, args []string) {
 		AllowErrors:              vendorE,
 		SilenceMissingStdImports: true,
 	}
+
+	// 注意这个函数不但会加载packages，然后更新go.mod
+	// 特别是ResolveMissingImports=true会更新go.mod添加缺少的require
 	_, pkgs := modload.LoadPackages(ctx, loadOpts, "all")
 
 	vdir := filepath.Join(modload.ModRoot(), "vendor")
 	if err := os.RemoveAll(vdir); err != nil {
 		base.Fatalf("go mod vendor: %v", err)
 	}
-
-	os.Exit(0)
 
 	modpkgs := make(map[module.Version][]string)
 	for _, pkg := range pkgs {
@@ -94,16 +95,17 @@ func runVendor(ctx context.Context, cmd *base.Command, args []string) {
 	includeGoVersions := false
 	isExplicit := map[module.Version]bool{}
 	if gv := modload.ModFile().Go; gv != nil {
-		if semver.Compare("v"+gv.Version, "v1.14") >= 0 {
+		// 根据go.mod中指定的go版本做处理
+		if semver.Compare("v"+gv.Version, "v1.14") >= 0 { // >= go1.14
 			// If the Go version is at least 1.14, annotate all explicit 'require' and
 			// 'replace' targets found in the go.mod file so that we can perform a
 			// stronger consistency check when -mod=vendor is set.
 			for _, r := range modload.ModFile().Require {
-				isExplicit[r.Mod] = true
+				isExplicit[r.Mod] = true // go.mod中所有require的都是explicit
 			}
 			includeAllReplacements = true
 		}
-		if semver.Compare("v"+gv.Version, "v1.17") >= 0 {
+		if semver.Compare("v"+gv.Version, "v1.17") >= 0 { // >= go1.17
 			// If the Go version is at least 1.17, annotate all modules with their
 			// 'go' version directives.
 			includeGoVersions = true
@@ -115,6 +117,9 @@ func runVendor(ctx context.Context, cmd *base.Command, args []string) {
 		vendorMods = append(vendorMods, m)
 	}
 	for m := range modpkgs {
+		// 出现在go.mod中，但是没有出现在modpkgs中，比如:
+		//  - require github.com/abc/xyz
+		// 但是代码中没有任何地方import "github.com/abc/xyz/..."
 		if !isExplicit[m] {
 			vendorMods = append(vendorMods, m)
 		}
@@ -149,6 +154,8 @@ func runVendor(ctx context.Context, cmd *base.Command, args []string) {
 		pkgs := modpkgs[m]
 		sort.Strings(pkgs)
 		for _, pkg := range pkgs {
+			// 输出的使用过的package，而不是module中所有的package
+			// 注意: 是按照package为单位复制的，而不是module，只需要复制真正用到的代码
 			fmt.Fprintf(w, "%s\n", pkg)
 			vendorPkg(vdir, pkg)
 		}
