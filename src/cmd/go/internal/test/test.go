@@ -771,6 +771,7 @@ func runTest(ctx context.Context, cmd *base.Command, args []string) {
 			coverFiles = append(coverFiles, p.GoFiles...)
 			coverFiles = append(coverFiles, p.CgoFiles...)
 			coverFiles = append(coverFiles, p.TestGoFiles...)
+			// 注意这里设置好了CoverVars，编译时自动调用go tool cover
 			p.Internal.CoverVars = declareCoverVars(p, coverFiles...)
 			if testCover && testCoverMode == "atomic" {
 				ensureImport(p, "sync/atomic")
@@ -873,7 +874,7 @@ func builderTest(b *work.Builder, ctx context.Context, pkgOpts load.PackageOpts,
 			Local:    testCover && testCoverPaths == nil,
 			Pkgs:     testCoverPkgs,
 			Paths:    testCoverPaths,
-			DeclVars: declareCoverVars,
+			DeclVars: declareCoverVars, // load.TestPackagesFor()回调这个函数
 		}
 	}
 	// pmain: 自动生成的testmain.go, 内容在pmain.Internal.TestmainGo
@@ -988,8 +989,8 @@ func builderTest(b *work.Builder, ctx context.Context, pkgOpts load.PackageOpts,
 			Package:    p,
 			IgnoreFail: true, // run (prepare output) even if build failed
 			// 注意TryCache的调用，在useCache()中调用
-			TryCache:   c.tryCache,
-			Objdir:     testDir,
+			TryCache: c.tryCache,
+			Objdir:   testDir,
 		}
 		vetRunAction = runAction
 		cleanAction = &work.Action{
@@ -1053,6 +1054,7 @@ func isTestFile(file string) bool {
 
 // declareCoverVars attaches the required cover variables names
 // to the files, to be used when annotating the files.
+// 为每个.go文件生成一个GoCover变量名，会调用go cover -mode=set -var=GoCoverVarName xxx.go
 func declareCoverVars(p *load.Package, files ...string) map[string]*load.CoverVar {
 	coverVars := make(map[string]*load.CoverVar)
 	coverIndex := 0
@@ -1498,7 +1500,6 @@ func (c *runCache) tryCacheWithID(b *work.Builder, a *work.Action, id string) bo
 
 var errBadTestInputs = errors.New("error parsing test inputs")
 var testlogMagic = []byte("# test log\n") // known to testing/internal/testdeps/deps.go
-
 
 // 注意测试结果不仅仅依赖依赖于testmain, args, 还依赖于testmain在执行过程中访问
 // 的外部环境，只记录常见部分:

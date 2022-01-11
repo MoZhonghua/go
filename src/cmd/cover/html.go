@@ -196,7 +196,7 @@ func (td templateData) PackageName() string {
 
 type templateFile struct {
 	Name     string
-	Body     template.HTML
+	Body     template.HTML // 注意Body的类型了template.HTML，Execute()时不会再做转换
 	Coverage float64
 }
 

@@ -64,3 +64,11 @@ go/format/internal.go
 
 2022-01-01
 go/types/type.go ? // cmd/compile 和 cmd/vet使用
+
+
+2022-01-11
+cmd/cover/doc.go
+cmd/vendor/golang.org/x/tools/cover/profile.go
+cmd/cover/func.go
+cmd/cover/html.go
+cmd/cover/cover.go

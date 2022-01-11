@@ -20,6 +20,11 @@ import (
 	"cmd/internal/objabi"
 )
 
+// 两大功能:
+//  - 给定一个.go文件，生成一个instrumented .go文件
+//    go test还需要生成代码把所有.go中的数据汇总起来
+//  - 给定一个coverprofile生成报告
+
 const usageMessage = "" +
 	`Usage of 'go tool cover':
 Given a coverage profile produced by 'go test':
@@ -65,7 +70,7 @@ const (
 )
 
 func main() {
-	objabi.AddVersionFlag()
+	objabi.AddVersionFlag() // 支持-V=full, 用来生成ActionID
 	flag.Usage = usage
 	flag.Parse()
 
@@ -158,7 +163,7 @@ type File struct {
 	name    string // Name of file.
 	astFile *ast.File
 	blocks  []Block
-	content []byte
+	content []byte  // 文件内容
 	edit    *edit.Buffer
 }
 
@@ -171,6 +176,7 @@ func (f *File) findText(pos token.Pos, text string) int {
 	start := f.offset(pos)
 	i := start
 	s := f.content
+	// 从f.content中pos起始位置开始查找text指定的字符串
 	for i < len(s) {
 		if bytes.HasPrefix(s[i:], b) {
 			return i
@@ -571,6 +577,7 @@ func (f *File) endsBasicSourceBlock(s ast.Stmt) bool {
 	return found
 }
 
+
 // isControl reports whether s is a control statement that, if labeled, cannot be
 // separated from its label.
 func (f *File) isControl(s ast.Stmt) bool {
@@ -616,6 +623,7 @@ func (b blockSlice) Swap(i, j int)      { b[i], b[j] = b[j], b[i] }
 
 // offset translates a token position into a 0-indexed byte offset.
 func (f *File) offset(pos token.Pos) int {
+	// 因为总是只有一个文件，Offset总是实际文件中偏移量
 	return f.fset.Position(pos).Offset
 }
 
@@ -727,3 +735,49 @@ func dedup(p1, p2 token.Position) (r1, r2 token.Position) {
 
 	return key.p1, key.p2
 }
+
+/*
+//line size.go:1
+package size
+
+func Size(a int) string {Abc.Count[0] = 1;
+    switch {
+    case a < 0:Abc.Count[2] = 1;
+        return "negative"
+    case a == 0:Abc.Count[3] = 1;
+        return "zero"
+    case a < 10:Abc.Count[4] = 1;
+        return "small"
+    case a < 100:Abc.Count[5] = 1;
+        return "big"
+    case a < 1000:Abc.Count[6] = 1;
+        return "huge"
+    }
+    Abc.Count[1] = 1;return "enormous"
+}
+
+var Abc = struct {
+	Count     [7]uint32
+	Pos       [3 * 7]uint32
+	NumStmt   [7]uint16
+} {
+	Pos: [3 * 7]uint32{
+		3, 4, 0xc0019, // [0]  line_start, line_end, col_start << 16 | col_end
+		16, 16, 0x160005, // [1]
+		5, 6, 0x1a0010, // [2]
+		7, 8, 0x160011, // [3]
+		9, 10, 0x170011, // [4]
+		11, 12, 0x150012, // [5]
+		13, 14, 0x160013, // [6]
+	},
+	NumStmt: [7]uint16{
+		1, // 0
+		1, // 1
+		1, // 2
+		1, // 3
+		1, // 4
+		1, // 5
+		1, // 6
+	},
+}
+*/

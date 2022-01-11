@@ -17,6 +17,20 @@ import (
 	"strings"
 )
 
+/*
+go test -coverprofile=/tmp/1.txt .
+cat /tmp/1.txt
+
+mode: set
+playground/gotest/runtest/size.go:3.25,4.12 1 1  // FileName: StartLine.Col , Endline.Col NumStmt Count
+playground/gotest/runtest/size.go:16.5,16.22 1 0
+playground/gotest/runtest/size.go:5.16,6.26 1 1
+playground/gotest/runtest/size.go:7.17,8.22 1 0
+playground/gotest/runtest/size.go:9.17,10.23 1 1
+playground/gotest/runtest/size.go:11.18,12.21 1 0
+playground/gotest/runtest/size.go:13.19,14.22 1 0
+*/
+
 // Profile represents the profiling data for a specific file.
 type Profile struct {
 	FileName string

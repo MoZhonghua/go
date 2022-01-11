@@ -145,6 +145,9 @@ func (v *FuncVisitor) Visit(node ast.Node) ast.Visitor {
 	return v
 }
 
+
+// 统计的是所有有打点stmt count和testmain执行过程中被访问的打点stmt count
+// 也就是只考虑打点的stmt，其他忽略
 // coverage returns the fraction of the statements in the function that were covered, as a numerator and denominator.
 func (f *FuncExtent) coverage(profile *cover.Profile) (num, den int64) {
 	// We could avoid making this n^2 overall by doing a single scan and annotating the functions,
@@ -196,6 +199,9 @@ func findPkgs(profiles []*cover.Profile) (map[string]*Pkg, error) {
 	if len(list) == 0 {
 		return pkgs, nil
 	}
+
+	// go test -coverprofile=1.txt，在1.txt中的文件路径是pkgpath/filename.go，不是
+	// filename.go的绝对路径, 因此下面的go list可以找到正确的package数据。
 
 	// Note: usually run as "go tool cover" in which case $GOROOT is set,
 	// in which case runtime.GOROOT() does exactly what we want.
