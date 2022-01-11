@@ -18,5 +18,5 @@ function buildgo() {
 SELF_DIR=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
 
 (
-	cd $SELF_DIR && buildgo version
+	cd $SELF_DIR && buildgo -V
 )
