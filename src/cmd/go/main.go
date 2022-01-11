@@ -56,11 +56,11 @@ func init() {
 		work.CmdInstall,      // Done
 		list.CmdList,         // Done
 		modcmd.CmdMod,        // Done
-		run.CmdRun,           // Done, go run main.go
-		test.CmdTest,
-		tool.CmdTool,       // Done
-		version.CmdVersion, // Done
-		vet.CmdVet,         // Done
+		run.CmdRun,           // Done
+		test.CmdTest,         // Done
+		tool.CmdTool,         // Done
+		version.CmdVersion,   // Done
+		vet.CmdVet,           // Done
 
 		// 注意这以下的Command.Run = nil, 也就是本身不能运行, 出现在两个地方
 		//  - go help: "Additional help topics" 会列出所有!Runnable()的Command
