@@ -649,6 +649,7 @@ func runTest(ctx context.Context, cmd *base.Command, args []string) {
 	b.Init()
 
 	if cfg.BuildI {
+		// 还是注意install $GOPATH/pkg/linux_amd64/xxx.a和~/.cache/go-build的区别
 		fmt.Fprint(os.Stderr, "go test: -i flag is deprecated\n")
 		cfg.BuildV = testV
 
@@ -695,6 +696,8 @@ func runTest(ctx context.Context, cmd *base.Command, args []string) {
 				// can not be reinstalled.
 				continue
 			}
+
+			// 这里会为所有import "path"递归添加CompileAction(ModeInstall)
 			a.Deps = append(a.Deps, b.CompileAction(work.ModeInstall, work.ModeInstall, p))
 		}
 		b.Do(ctx, a)
@@ -849,10 +852,11 @@ var windowsBadWords = []string{
 	"update",
 }
 
+// 返回三个action
 func builderTest(b *work.Builder, ctx context.Context, pkgOpts load.PackageOpts, p *load.Package) (buildAction, runAction, printAction *work.Action, err error) {
 	if len(p.TestGoFiles)+len(p.XTestGoFiles) == 0 {
 		build := b.CompileAction(work.ModeBuild, work.ModeBuild, p)
-		run := &work.Action{Mode: "test run", Package: p, Deps: []*work.Action{build}}
+		run := &work.Action{Mode: "test run", Package: p, Deps: []*work.Action{build}} // 注意没有设置Action.Func
 		addTestVet(b, p, run, nil)
 		print := &work.Action{Mode: "test print", Func: builderNoTest, Package: p, Deps: []*work.Action{run}}
 		return build, run, print, nil
@@ -872,6 +876,9 @@ func builderTest(b *work.Builder, ctx context.Context, pkgOpts load.PackageOpts,
 			DeclVars: declareCoverVars,
 		}
 	}
+	// pmain: 自动生成的testmain.go, 内容在pmain.Internal.TestmainGo
+	// ptest: p + 所有_test.go
+	// pxtest: 把p中所有package "p_test"的_test.go文件单独作为一个package
 	pmain, ptest, pxtest, err := load.TestPackagesFor(ctx, pkgOpts, p, cover)
 	if err != nil {
 		return nil, nil, nil, err
@@ -910,7 +917,7 @@ func builderTest(b *work.Builder, ctx context.Context, pkgOpts load.PackageOpts,
 	b.CompileAction(work.ModeBuild, work.ModeBuild, pmain).Objdir = testDir
 
 	a := b.LinkAction(work.ModeBuild, work.ModeBuild, pmain)
-	a.Target = testDir + testBinary + cfg.ExeSuffix
+	a.Target = testDir + testBinary + cfg.ExeSuffix // 比如/tmp/go-build2631499547/b001/runtest.test
 	if cfg.Goos == "windows" {
 		// There are many reserved words on Windows that,
 		// if used in the name of an executable, cause Windows
@@ -944,6 +951,7 @@ func builderTest(b *work.Builder, ctx context.Context, pkgOpts load.PackageOpts,
 	buildAction = a
 	var installAction, cleanAction *work.Action
 	if testC || testNeedBinary() {
+		// 需要把link.pmain.Target复制到当前目录下
 		// -c or profiling flag: create action to copy binary to ./test.out.
 		target := filepath.Join(base.Cwd(), testBinary+cfg.ExeSuffix)
 		if testO != "" {
@@ -979,6 +987,7 @@ func builderTest(b *work.Builder, ctx context.Context, pkgOpts load.PackageOpts,
 			Deps:       []*work.Action{buildAction},
 			Package:    p,
 			IgnoreFail: true, // run (prepare output) even if build failed
+			// 注意TryCache的调用，在useCache()中调用
 			TryCache:   c.tryCache,
 			Objdir:     testDir,
 		}
@@ -1166,6 +1175,8 @@ func (c *runCache) builderRunTest(b *work.Builder, ctx context.Context, a *work.
 		// we have different link inputs but the same final binary,
 		// we still reuse the cached test result.
 		// c.saveOutput will store the result under both IDs.
+
+		// 注意此时已经执行完link操作，buildid更新了
 		c.tryCacheWithID(b, a, a.Deps[0].BuildContentID())
 	}
 	if c.buf != nil {
@@ -1306,9 +1317,16 @@ func (c *runCache) builderRunTest(b *work.Builder, ctx context.Context, a *work.
 // to see if the test result is cached and therefore the link is unneeded.
 // It reports whether the result can be satisfied from cache.
 func (c *runCache) tryCache(b *work.Builder, a *work.Action) bool {
+	// a.Deps[0]=link.testmain
+	// 此时buildid是aid/aid，因为还没有执行link，不知道oid
+
 	return c.tryCacheWithID(b, a, a.Deps[0].BuildActionID())
 }
 
+// 两层cache，一个是link生成testmain，一个是执行testmain的输出结果(testResult)
+
+// 注意同时需要考虑生成的test binary和传给test binary的参数
+// 同样是两次调用，一次是compile.testmain.buildid，一次是link.testmain.buildid
 func (c *runCache) tryCacheWithID(b *work.Builder, a *work.Action, id string) bool {
 	if len(pkgArgs) == 0 {
 		// Caching does not apply to "go test",
@@ -1331,6 +1349,8 @@ func (c *runCache) tryCacheWithID(b *work.Builder, a *work.Action, id string) bo
 
 	var cacheArgs []string
 	for _, arg := range testArgs {
+		// 如果传给test binary额外参数，比如go test . -- abc，不使用cache
+		// 注意不能是go test . abc，此时abc被解析为pkgArgs
 		i := strings.Index(arg, "=")
 		if i < 0 || !strings.HasPrefix(arg, "-test.") {
 			if cache.DebugTest {
@@ -1397,6 +1417,7 @@ func (c *runCache) tryCacheWithID(b *work.Builder, a *work.Action, id string) bo
 	// the new outputs.
 
 	h := cache.NewHash("testResult")
+	// id是link.testmain的BuildID
 	fmt.Fprintf(h, "test binary %s args %q execcmd %q", id, cacheArgs, work.ExecCmd)
 	testID := h.Sum()
 	if c.id1 == (cache.ActionID{}) {
@@ -1477,6 +1498,23 @@ func (c *runCache) tryCacheWithID(b *work.Builder, a *work.Action, id string) bo
 
 var errBadTestInputs = errors.New("error parsing test inputs")
 var testlogMagic = []byte("# test log\n") // known to testing/internal/testdeps/deps.go
+
+
+// 注意测试结果不仅仅依赖依赖于testmain, args, 还依赖于testmain在执行过程中访问
+// 的外部环境，只记录常见部分:
+//   - getenv: os.Getenv()
+//   - stat: os.Stat()
+//   - open: os.Open()
+//   - chdir: os.Chdir()
+//
+// testmain -test.testlogfile=testlog.txt 执行test过程中会生成testlog.txt文件，内容类似:
+/*
+# test log
+getenv abc
+chdir /tmp
+stat /tmp/1.log
+open /tmp/1.log
+*/
 
 // computeTestInputsID computes the "test inputs ID"
 // (see comment in tryCacheWithID above) for the
@@ -1641,6 +1679,7 @@ func (c *runCache) saveOutput(a *work.Action) {
 	if err != nil {
 		return
 	}
+	// 注意用两个id来记录，一个是link.testmain.buildid，一个是compile.testmain.buildid
 	if c.id1 != (cache.ActionID{}) {
 		if cache.DebugTest {
 			fmt.Fprintf(os.Stderr, "testcache: %s: save test ID %x => input ID %x => %x\n", a.Package.ImportPath, c.id1, testInputsID, testAndInputKey(c.id1, testInputsID))

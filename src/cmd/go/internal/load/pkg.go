@@ -232,7 +232,7 @@ type PackageInternal struct {
 	OmitDebug         bool                 // tell linker not to write debug information
 	GobinSubdir       bool                 // install target would be subdir of GOBIN
 	BuildInfo         string               // add this info to package main
-	TestmainGo        *[]byte              // content for _testmain.go
+	TestmainGo        *[]byte              // content for _testmain.go: go test时自动生成
 	Embed             map[string][]string  // //go:embed comment mapping
 	OrigImportPath    string               // original import path before adding '_test' suffix
 

@@ -20,6 +20,10 @@ import (
 	"unicode/utf8"
 )
 
+// 把test的输出转换为json输出，需要解析go test输出的文本, 基本规则:
+// - 每一行对应一个output event
+// - test输出的行，比如PASS\n, 这样的会再对应一个pass event
+
 // Mode controls details of the conversion.
 type Mode int
 
@@ -30,7 +34,7 @@ const (
 // event is the JSON struct we emit.
 type event struct {
 	Time    *time.Time `json:",omitempty"`
-	Action  string
+	Action  string // pass, output, fail
 	Package string     `json:",omitempty"`
 	Test    string     `json:",omitempty"`
 	Elapsed *float64   `json:",omitempty"`
@@ -54,6 +58,7 @@ type Converter struct {
 	mode     Mode       // mode bits
 	start    time.Time  // time converter started
 	testName string     // name of current test, for output attribution
+	// subtest指在TestX中再调用t.Run("Name", func)
 	report   []*event   // pending test result reports (nested for subtests)
 	result   string     // overall test result if seen
 	input    lineBuffer // input buffer
@@ -248,7 +253,7 @@ func (c *Converter) handleInputLine(line []byte) {
 	name := strings.TrimSpace(string(line[i:]))
 
 	e := &event{Action: action}
-	if line[0] == '-' { // PASS or FAIL report
+	if line[0] == '-' { // PASS or FAIL report: "--- PASS: TestA (0.00s)"
 		// Parse out elapsed time.
 		if i := strings.Index(name, " ("); i >= 0 {
 			if strings.HasSuffix(name, "s)") {
@@ -350,6 +355,9 @@ func (c *Converter) writeEvent(e *event) {
 	c.w.Write(js)
 }
 
+
+// 主要完成拆分行的工作, 增加缓存层，即一次可以写入多行数据和partial line数据
+//
 // A lineBuffer is an I/O buffer that reacts to writes by invoking
 // input-processing callbacks on whole lines or (for long lines that
 // have been split) line fragments.
@@ -364,7 +372,7 @@ type lineBuffer struct {
 	b    []byte       // buffer
 	mid  bool         // whether we're in the middle of a long line
 	line func([]byte) // line callback
-	part func([]byte) // partial line callback
+	part func([]byte) // partial line callback，一行太长了，buf存不下，会多次调用part
 }
 
 // write writes b to the buffer.
@@ -381,6 +389,7 @@ func (l *lineBuffer) write(b []byte) {
 			j := bytes.IndexByte(l.b[i:], '\n')
 			if j < 0 {
 				if !l.mid {
+					// BenchmarkC-12           1000000000               0.0000002 ns/op
 					if j := bytes.IndexByte(l.b[i:], '\t'); j >= 0 {
 						if isBenchmarkName(bytes.TrimRight(l.b[i:i+j], " ")) {
 							l.part(l.b[i : i+j+1])
