@@ -83,6 +83,7 @@ func expandiface(t *Type) {
 		case prev == nil:
 			seen[m.Sym] = m
 		case AllowsGoVersion(t.Pkg(), 1, 14) && !explicit && Identical(m.Type, prev.Type):
+			// -lang>=go1.14
 			return
 		default:
 			base.ErrorfAt(m.Pos, "duplicate method %s", m.Sym.Name)
@@ -120,6 +121,7 @@ func expandiface(t *Type) {
 		// (including broken ones, if any) and add to t's
 		// method set.
 		for _, t1 := range m.Type.AllMethods().Slice() {
+			// 多层嵌套的话依赖于m.Type.AllMethods()已经计算过包含自己嵌套的所有方法
 			// Use m.Pos rather than t1.Pos to preserve embedding position.
 			f := NewField(m.Pos, t1.Sym, t1.Type)
 			addMethod(f, false)
@@ -285,7 +287,7 @@ func reportTypeLoop(t *Type) {
 			i = j + 1
 		}
 	}
-	l = append(l[i:], l[:i]...)
+	l = append(l[i:], l[:i]...) // 把[0..i]挪到最后面
 
 	var msg bytes.Buffer
 	fmt.Fprintf(&msg, "invalid recursive type %v\n", l[0])
@@ -395,7 +397,7 @@ func CalcSize(t *Type) {
 
 	case TPTR:
 		w = int64(PtrSize)
-		CheckSize(t.Elem())
+		CheckSize(t.Elem()) // 注意这里是CheckSize，Ptr本身的width不依赖于t.Elem.Width
 
 	case TUNSAFEPTR:
 		w = int64(PtrSize)

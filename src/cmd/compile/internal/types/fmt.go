@@ -24,7 +24,7 @@ var BuiltinPkg *Pkg
 var LocalPkg *Pkg
 
 // BlankSym is the blank (_) symbol.
-var BlankSym *Sym
+var BlankSym *Sym // =typecheck.Lookup("_")
 
 // OrigSym returns the original symbol written by the user.
 func OrigSym(s *Sym) *Sym {
@@ -32,7 +32,7 @@ func OrigSym(s *Sym) *Sym {
 		return nil
 	}
 
-	if len(s.Name) > 1 && s.Name[0] == '~' {
+	if len(s.Name) > 1 && s.Name[0] == '~' {  // ~rXXX, ~bXXX
 		switch s.Name[1] {
 		case 'r': // originally an unnamed result
 			return nil
@@ -79,8 +79,7 @@ const (
 //	%v	Go syntax: Name for symbols in the local package, PkgName.Name for imported symbols.
 //	%+v	Debug syntax: always include PkgName. prefix even for local names.
 //	%S	Short syntax: Name only, no matter what.
-//
-func (s *Sym) Format(f fmt.State, verb rune) {
+func (s *Sym) Format(f fmt.State, verb rune) { // fmt.Printf()会回调这个函数, fmt.Formatter接口
 	mode := fmtGo
 	switch verb {
 	case 'v', 'S':
@@ -90,6 +89,7 @@ func (s *Sym) Format(f fmt.State, verb rune) {
 		fmt.Fprint(f, sconv(s, verb, mode))
 
 	default:
+		// 其他不合适的%x
 		fmt.Fprintf(f, "%%!%c(*types.Sym=%p)", verb, s)
 	}
 }
@@ -121,7 +121,7 @@ func sconv(s *Sym, verb rune, mode fmtMode) string {
 	buf.WriteString(q)
 	buf.WriteByte('.')
 	buf.WriteString(s.Name)
-	return InternString(buf.Bytes())
+	return InternString(buf.Bytes()) // 同样的字符串避免分配
 }
 
 func sconv2(b *bytes.Buffer, s *Sym, verb rune, mode fmtMode) {
@@ -148,7 +148,7 @@ func symfmt(b *bytes.Buffer, s *Sym, verb rune, mode fmtMode) {
 // symbols from the given package in the given mode.
 // If it returns the empty string, no qualification is needed.
 func pkgqual(pkg *Pkg, verb rune, mode fmtMode) string {
-	if verb != 'S' {
+	if verb != 'S' { // =='S'永远输出sym.Name，也就是这里总是返回""
 		switch mode {
 		case fmtGo: // This is for the user
 			if pkg == BuiltinPkg || pkg == LocalPkg {
@@ -617,7 +617,7 @@ func fldconv(b *bytes.Buffer, f *Field, verb rune, mode fmtMode, visited map[*Ty
 		b.WriteString(" ")
 	}
 
-	if f.IsDDD() {
+	if f.IsDDD() {  // DDD=...
 		var et *Type
 		if f.Type != nil {
 			et = f.Type.Elem()
@@ -670,6 +670,7 @@ func FmtConst(v constant.Value, sharp bool) string {
 }
 
 // TypeHash computes a hash value for type t to use in type switch statements.
+// 是转换为字符串然后hash
 func TypeHash(t *Type) uint32 {
 	p := t.LongString()
 

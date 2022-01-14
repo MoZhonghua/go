@@ -19,6 +19,8 @@ type lang struct {
 	major, minor int
 }
 
+// 比如go tool compile -lang=go1.17
+
 // langWant is the desired language version set by the -lang flag.
 // If the -lang flag is not set, this is the zero value, meaning that
 // any language version is supported.
@@ -28,6 +30,8 @@ var langWant lang
 // is allowed to use Go version major.minor.
 // We assume the imported packages have all been checked,
 // so we only have to check the local package against the -lang flag.
+//
+// Pkg中的版本应该<= -lang参数指定的版本
 func AllowsGoVersion(pkg *Pkg, major, minor int) bool {
 	if pkg == nil {
 		// TODO(mdempsky): Set Pkg for local types earlier.
@@ -45,6 +49,8 @@ func AllowsGoVersion(pkg *Pkg, major, minor int) bool {
 
 // ParseLangFlag verifies that the -lang flag holds a valid value, and
 // exits if not. It initializes data used by langSupported.
+//
+// -lang=go1.17
 func ParseLangFlag() {
 	if base.Flag.Lang == "" {
 		return
@@ -61,6 +67,7 @@ func ParseLangFlag() {
 		if err != nil {
 			log.Fatalf("internal error parsing default lang %q: %v", def, err)
 		}
+		// -lang要求的版本 <= compile版本
 		if langWant.major > defVers.major || (langWant.major == defVers.major && langWant.minor > defVers.minor) {
 			log.Fatalf("invalid value %q for -lang: max known version is %q", base.Flag.Lang, def)
 		}

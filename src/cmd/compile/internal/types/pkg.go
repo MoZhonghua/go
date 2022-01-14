@@ -83,6 +83,7 @@ func (pkg *Pkg) Lookup(name string) *Sym {
 	return s
 }
 
+// 注意如果不存在则会创建
 // LookupOK looks up name in pkg and reports whether it previously existed.
 func (pkg *Pkg) LookupOK(name string) (s *Sym, existed bool) {
 	// TODO(gri) remove this check in favor of specialized lookup
@@ -106,6 +107,8 @@ func (pkg *Pkg) LookupBytes(name []byte) *Sym {
 	if pkg == nil {
 		pkg = nopkg
 	}
+	
+	// 注意这里的string(name)会做优化，不会真的创建string并复制
 	if s := pkg.Syms[string(name)]; s != nil {
 		return s
 	}
@@ -138,6 +141,6 @@ func CleanroomDo(f func()) {
 	pkgMap = saved
 }
 
-func IsDotAlias(sym *Sym) bool {
+func IsDotAlias(sym *Sym) bool { // what's this?
 	return sym.Def != nil && sym.Def.Sym() != sym
 }

@@ -1,26 +1,51 @@
 2022-01-11
 main.go
 
-
-TODO
-internal/abi/abiutils.go *
-
-internal/amd64/ssa.go
-
+2022-01-12
 internal/base/base.go
 
+2022-01-14
+internal/abi/abiutils.go
 internal/bitvec/bv.go
+internal/types/alg.go
+internal/types/algkind_string.go
+internal/types/fmt.go
+internal/types/goversion.go
+internal/types/identity.go
+internal/types/kind_string.go
+internal/types/pkg.go
+internal/types/scope.go
+internal/types/sort.go
+internal/types/size.go
+internal/types/utils.go
+internal/types/sym.go
+internal/types/type.go
 
-internal/bitvec/bv.go
+internal/ir/bitset.go
+internal/ir/cfg.go
+internal/ir/class_string.go
+internal/ir/const.go
+internal/ir/copy.go
+internal/ir/dump.go
+internal/ir/expr.go ?
+internal/ir/fmt.go ?
+internal/ir/func.go ?
+internal/ir/ir.go
+internal/ir/mini.go ?
+internal/ir/mknode.go ?
+internal/ir/name.go ?
+internal/ir/node.go ?
 
-internal/deadcode/deadcode.go
 
+
+TODO
+internal/types2/api.go ?
+
+internal/amd64/ssa.go ?
 internal/devirtualize/devirtualize.go
-
+internal/deadcode/deadcode.go
 internal/dwarfgen/dwarf.go
-
 internal/escape/escape.go
-
 internal/gc/main.go
 
 

@@ -33,6 +33,7 @@ type Bulk struct {
 	nword int32
 }
 
+// 创建count个bitvec，每个包含nbit
 func NewBulk(nbit int32, count int32) Bulk {
 	nword := (nbit + wordBits - 1) / wordBits
 	size := int64(nword) * int64(count)
@@ -46,6 +47,7 @@ func NewBulk(nbit int32, count int32) Bulk {
 	}
 }
 
+// 返回下一个包含nbit的bitvec
 func (b *Bulk) Next() BitVec {
 	out := BitVec{b.nbit, b.words[:b.nword]}
 	b.words = b.words[b.nword:]

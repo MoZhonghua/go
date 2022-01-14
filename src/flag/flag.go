@@ -42,6 +42,7 @@
 		-flag
 		-flag=x
 		-flag x  // non-boolean flags only
+
 	One or two minus signs may be used; they are equivalent.
 	The last form is not permitted for boolean flags because the
 	meaning of the command
@@ -49,6 +50,8 @@
 	where * is a Unix shell wildcard, will change if there is a file
 	called 0, false, etc. You must use the -flag=false form to turn
 	off a boolean flag.
+
+    实现了IsBoolFlag()方法且返回true的类型才是boolean flag，其他都是non-boolean flag
 
 	Flag parsing stops just before the first non-flag argument
 	("-" is a non-flag argument) or after the terminator "--".
@@ -82,7 +85,7 @@ import (
 // ErrHelp is the error returned if the -help or -h flag is invoked
 // but no such flag is defined.
 // 遇到这个错误时会把命令转换为等价的go help命令
-// go xxx <ErrHelp> yyy => go help xxx yyy
+// go xxx -h/-help <ErrHelp> yyy => go help xxx yyy
 var ErrHelp = errors.New("flag: help requested")
 
 // errParse is returned by Set if a flag's value fails to parse, such as with an invalid integer for Int.
@@ -280,6 +283,7 @@ func (d *durationValue) Get() interface{} { return time.Duration(*d) }
 
 func (d *durationValue) String() string { return (*time.Duration)(d).String() }
 
+// 比如go tool link -importcfg xxx 这个就是用funcValue实现
 type funcValue func(string) error
 
 func (f funcValue) Set(s string) error { return f(s) }
@@ -296,6 +300,9 @@ func (f funcValue) String() string { return "" }
 // Set is called once, in command line order, for each flag present.
 // The flag package may call the String method with a zero-valued receiver,
 // such as a nil pointer.
+//
+// boolean flag使用方式: -flag => Set("true"), -flag=xxx => Set("xxx")
+// 注意Set调用可以是任意值
 type Value interface {
 	String() string
 	Set(string) error
@@ -388,6 +395,9 @@ func (f *FlagSet) ErrorHandling() ErrorHandling {
 func (f *FlagSet) SetOutput(output io.Writer) {
 	f.output = output
 }
+
+// 注意这VisitAll和Visit的区别，一个是遍历所有定义过的flag，一个是遍历所有
+// 真正设置过的flag
 
 // VisitAll visits the flags in lexicographical order, calling fn for each.
 // It visits all flags, even those not set.
@@ -860,6 +870,9 @@ func Func(name, usage string, fn func(string) error) {
 // caller could create a flag that turns a comma-separated string into a slice
 // of strings by giving the slice the methods of Value; in particular, Set would
 // decompose the comma-separated string into the slice.
+//
+// 注意没有默认值参数，设置为value.String()，换句话说就是调用Var函数前，调用这应该
+// 把value本身设置为默认值
 func (f *FlagSet) Var(value Value, name string, usage string) {
 	// Flag must not begin "-" or contain "=".
 	if strings.HasPrefix(name, "-") {
@@ -927,7 +940,7 @@ func (f *FlagSet) parseOne() (bool, error) {
 		return false, nil
 	}
 	s := f.args[0]
-	if len(s) < 2 || s[0] != '-' {
+	if len(s) < 2 || s[0] != '-' {  // 不是-x这种形式，一定是arg，不是flag
 		return false, nil
 	}
 	numMinuses := 1
@@ -939,7 +952,7 @@ func (f *FlagSet) parseOne() (bool, error) {
 		}
 	}
 	name := s[numMinuses:]
-	if len(name) == 0 || name[0] == '-' || name[0] == '=' {
+	if len(name) == 0 || name[0] == '-' || name[0] == '=' { // -, --, ---, --=: bad
 		return false, f.failf("bad flag syntax: %s", s)
 	}
 

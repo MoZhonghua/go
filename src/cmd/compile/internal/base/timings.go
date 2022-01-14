@@ -17,6 +17,8 @@ var Timer Timings
 // which are added trough a sequence of Start/Stop calls.
 // Events may be associated with each phase via AddEvent.
 type Timings struct {
+	// 注意虽然每个phase有start/end，但是这里每个元素都对应一个新的phase. 因为Start会自动结束之前
+	// phase，而Stop会自动开始一个新的phase
 	list   []timestamp
 	events map[int][]*event // lazily allocated
 }
@@ -81,6 +83,12 @@ func (t *Timings) Write(w io.Writer, prefix string) {
 		// accumulated time between Stop/Start timestamps
 		var unaccounted time.Duration
 
+		// 注意四种序列的解释:
+		//   start, stop:   标记一个phase的开始和结束
+		//   start, start:  第二个start标记了phase1结束, 等价于start, stop&start
+		//   stop,  start:  前一个phase结束，后一个phase开始，中间的时间不统计
+		//   stop,  stop:   第一个stop自动开始了一个新的phase， 等价于stop&start, stop
+
 		// process Start/Stop timestamps
 		pt := &t.list[0] // previous timestamp
 		tot := t.list[len(t.list)-1].time.Sub(pt.time)
@@ -94,24 +102,25 @@ func (t *Timings) Write(w io.Writer, prefix string) {
 				// previous phase started
 				label = pt.label
 				events = t.events[i-1]
-				if qt.start {
+				if qt.start { // start, start
 					// start implicitly ended previous phase; nothing to do
-				} else {
+				} else { // start, stop
 					// stop ended previous phase; append stop labels, if any
 					if qt.label != "" {
 						label += ":" + qt.label
 					}
 					// events associated with stop replace prior events
+					// start, stop, add_events? 有点奇怪的逻辑
 					if e := t.events[i]; e != nil {
 						events = e
 					}
 				}
 			} else {
 				// previous phase stopped
-				if qt.start {
+				if qt.start { // stop, start
 					// between a stopped and started phase; unaccounted time
 					unaccounted += dt
-				} else {
+				} else { // stop, stop
 					// previous stop implicitly started current phase
 					label = qt.label
 					events = t.events[i]

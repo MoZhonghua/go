@@ -23,7 +23,7 @@ const (
 	AMEM128
 	ASTRING
 	AINTER
-	ANILINTER
+	ANILINTER // type.IsEmptyInterface()
 	AFLOAT32
 	AFLOAT64
 	ACPLX64
@@ -60,9 +60,13 @@ func AlgType(t *Type) (AlgKind, *Type) {
 		return AMEM, nil
 
 	case TFUNC, TMAP:
+		// var m1, m2 map[int]int
+		// m1 == m2: cannot compare m1 == m2 (operator == not defined for map[int]int)
+		// 但是可以和nil比较，应该是compile阶段特别处理
 		return ANOEQ, t
 
 	case TFLOAT32:
+		// 浮点数的比较需要特别处理，比如-0和+0的比较
 		return AFLOAT32, nil
 
 	case TFLOAT64:
@@ -84,6 +88,7 @@ func AlgType(t *Type) (AlgKind, *Type) {
 		return AINTER, nil
 
 	case TSLICE:
+		// 不能比较slice，同样nil也是特别处理
 		return ANOEQ, t
 
 	case TARRAY:
@@ -140,6 +145,7 @@ func AlgType(t *Type) (AlgKind, *Type) {
 // algorithms because t, or some component of t, is marked Noalg.
 func TypeHasNoAlg(t *Type) bool {
 	a, bad := AlgType(t)
+	// 为什么还要检查bad.Noalg()
 	return a == ANOEQ && bad.Noalg()
 }
 
@@ -169,5 +175,6 @@ func IsPaddedField(t *Type, i int) bool {
 	if i+1 < t.NumFields() {
 		end = t.Field(i + 1).Offset
 	}
+	// 当前字段的end不等于下一个字段的offset
 	return t.Field(i).End() != end
 }

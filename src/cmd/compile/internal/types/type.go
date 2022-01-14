@@ -61,14 +61,14 @@ const (
 	TBOOL
 
 	TPTR
-	TFUNC
+	TFUNC  // NewSignature() 没有NewFunc()
 	TSLICE
 	TARRAY
 	TSTRUCT
 	TCHAN
 	TMAP
-	TINTER
-	TFORW
+	TINTER // interface
+	TFORW  // forward, what's this?
 	TANY
 	TSTRING
 	TUNSAFEPTR
@@ -77,15 +77,15 @@ const (
 	// pseudo-types for literals
 	TIDEAL // untyped numeric constants
 	TNIL
-	TBLANK
+	TBLANK // "_" ?
 
 	// pseudo-types for frame layout
-	TFUNCARGS
+	TFUNCARGS // 特殊处理完之后会按照TFUNC来处理
 	TCHANARGS
 
 	// SSA backend types
 	TSSA     // internal types used by SSA backend (flags, memory, etc.)
-	TTUPLE   // a pair of types, used by SSA backend
+	TTUPLE   // a pair of types, used by SSA backend, 注意一定是两个, 多个的话用TRESULTS，优化多数情况?
 	TRESULTS // multiple types; the result of calling a function or method, with a memory at the end.
 
 	NTYPE
@@ -163,8 +163,11 @@ type Type struct {
 	allMethods Fields
 
 	// canonical OTYPE node for a named type (should be an ir.Name node with same sym)
-	nod Object
+	nod Object // ir.Node
+
 	// the underlying type (type literal or predeclared type) for a defined type
+	//
+	// 最终的underlying应该是基础类型(int, string, ...)或者type liternal([]int, [3]int, struct {...}, interface{...})
 	underlying *Type
 
 	// Cache of composite types, with this type being the element type.
@@ -190,7 +193,7 @@ type Type struct {
 	rparams *[]*Type
 }
 
-func (*Type) CanBeAnSSAAux() {}
+func (*Type) CanBeAnSSAAux() {} // ssa.Aux interface
 
 const (
 	typeNotInHeap  = 1 << iota // type cannot be heap allocated
@@ -344,6 +347,9 @@ func (t *Type) FuncType() *Func {
 }
 
 // StructType contains Type fields specific to struct types.
+//
+// 函数的参数也是通过Struct来记录，通过Funcarg这个字段标识具体是哪种
+// 注意interface不是，有单独的TINTER
 type Struct struct {
 	fields Fields
 	pkg    *Pkg
@@ -624,6 +630,7 @@ func newResults(types []*Type) *Type {
 }
 
 func NewResults(types []*Type) *Type {
+	// 经常用到?
 	if len(types) == 1 && types[0] == TypeMem {
 		return TypeResultMem
 	}
@@ -704,7 +711,7 @@ func NewField(pos src.XPos, sym *Sym, typ *Type) *Field {
 		Pos:    pos,
 		Sym:    sym,
 		Type:   typ,
-		Offset: BADWIDTH,
+		Offset: BADWIDTH, // 注意offset的默认值
 	}
 	if typ == nil {
 		f.SetBroke(true)
@@ -768,7 +775,7 @@ func SubstAny(t *Type, types *[]*Type) *Type {
 		}
 
 	case TFUNC:
-		recvs := SubstAny(t.Recvs(), types)
+		recvs := SubstAny(t.Recvs(), types) // kind=?
 		params := SubstAny(t.Params(), types)
 		results := SubstAny(t.Results(), types)
 		if recvs != t.Recvs() || params != t.Params() || results != t.Results() {
@@ -1681,6 +1688,9 @@ func (t *Type) Obj() Object {
 	return nil
 }
 
+
+// TFORW是一个虚构出来的中转类型?
+//
 // SetUnderlying sets the underlying type. SetUnderlying automatically updates any
 // types that were waiting for this type to be completed.
 func (t *Type) SetUnderlying(underlying *Type) {
@@ -1697,7 +1707,7 @@ func (t *Type) SetUnderlying(underlying *Type) {
 	t.Extra = underlying.Extra
 	t.Width = underlying.Width
 	t.Align = underlying.Align
-	t.underlying = underlying.underlying
+	t.underlying = underlying.underlying // ???
 
 	if underlying.NotInHeap() {
 		t.SetNotInHeap(true)
@@ -1899,6 +1909,8 @@ func IsReflexive(t *Type) bool {
 	}
 }
 
+// eface struct { ty *type, data ptr }; 注意int类型存的也是指针，不是int值
+//
 // Can this type be stored directly in an interface word?
 // Yes, if the representation is a single pointer.
 func IsDirectIface(t *Type) bool {

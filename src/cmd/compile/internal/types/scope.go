@@ -51,6 +51,7 @@ func Popdcl() {
 			return
 		}
 
+		// 还原之前push的字段
 		s.Def = d.def
 		s.Block = d.block
 		s.Lastlineno = d.lastlineno
@@ -72,6 +73,7 @@ func Markdcl() {
 	Block = blockgen
 }
 
+// 全部处理完成后不应该有stack mark
 func isDclstackValid() bool {
 	for _, d := range dclstack {
 		if d.sym == nil {

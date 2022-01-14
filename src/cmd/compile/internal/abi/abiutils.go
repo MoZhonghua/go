@@ -24,8 +24,13 @@ import (
 // register-assigned (and to which register(s)) or the stack offset
 // for the param if is not going to be passed in registers according
 // to the rules in the Go internal ABI specification (1.17).
+//
+// spill area: 注意只有寄存器中的入参需要，出参不需要
+//             一定是在prolog newstack()里抢占只有入参有效。异步抢占的问题?
+// stack-assigned args
+// return address
 type ABIParamResultInfo struct {
-	inparams          []ABIParamAssignment // Includes receiver for method calls.  Does NOT include hidden closure pointer.
+	inparams          []ABIParamAssignment // Includes receiver for method calls.  Does NOT include hidden closure pointer($DX).
 	outparams         []ABIParamAssignment
 	offsetToSpillArea int64
 	spillAreaSize     int64
@@ -75,6 +80,8 @@ func (a *ABIParamResultInfo) SpillAreaSize() int64 {
 // slots and ABI-defined spill slots for register-resident parameters.
 // The name is inherited from (*Type).ArgWidth(), which it replaces.
 func (a *ABIParamResultInfo) ArgWidth() int64 {
+	// offsetToSpillArea相对call语句之后SP来说的，此时栈上还有一个ret address
+	// 需要减去这个?
 	return a.spillAreaSize + a.offsetToSpillArea - a.config.LocalsOffset()
 }
 
@@ -97,7 +104,13 @@ type RegIndex uint8
 type ABIParamAssignment struct {
 	Type      *types.Type
 	Name      types.Object // should always be *ir.Name, used to match with a particular ssa.OpArg.
-	Registers []RegIndex
+	Registers []RegIndex   // 一个参数可能占用多个register，比如string占用两个。一个参数要么全在registers，要么全不在
+
+	// 两种情况:
+	//  - stack-assigned: stack offset
+	//  - reg-assigned:   相对于offsetToSpillArea的偏移量
+	// 只是方便计算: 如果一个arg放在reg中，马上计算spillArea，但是此时所有的stack args还没
+	// 处理完，因此只能计算出相对于offsetToSpillArea的偏移量
 	offset    int32
 }
 
@@ -127,6 +140,7 @@ func RegisterTypes(apa []ABIParamAssignment) []*types.Type {
 		if len(pa.Registers) == 0 {
 			continue
 		}
+		// 返回的是每个register的数据类型，不是每个参数的数据类型
 		rts = appendParamTypes(rts, pa.Type)
 	}
 	return rts
@@ -151,7 +165,7 @@ func appendParamTypes(rts []*types.Type, t *types.Type) []*types.Type {
 	if t.IsScalar() || t.IsPtrShaped() {
 		if t.IsComplex() {
 			c := types.FloatForComplex(t)
-			return append(rts, c, c)
+			return append(rts, c, c) // 注意是append两个元素
 		} else {
 			if int(t.Size()) <= types.RegSize {
 				return append(rts, t)
@@ -230,6 +244,13 @@ func appendParamOffsets(offsets []int64, at int64, t *types.Type) ([]int64, int6
 	return offsets, at
 }
 
+// Thus 0(FP) is the first argument to the function, 和frame pointer是一个吗
+// 也就是可以认为frame pointer永远指向第一个参数的起始位置。
+//
+// 在这里关键是ABIParamAssignment.offset的计算方式：注意stackOffset的初始值设置
+// 为LocalsOffset()，因此第一个参数的offset就是LocalsOffset()，而FP应该指向第一个
+// 参数的位置，也就是第一个参数相对于FP的offset应该为0
+
 // FrameOffset returns the frame-pointer-relative location that a function
 // would spill its input or output parameter to, if such a spill slot exists.
 // If there is none defined (e.g., register-allocated outputs) it panics.
@@ -259,7 +280,7 @@ type RegAmounts struct {
 type ABIConfig struct {
 	// Do we need anything more than this?
 	offsetForLocals  int64 // e.g., obj.(*Link).FixedFrameSize() -- extra linkage information on some architectures.
-	regAmounts       RegAmounts
+	regAmounts       RegAmounts  // 当前系统中可用的寄存器数量
 	regsForTypeCache map[*types.Type]int
 }
 
@@ -302,7 +323,7 @@ func (a *ABIConfig) NumParamRegs(t *types.Type) int {
 		if t.IsComplex() {
 			n = 2
 		} else {
-			n = (int(t.Size()) + types.RegSize - 1) / types.RegSize
+			n = (int(t.Size()) + types.RegSize - 1) / types.RegSize // round up division
 		}
 	} else {
 		typ := t.Kind()
@@ -339,6 +360,8 @@ func (a *ABIParamResultInfo) preAllocateParams(hasRcvr bool, nIns, nOuts int) {
 // based on the given configuration.  This is the same result computed by config.ABIAnalyze applied to the
 // corresponding method/function type, except that all the embedded parameter names are nil.
 // This is intended for use by ssagen/ssa.go:(*state).rtcall, for runtime functions that lack a parsed function type.
+//
+// 计算出入参的stack,register assignment
 func (config *ABIConfig) ABIAnalyzeTypes(rcvr *types.Type, ins, outs []*types.Type) *ABIParamResultInfo {
 	setup()
 	s := assignState{
@@ -446,6 +469,7 @@ func (config *ABIConfig) ABIAnalyze(t *types.Type, setNname bool) *ABIParamResul
 	return result
 }
 
+// 用 ABIParamAssignment.offset 更新f.SetFrameOffset()
 func (config *ABIConfig) updateOffset(result *ABIParamResultInfo, f *types.Field, a ABIParamAssignment, isReturn, setNname bool) {
 	// Everything except return values in registers has either a frame home (if not in a register) or a frame spill location.
 	if !isReturn || len(a.Registers) == 0 {
@@ -486,6 +510,7 @@ func (c *RegAmounts) regString(r RegIndex) string {
 
 // ToString method renders an ABIParamAssignment in human-readable
 // form, suitable for debugging or unit testing.
+// R{ I1(1), F2(15) | #I=1, #F=1 }: offset: 100; typ: TypeName
 func (ri *ABIParamAssignment) ToString(config *ABIConfig, extra bool) string {
 	regs := "R{"
 	offname := "spilloffset" // offset is for spill for register(s)
@@ -646,6 +671,7 @@ func (state *assignState) floatUsed() int {
 // determines whether it can be register-assigned. Returns TRUE if we
 // can register allocate, FALSE otherwise (and updates state
 // accordingly).
+// 注意regassignXXXX函数更新的是pUsed字段
 func (state *assignState) regassignIntegral(t *types.Type) bool {
 	regsNeeded := int(types.Rnd(t.Width, int64(types.PtrSize)) / int64(types.PtrSize))
 	if t.IsComplex() {
@@ -684,7 +710,7 @@ func (state *assignState) regassignArray(t *types.Type) bool {
 		// Not an array of length 1: stack assign
 		return false
 	}
-	// Visit element
+	// Visit element, 必然只有一个元素
 	return state.regassign(t.Elem())
 }
 
@@ -693,6 +719,7 @@ func (state *assignState) regassignArray(t *types.Type) bool {
 // assigned. Returns TRUE if we can register allocate, FALSE otherwise.
 func (state *assignState) regassignStruct(t *types.Type) bool {
 	for _, field := range t.FieldSlice() {
+		// 注意要求所有字段全部在registe中，否则全部放到栈上
 		if !state.regassign(field.Type) {
 			return false
 		}
@@ -815,7 +842,7 @@ func (pa *ABIParamAssignment) ComputePadding(storage []uint64) []uint64 {
 		ts := t.Size()
 		off += int64(ts)
 		if idx < len(types)-1 {
-			noff := align(off, types[idx+1])
+			noff := align(off, types[idx+1]) // 注意不是对齐到reg width
 			if noff != off {
 				padding[idx] = uint64(noff - off)
 			}

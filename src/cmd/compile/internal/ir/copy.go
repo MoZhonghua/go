@@ -53,7 +53,7 @@ func Orig(n Node) Node {
 func SepCopy(n Node) Node {
 	n = n.copy()
 	if n, ok := n.(OrigNode); ok {
-		n.SetOrig(n)
+		n.SetOrig(n) // 复制的n.Orig总是指向自己
 	}
 	return n
 }

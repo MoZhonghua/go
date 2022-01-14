@@ -76,6 +76,8 @@ func init() {
 		if help == "" {
 			panic(fmt.Sprintf("base.Debug.%s is missing help text", f.Name))
 		}
+
+		// 注意上面是&Debug，此处才是Addressable，可以调用Addr()
 		ptr := v.Field(i).Addr().Interface()
 		switch ptr.(type) {
 		default:
@@ -92,6 +94,9 @@ func init() {
 // If DebugSSA returns a non-empty string, that text is reported as a compiler error.
 var DebugSSA func(phase, flag string, val int, valString string) string
 
+// go tool compile -d help
+// go tool compile -d ssa/help
+//
 // parseDebug parses the -d debug string argument.
 func parseDebug(debugstr string) {
 	// parse -d argument

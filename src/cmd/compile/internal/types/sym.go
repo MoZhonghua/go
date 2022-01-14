@@ -12,6 +12,8 @@ import (
 	"unicode/utf8"
 )
 
+// 注意不限制为package顶层object, 可以是局部变量, 通过scope/shadow来处理?
+//
 // Sym represents an object name in a segmented (pkg, name) namespace.
 // Most commonly, this is a Go identifier naming an object declared within a package,
 // but Syms are also used to name internal synthesized objects.

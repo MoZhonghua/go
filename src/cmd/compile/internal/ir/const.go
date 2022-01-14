@@ -56,7 +56,7 @@ func ConstOverflow(v constant.Value, t *types.Type) bool {
 	case t.IsInteger():
 		bits := uint(8 * t.Size())
 		if t.IsUnsigned() {
-			x, ok := constant.Uint64Val(v)
+			x, ok := constant.Uint64Val(v) // 最大就是8字节，64bit
 			return !ok || x>>bits != 0
 		}
 		x, ok := constant.Int64Val(v)

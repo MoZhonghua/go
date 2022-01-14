@@ -31,7 +31,7 @@ import (
 type miniNode struct {
 	pos  src.XPos // uint32
 	op   Op       // uint8
-	bits bitset8
+	bits bitset8  // walkdef | typecheck | diag | walked
 	esc  uint16
 }
 
@@ -82,11 +82,11 @@ func (n *miniNode) Init() Nodes { return Nodes{} }
 
 func (n *miniNode) no(name string) string { return "cannot " + name + " on " + n.op.String() }
 
-func (n *miniNode) Type() *types.Type       { return nil }
-func (n *miniNode) SetType(*types.Type)     { panic(n.no("SetType")) }
-func (n *miniNode) Name() *Name             { return nil }
-func (n *miniNode) Sym() *types.Sym         { return nil }
-func (n *miniNode) Val() constant.Value     { panic(n.no("Val")) }
-func (n *miniNode) SetVal(v constant.Value) { panic(n.no("SetVal")) }
-func (n *miniNode) NonNil() bool            { return false }
-func (n *miniNode) MarkNonNil()             { panic(n.no("MarkNonNil")) }
+func (n *miniNode) Type() *types.Type             { return nil }
+func (n *miniNode) SetType(*types.Type)           { panic(n.no("SetType")) }
+func (n *miniNode) Name() *Name                   { return nil }
+func (n *miniNode) Sym() *types.Sym               { return nil }
+func (n *miniNode) Val() constant.Value           { panic(n.no("Val")) }
+func (n *miniNode) SetVal(v constant.Value)       { panic(n.no("SetVal")) }
+func (n *miniNode) NonNil() bool                  { return false }
+func (n *miniNode) MarkNonNil()                   { panic(n.no("MarkNonNil")) }
