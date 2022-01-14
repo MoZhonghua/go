@@ -32,7 +32,7 @@ type miniNode struct {
 	pos  src.XPos // uint32
 	op   Op       // uint8
 	bits bitset8  // walkdef | typecheck | diag | walked
-	esc  uint16
+	esc  uint16 // escape?
 }
 
 // posOr returns pos if known, or else n.pos.

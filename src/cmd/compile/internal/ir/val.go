@@ -92,6 +92,7 @@ func ValidTypeForConst(t *types.Type, v constant.Value) bool {
 
 // NewLiteral returns a new untyped constant with value v.
 func NewLiteral(v constant.Value) Node {
+	// base.Pos是当前位置，会随着处理不断更新
 	return NewBasicLit(base.Pos, v)
 }
 
@@ -141,6 +142,8 @@ func Int64Val(n Node) int64 {
 
 // Uint64Val returns n as an uint64.
 // n must be an integer or rune constant.
+//
+// (*BasicLiteral: Op == OLITERAL &&  Val().Kind() == constantInt)
 func Uint64Val(n Node) uint64 {
 	if !IsConst(n, constant.Int) {
 		base.Fatalf("Uint64Val(%v)", n)

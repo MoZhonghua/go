@@ -27,18 +27,28 @@ internal/ir/class_string.go
 internal/ir/const.go
 internal/ir/copy.go
 internal/ir/dump.go
-internal/ir/expr.go ?
-internal/ir/fmt.go ?
-internal/ir/func.go ?
+internal/ir/expr.go
+internal/ir/fmt.go
+internal/ir/func.go
 internal/ir/ir.go
-internal/ir/mini.go ?
-internal/ir/mknode.go ?
+internal/ir/mini.go
+internal/ir/mknode.go
+internal/ir/node_gen.go
+internal/ir/op_string.go
+internal/ir/package.go
+internal/ir/symtab.go
+internal/ir/type.go
+internal/ir/val.go
+internal/ir/visit.go
+
+2022-01-15
 internal/ir/name.go ?
 internal/ir/node.go ?
-
-
+internal/ir/scc.go ?
+internal/ir/stmt.go ?
 
 TODO
+internal/syntax/pos.go ?
 internal/types2/api.go ?
 
 internal/amd64/ssa.go ?

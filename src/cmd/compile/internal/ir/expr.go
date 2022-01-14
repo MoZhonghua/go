@@ -57,8 +57,8 @@ func (n *miniExpr) SetInit(x Nodes)       { n.init = x }
 // An AddStringExpr is a string concatenation Expr[0] + Exprs[1] + ... + Expr[len(Expr)-1].
 type AddStringExpr struct {
 	miniExpr
-	List     Nodes
-	Prealloc *Name
+	List     Nodes // 注意是列表，即可以同时表示多个string相加
+	Prealloc *Name // for named nodes
 }
 
 func NewAddStringExpr(pos src.XPos, list []Node) *AddStringExpr {
@@ -91,7 +91,7 @@ func (n *AddrExpr) SetOp(op Op) {
 	switch op {
 	default:
 		panic(n.no("SetOp " + op.String()))
-	case OADDR, OPTRLIT:
+	case OADDR, OPTRLIT: // &x, &B{...}
 		n.op = op
 	}
 }
@@ -136,7 +136,7 @@ func (n *BinaryExpr) SetOp(op Op) {
 		panic(n.no("SetOp " + op.String()))
 	case OADD, OADDSTR, OAND, OANDNOT, ODIV, OEQ, OGE, OGT, OLE,
 		OLSH, OLT, OMOD, OMUL, ONE, OOR, ORSH, OSUB, OXOR,
-		OCOPY, OCOMPLEX, OUNSAFEADD, OUNSAFESLICE,
+		OCOPY, OCOMPLEX, OUNSAFEADD, OUNSAFESLICE, // 注意把一些内置函数也当做binary op处理，比如copy(), unsafe.Add()
 		OEFACE:
 		n.op = op
 	}
@@ -194,6 +194,7 @@ type ClosureExpr struct {
 	Prealloc *Name
 }
 
+// function literal
 func NewClosureExpr(pos src.XPos, fn *Func) *ClosureExpr {
 	n := &ClosureExpr{Func: fn}
 	n.op = OCLOSURE
@@ -239,6 +240,9 @@ type ConstExpr struct {
 	val constant.Value
 }
 
+// const X = 1000;
+// val: 1000
+// orig: X?
 func NewConstExpr(val constant.Value, orig Node) Node {
 	n := &ConstExpr{val: val}
 	n.op = OLITERAL
@@ -278,6 +282,7 @@ func (n *ConvExpr) SetOp(op Op) {
 	default:
 		panic(n.no("SetOp " + op.String()))
 	case OCONV, OCONVIFACE, OCONVNOP, OBYTES2STR, OBYTES2STRTMP, ORUNES2STR, OSTR2BYTES, OSTR2BYTESTMP, OSTR2RUNES, ORUNESTR, OSLICE2ARRPTR:
+		// 分的细方便做优化
 		n.op = op
 	}
 }
@@ -307,6 +312,7 @@ func (n *IndexExpr) SetOp(op Op) {
 }
 
 // A KeyExpr is a Key: Value composite literal key.
+// 比如map[string]int { "abc": 100 }
 type KeyExpr struct {
 	miniExpr
 	Key   Node
@@ -678,6 +684,7 @@ func (n *UnaryExpr) SetOp(op Op) {
 	}
 }
 
+// type X struct {...}
 // An InstExpr is a generic function or type instantiation.
 type InstExpr struct {
 	miniExpr
@@ -775,6 +782,7 @@ func StaticValue(n Node) Node {
 
 		n1 := staticValue1(n)
 		if n1 == nil {
+			// 注意返回的是n，不是n1
 			return n
 		}
 		n = n1
@@ -789,11 +797,11 @@ func staticValue1(nn Node) Node {
 		return nil
 	}
 	n := nn.(*Name)
-	if n.Class != PAUTO {
+	if n.Class != PAUTO { // local variables
 		return nil
 	}
 
-	defn := n.Defn
+	defn := n.Defn // defining node: x := 1000: 这里nn=x， defn是整条语句
 	if defn == nil {
 		return nil
 	}
@@ -808,7 +816,7 @@ FindRHS:
 		defn := defn.(*AssignListStmt)
 		for i, lhs := range defn.Lhs {
 			if lhs == n {
-				rhs = defn.Rhs[i]
+				rhs = defn.Rhs[i] // x, y = 1, 100，nn=y则需要找到右值100
 				break FindRHS
 			}
 		}
@@ -908,11 +916,11 @@ func SameSafeExpr(l Node, r Node) bool {
 
 	switch l.Op() {
 	case ONAME:
-		return l == r
+		return l == r // x op x
 
 	case ODOT, ODOTPTR:
 		l := l.(*SelectorExpr)
-		r := r.(*SelectorExpr)
+		r := r.(*SelectorExpr) // x.y a.b: x==a && y==b
 		return l.Sel != nil && r.Sel != nil && l.Sel == r.Sel && SameSafeExpr(l.X, r.X)
 
 	case ODEREF:
@@ -973,10 +981,10 @@ func IsReflectHeaderDataField(l Node) bool {
 
 	var tsym *types.Sym
 	switch l.Op() {
-	case ODOT:
+	case ODOT: // x = struct{}, x.sel
 		l := l.(*SelectorExpr)
 		tsym = l.X.Type().Sym()
-	case ODOTPTR:
+	case ODOTPTR: // x := &struct{}, x.sel
 		l := l.(*SelectorExpr)
 		tsym = l.X.Type().Elem().Sym()
 	default:
@@ -986,11 +994,13 @@ func IsReflectHeaderDataField(l Node) bool {
 	if tsym == nil || l.Sym().Name != "Data" || tsym.Pkg.Path != "reflect" {
 		return false
 	}
+
+	// tsym should be reflect.StringHeader/SliceHeader
 	return tsym.Name == "SliceHeader" || tsym.Name == "StringHeader"
 }
 
 func ParamNames(ft *types.Type) []Node {
-	args := make([]Node, ft.NumParams())
+	args := make([]Node, ft.NumParams())  // ft.kind=TFUNC
 	for i, f := range ft.Params().FieldSlice() {
 		args[i] = AsNode(f.Nname)
 	}
@@ -1019,8 +1029,9 @@ func MethodSymSuffix(recv *types.Type, msym *types.Sym, suffix string) *types.Sy
 		base.Fatalf("blank method name")
 	}
 
-	rsym := recv.Sym()
+	rsym := recv.Sym()  // Type.Sym()是Type的名字
 	if recv.IsPtr() {
+		// func (*T) method(): 注意recv=*T, 名字应该为空
 		if rsym != nil {
 			base.Fatalf("declared pointer receiver type: %v", recv)
 		}
@@ -1039,7 +1050,7 @@ func MethodSymSuffix(recv *types.Type, msym *types.Sym, suffix string) *types.Sy
 	if recv.IsPtr() {
 		// The parentheses aren't really necessary, but
 		// they're pretty traditional at this point.
-		fmt.Fprintf(&b, "(%-S)", recv)
+		fmt.Fprintf(&b, "(%-S)", recv)  // 注意输出的类型的完整信息，不仅仅是类型名称
 	} else {
 		fmt.Fprintf(&b, "%-S", recv)
 	}
@@ -1049,6 +1060,7 @@ func MethodSymSuffix(recv *types.Type, msym *types.Sym, suffix string) *types.Sy
 	// package qualifier for names that came from a different
 	// package than the receiver type.
 	if !types.IsExported(msym.Name) && msym.Pkg != rpkg {
+		// (T).pkgpath.method suffix
 		b.WriteString(".")
 		b.WriteString(msym.Pkg.Prefix)
 	}

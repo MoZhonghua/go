@@ -297,6 +297,7 @@ func ClosureDebugRuntimeCheck(clo *ClosureExpr) {
 		}
 	}
 	if base.Flag.CompilingRuntime && clo.Esc() == EscHeap {
+		// 注意runtime不允许heap-alloc closure，因为不确定allocator已经初始化完成
 		base.ErrorfAt(clo.Pos(), "heap-allocated closure, not allowed in runtime")
 	}
 }

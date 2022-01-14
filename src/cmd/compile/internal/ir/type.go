@@ -37,6 +37,8 @@ func (*miniType) CanBeNtype() {}
 
 func (n *miniType) Type() *types.Type { return n.typ }
 
+// 比如多个map[int]int，是多个MapType node，typechecking后通过SetOType()指向同一个*types.Type?
+//
 // setOTYPE changes n to be an OTYPE node returning t.
 // Rewriting the node in place this way should not be strictly
 // necessary (we should be able to update the uses with
