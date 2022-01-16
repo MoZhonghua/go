@@ -17,7 +17,7 @@ import (
 // the comment text; otherwise it is the error message.
 func CommentsDo(src io.Reader, handler func(line, col uint, text string)) {
 	var s scanner
-	s.init(src, handler, comments)
+	s.init(src, handler, comments)  // 遇到错误或者注释时会回调handler函数
 	for s.tok != _EOF {
 		s.next()
 	}

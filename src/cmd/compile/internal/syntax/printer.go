@@ -107,7 +107,7 @@ func (p *printer) writeBytes(data []byte) {
 	if len(data) == 0 {
 		panic("expected non-empty []byte")
 	}
-	if p.nlcount > 0 && p.indent > 0 {
+	if p.nlcount > 0 && p.indent > 0 { // nlcount > 0 说明刚写完换行(可能是多个连续的换行)
 		// write indentation
 		n := p.indent
 		for n > len(tabBytes) {
@@ -143,6 +143,8 @@ func lineComment(text string) bool {
 	return strings.HasPrefix(text, "//")
 }
 
+// 空白字符(;,\n,indent)不是直接输出，而是记录下来，等真正需要输出token时
+// 才真正输出，需要做一些去重工作
 func (p *printer) addWhitespace(kind ctrlSymbol, text string) {
 	p.pending = append(p.pending, whitespace{p.lastTok, kind /*text*/})
 	switch kind {
@@ -157,12 +159,12 @@ func (p *printer) addWhitespace(kind ctrlSymbol, text string) {
 func (p *printer) flush(next token) {
 	// eliminate semis and redundant whitespace
 	sawNewline := next == _EOF
-	sawParen := next == _Rparen || next == _Rbrace
+	sawParen := next == _Rparen || next == _Rbrace // (, {
 	for i := len(p.pending) - 1; i >= 0; i-- {
 		switch p.pending[i].kind {
 		case semi:
 			k := semi
-			if sawParen {
+			if sawParen {  // ;( 或者 ;{ 可以删掉这个分号?
 				sawParen = false
 				k = none // eliminate semi
 			} else if sawNewline && impliesSemi(p.pending[i].last) {

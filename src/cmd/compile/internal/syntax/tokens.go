@@ -4,6 +4,7 @@
 
 package syntax
 
+// 注意token没有包含所有的lexical token，还有部分定义为Operator..
 type token uint
 
 //go:generate stringer -type token -linecomment tokens.go

@@ -41,14 +41,30 @@ internal/ir/type.go
 internal/ir/val.go
 internal/ir/visit.go
 
-2022-01-15
-internal/ir/name.go ?
-internal/ir/node.go ?
-internal/ir/scc.go ?
-internal/ir/stmt.go ?
+2022-01-16
+internal/ir/name.go
+internal/ir/node.go
+internal/ir/scc.go
+internal/ir/stmt.go
+
+internal/syntax/scanner.go
+internal/syntax/token_string.go
+internal/syntax/source.go
+internal/syntax/tokens.go
+internal/syntax/nodes.go
+internal/syntax/pos.go
+internal/syntax/positions.go
+internal/syntax/operator_string.go
+internal/syntax/dumper.go
+internal/syntax/printer.go
+internal/syntax/walk.go
+internal/syntax/testing.go
+internal/syntax/syntax.go
+
+internal/syntax/branches.go ?
+internal/syntax/parser.go ?
 
 TODO
-internal/syntax/pos.go ?
 internal/types2/api.go ?
 
 internal/amd64/ssa.go ?

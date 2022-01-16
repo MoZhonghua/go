@@ -33,6 +33,8 @@ func (n *Ident) Sym() *types.Sym { return n.sym }
 
 func (*Ident) CanBeNtype() {}
 
+// named node: 比如变量名，函数名. 注意stmt/expr不是named node，没办法命名
+//
 // Name holds Node fields used only by named nodes (ONAME, OTYPE, some OLITERAL).
 type Name struct {
 	miniExpr
@@ -52,12 +54,12 @@ type Name struct {
 	// For a closure var, the ONAME node of the outer captured variable.
 	// For the case-local variables of a type switch, the type switch guard (OTYPESW).
 	// For the name of a function, points to corresponding Func node.
-	Defn Node
+	Defn Node  // 定义这个named node的语句Node
 
 	// The function, method, or closure in which local variable or param is declared.
-	Curfn *Func
+	Curfn *Func  // nil说明是package全局变量?
 
-	Ntype    Ntype
+	Ntype    Ntype // 类型信息对应的Node，真正的types.Type在miniExpr.typ
 	Heapaddr *Name // temp holding heap address of param
 
 	// ONAME closure linkage
@@ -94,6 +96,10 @@ type Name struct {
 	//   - x2.Outer = nil
 	//   - xN.Outer = x(N-1), N > 2
 	//
+	// x1.Innermost = x3: 总是指向当前closure中x。
+	// Lookup("x")返回的总是x1，然后通过x1.innermost就可以拿到当前closure中的x3
+	//
+	// x3.Outer => x2.Outer => nil
 	//
 	// When we look up x in the symbol table, we always get x1.
 	// Then we can use x1.Innermost (if not nil) to get the x
@@ -218,7 +224,7 @@ func (n *Name) SetOffset(x int64) {
 }
 func (n *Name) FrameOffset() int64     { return n.Offset_ }
 func (n *Name) SetFrameOffset(x int64) { n.Offset_ = x }
-func (n *Name) Iota() int64            { return n.Offset_ }
+func (n *Name) Iota() int64            { return n.Offset_ }  // 注意Offset_用在两个地方
 func (n *Name) SetIota(x int64)        { n.Offset_ = x }
 func (n *Name) Walkdef() uint8         { return n.bits.get2(miniWalkdefShift) }
 func (n *Name) SetWalkdef(x uint8) {
@@ -294,9 +300,9 @@ func (n *Name) SetLibfuzzerExtraCounter(b bool)    { n.flags.set(nameLibfuzzerEx
 func (n *Name) OnStack() bool {
 	if n.Op() == ONAME {
 		switch n.Class {
-		case PPARAM, PPARAMOUT, PAUTO:
+		case PPARAM, PPARAMOUT, PAUTO:  // 入参，出参，局部变量
 			return n.Esc() != EscHeap
-		case PEXTERN, PAUTOHEAP:
+		case PEXTERN, PAUTOHEAP: // 全局变量，..?
 			return false
 		}
 	}
@@ -345,7 +351,8 @@ func (n *Name) Canonical() *Name {
 	return n
 }
 
-func (n *Name) SetByval(b bool) {
+// 注意设置在x的原始定义Node，而不是x1,x2...
+func (n *Name) SetByval(b bool) { // is captured by value or by reference?
 	if n.Canonical() != n {
 		base.Fatalf("SetByval called on non-canonical variable: %v", n)
 	}
@@ -368,6 +375,8 @@ func CaptureName(pos src.XPos, fn *Func, n *Name) *Name {
 		base.FatalfAt(pos, "misuse of CaptureName on closure variable: %v", n)
 	}
 	if n.Op() != ONAME || n.Curfn == nil || n.Curfn == fn {
+		// n.Curfn==nil: 全局变量
+		// n.Curfn==fn:  n是当前函数声明的变量，直接使用
 		return n // okay to use directly
 	}
 	if fn == nil {
@@ -375,7 +384,7 @@ func CaptureName(pos src.XPos, fn *Func, n *Name) *Name {
 	}
 
 	c := n.Innermost
-	if c != nil && c.Curfn == fn {
+	if c != nil && c.Curfn == fn { // 已经创建了closure var
 		return c
 	}
 
@@ -395,6 +404,9 @@ func CaptureName(pos src.XPos, fn *Func, n *Name) *Name {
 	return c
 }
 
+// 因为处理嵌套函数是从外向内依次处理，而只有处理到最内层函数才能明确知道哪些
+// 变量需要capture，所有需要在每层函数结束时在外层函数创建缺少closure var
+//
 // FinishCaptureNames handles any work leftover from calling CaptureName
 // earlier. outerfn should be the function that immediately encloses fn.
 func FinishCaptureNames(pos src.XPos, outerfn, fn *Func) {
@@ -481,7 +493,7 @@ const (
 	Pxxx       Class = iota // no class; used during ssa conversion to indicate pseudo-variables
 	PEXTERN                 // global variables
 	PAUTO                   // local variables
-	PAUTOHEAP               // local variables or parameters moved to heap
+	PAUTOHEAP               // local variables or parameters moved to heap. closure var是这个类型的
 	PPARAM                  // input arguments
 	PPARAMOUT               // output results
 	PTYPEPARAM              // type params

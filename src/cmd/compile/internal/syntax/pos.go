@@ -16,8 +16,8 @@ const PosMax = 1 << 30
 // Pos values are intentionally light-weight so that they
 // can be created without too much concern about space use.
 type Pos struct {
-	base      *PosBase
-	line, col uint32
+	base      *PosBase // 相对位置，如果没有//line: xxx，base={filename=current_go_file, line=1, col=1}
+	line, col uint32   // 这个是在原始.go文件中的位置
 }
 
 // MakePos returns a new Pos for the given PosBase, line and column.
@@ -130,6 +130,7 @@ func (p position_) String() string {
 // A PosBase represents the base for relative position information:
 // At position pos, the relative position is filename:line:col.
 type PosBase struct {
+	// pos是line: xxx指令结束后的位置。对于.go文件可以认为在最开始有一个虚拟的line指令
 	pos       Pos
 	filename  string
 	line, col uint32
@@ -138,9 +139,9 @@ type PosBase struct {
 // NewFileBase returns a new PosBase for the given filename.
 // A file PosBase's position is relative to itself, with the
 // position being filename:1:1.
-func NewFileBase(filename string) *PosBase {
+func NewFileBase(filename string) *PosBase { // 开始处理一个.go文件时创建?
 	base := &PosBase{MakePos(nil, linebase, colbase), filename, linebase, colbase}
-	base.pos.base = base
+	base.pos.base = base // 注意是指向自己
 	return base
 }
 
@@ -149,7 +150,7 @@ func NewFileBase(filename string) *PosBase {
 // the comment containing the line directive. For a directive in a line comment,
 // that position is the beginning of the next line (i.e., the newline character
 // belongs to the line comment).
-func NewLineBase(pos Pos, filename string, line, col uint) *PosBase {
+func NewLineBase(pos Pos, filename string, line, col uint) *PosBase { // 遇到line: xxx指令时创建
 	return &PosBase{pos, filename, sat32(line), sat32(col)}
 }
 

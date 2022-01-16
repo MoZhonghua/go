@@ -338,7 +338,7 @@ type (
 		simpleStmt
 	}
 
-	LabeledStmt struct {
+	LabeledStmt struct {  // L1: stmt
 		Label *Name
 		Stmt  Stmt
 		stmt

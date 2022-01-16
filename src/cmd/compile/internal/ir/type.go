@@ -21,6 +21,8 @@ import (
 // Note that syntax doesn't guarantee it's a type: an expression
 // like *fmt is an Ntype (we don't know whether names are types yet),
 // but at least 1+1 is not an Ntype.
+//
+// 可以理解为所有嵌入了一个miniType的Node，用来表示类型
 type Ntype interface {
 	Node
 	CanBeNtype()

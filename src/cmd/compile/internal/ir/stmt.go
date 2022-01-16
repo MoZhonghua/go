@@ -179,7 +179,7 @@ func NewCaseStmt(pos src.XPos, list, body []Node) *CaseClause {
 	return n
 }
 
-type CommClause struct {
+type CommClause struct { // select语句的各个clause
 	miniStmt
 	Comm Node // communication case
 	Body Nodes

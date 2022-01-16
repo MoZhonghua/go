@@ -33,12 +33,12 @@ type Node interface {
 
 	// Abstract graph structure, for generic traversals.
 	Op() Op
-	Init() Nodes
+	Init() Nodes  // 指的是for/switch/if语句中的init clause?
 
 	// Fields specific to certain Ops only.
 	Type() *types.Type
 	SetType(t *types.Type)
-	Name() *Name
+	Name() *Name  // 只有*Name(op=ONAME, OLITERAL, ...)返回自己，其他类型返回nil
 	Sym() *types.Sym
 	Val() constant.Value
 	SetVal(v constant.Value)
@@ -171,7 +171,7 @@ const (
 	OPTRLIT    // &X (X is composite literal)
 	OCONV      // Type(X) (type conversion)
 	OCONVIFACE // Type(X) (type conversion, to interface)
-	OCONVNOP   // Type(X) (type conversion, no effect)
+	OCONVNOP   // Type(X) (type conversion, no effect), 用在修改MayBeShared node
 	OCOPY      // copy(X, Y)
 	ODCL       // var X (declares X of type X.Type)
 
@@ -326,7 +326,7 @@ const (
 
 // Nodes is a pointer to a slice of *Node.
 // For fields that are not used in most nodes, this is used instead of
-// a slice to save space.
+// a slice to save space. (slice是24字节，指针8字节)
 type Nodes []Node
 
 // Append appends entries to Nodes.
@@ -562,7 +562,7 @@ func InitExpr(init []Node, expr Node) Node {
 func OuterValue(n Node) Node {
 	for {
 		switch nn := n; nn.Op() {
-		case OXDOT:
+		case OXDOT: // 表示还不确定X.Sel具体是哪种类型
 			base.Fatalf("OXDOT in walk")
 		case ODOT:
 			nn := nn.(*SelectorExpr)
@@ -595,5 +595,5 @@ const (
 	EscUnknown = iota
 	EscNone    // Does not escape to heap, result, or parameters.
 	EscHeap    // Reachable from the heap
-	EscNever   // By construction will not escape.
+	EscNever   // By construction will not escape. ??
 )

@@ -72,7 +72,7 @@ func (v *bottomUpVisitor) visit(n *Func) uint32 {
 	v.visitgen++
 	id := v.visitgen
 	v.nodeID[n] = id
-	v.visitgen++
+	v.visitgen++  // 注意一个node，两次visitgen++
 	min := v.visitgen
 	v.stack = append(v.stack, n)
 
@@ -100,6 +100,9 @@ func (v *bottomUpVisitor) visit(n *Func) uint32 {
 		}
 	})
 
+	// min没有变得更小说明没有遇到更加小的节点，也就是我们是一个SCC的根
+	// 比如就是一个普通函数func x() {}，此时min=id+1
+	// min==id: 说明中间遇到过当前节点，之前min=id+1，更新为min=id
 	if (min == id || min == id+1) && !n.IsHiddenClosure() {
 		// This node is the root of a strongly connected component.
 
@@ -119,7 +122,7 @@ func (v *bottomUpVisitor) visit(n *Func) uint32 {
 			if x == n {
 				break
 			}
-			v.nodeID[x] = ^uint32(0)
+			v.nodeID[x] = ^uint32(0) // 0xFFFFFFFF，最大值
 		}
 		v.nodeID[n] = ^uint32(0)
 		block := v.stack[i:]

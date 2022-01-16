@@ -15,6 +15,8 @@ import "fmt"
 //    - bad labeled breaks and continues
 //    - invalid, unused, duplicate, and missing labels
 //    - gotos jumping over variable declarations and into blocks
+//
+// 注意label的作用域是整个函数!
 func checkBranches(body *BlockStmt, errh ErrorHandler) {
 	if body == nil {
 		return
@@ -30,6 +32,16 @@ func checkBranches(body *BlockStmt, errh ErrorHandler) {
 	for _, fwd := range fwdGotos {
 		name := fwd.Label.Value
 		if l := ls.labels[name]; l != nil {
+			// 这里不允许向内部label跳转，但是go/parser是允许的, 因为按照spec
+			// label的作用域是整个函数
+			/*
+			func x() {
+				goto L1
+				{
+					L1:  // error: jumps into block
+				}
+			}
+			*/
 			l.used = true // avoid "defined and not used" error
 			ls.err(fwd.Label.Pos(), "goto %s jumps into block starting at %s", name, l.parent.start)
 		} else {
@@ -88,6 +100,9 @@ func (ls *labelScope) declare(b *block, s *LabeledStmt) *label {
 // gotoTarget returns the labeled statement matching the given name and
 // declared in block b or any of its enclosing blocks. The result is nil
 // if the label is not defined, or doesn't match a valid labeled statement.
+//
+// 注意这里的逻辑，虽然label名是整个函数中有效，但是需要label定义语句所在的block
+// 是goto语句一个enclosing block
 func (ls *labelScope) gotoTarget(b *block, name string) *LabeledStmt {
 	if l := ls.labels[name]; l != nil {
 		l.used = true // even if it's not a valid target
@@ -120,6 +135,8 @@ func (ls *labelScope) enclosingTarget(b *block, name string) *LabeledStmt {
 
 // targets describes the target statements within which break
 // or continue statements are valid.
+//
+// 这个是指如果遇到了break/continu，对应的是break/continue哪个语句(for/switch/select)
 type targets struct {
 	breaks    Stmt     // *ForStmt, *SwitchStmt, *SelectStmt, or nil
 	continues *ForStmt // or nil
@@ -168,6 +185,12 @@ func (ls *labelScope) blockBranches(parent *block, ctxt targets, lstmt *LabeledS
 	L:
 		switch s := stmt.(type) {
 		case *DeclStmt:
+			/*
+			goto L1:
+			var x int // error: jumps over variable declaration
+			L1:
+			*/
+			// 注意此时只看到var语句，还不知道L1是否存在
 			for _, d := range s.DeclList {
 				if v, ok := d.(*VarDecl); ok {
 					recordVarDecl(v.Pos(), v.NameList[0])
@@ -185,7 +208,7 @@ func (ls *labelScope) blockBranches(parent *block, ctxt targets, lstmt *LabeledS
 					if fwd.Label.Value == name {
 						fwd.Target = s
 						l.used = true
-						if jumpsOverVarDecl(fwd) {
+						if jumpsOverVarDecl(fwd) { // 此时看到了L1，可以确认是jumps over decl错误
 							ls.err(
 								fwd.Label.Pos(),
 								"goto %s jumps over declaration of %s at %s",
@@ -205,12 +228,14 @@ func (ls *labelScope) blockBranches(parent *block, ctxt targets, lstmt *LabeledS
 			stmt = s.Stmt
 			goto L
 
-		case *BranchStmt:
+		case *BranchStmt:  // goto, continue, break, fallthrough
 			// unlabeled branch statement
 			if s.Label == nil {
 				switch s.Tok {
 				case _Break:
 					if t := ctxt.breaks; t != nil {
+						// 注意此时ctxt.breaks为for/switch/select语句
+						// innerBlock()时设置
 						s.Target = t
 					} else {
 						ls.err(s.Pos(), "break is not in a loop, switch, or select")
@@ -239,6 +264,7 @@ func (ls *labelScope) blockBranches(parent *block, ctxt targets, lstmt *LabeledS
 				// "for", "switch", or "select" statement, and that is the one
 				// whose execution terminates."
 				if t := ls.enclosingTarget(b, name); t != nil {
+					// label一定和stmt绑定，这里是L1: for/select/switch { }
 					switch t := t.Stmt.(type) {
 					case *SwitchStmt, *SelectStmt, *ForStmt:
 						s.Target = t
