@@ -4,7 +4,6 @@
 
 package syntax
 
-// 注意token没有包含所有的lexical token，还有部分定义为Operator..
 type token uint
 
 //go:generate stringer -type token -linecomment tokens.go
@@ -19,7 +18,7 @@ const (
 
 	// operators and operations
 	// _Operator is excluding '*' (_Star)
-	_Operator // op
+	_Operator // op, 注意这里所有的operator当做一个token类型, 具体值Operator类型定义
 	_AssignOp // op=
 	_IncOp    // opop
 	_Assign   // =

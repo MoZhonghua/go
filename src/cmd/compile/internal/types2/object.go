@@ -13,10 +13,20 @@ import (
 	"unicode/utf8"
 )
 
+// 各种object:
+//  - PkgName: an imported Go package.
+//  - TypeName: a name for a (defined or alias) type.
+//    * 把Type和TypeName拆分开，因为同一个Type可能有多个名字?
+//  - Const: declared constant.
+//  - Var: declared variable (including function parameters and results, and struct fields)
+//  - Func:
+//  - Label:
+//  - Builtin: builtin functions
+//  - Nil
+
 // An Object describes a named language entity such as a package,
 // constant, type, variable, function (incl. methods), or label.
 // All objects implement the Object interface.
-//
 type Object interface {
 	Parent() *Scope  // scope in which this object is declared; nil for methods and struct fields
 	Pos() syntax.Pos // position of object identifier in declaration
@@ -173,7 +183,7 @@ func (obj *object) sameId(pkg *Package, name string) bool {
 		return false
 	}
 	// obj.Name == name
-	if obj.Exported() {
+	if obj.Exported() {  // 不同package中的同名exported id是相同的?
 		return true
 	}
 	// not exported, so packages must be the same (pkg == nil for
@@ -188,6 +198,8 @@ func (obj *object) sameId(pkg *Package, name string) bool {
 
 // A PkgName represents an imported Go package.
 // PkgNames don't have a type.
+//
+// 注意嵌入了一个object，也就是可以当做Object来用
 type PkgName struct {
 	object
 	imported *Package
@@ -196,6 +208,8 @@ type PkgName struct {
 
 // NewPkgName returns a new PkgName object representing an imported package.
 // The remaining arguments set the attributes found with all Objects.
+//
+// 指在pkg中import "imported"，为每个imported package创建一个: import name "imported"
 func NewPkgName(pos syntax.Pos, pkg *Package, name string, imported *Package) *PkgName {
 	return &PkgName{object{nil, pos, pkg, name, Typ[Invalid], 0, black, nopos}, imported, false}
 }
@@ -253,8 +267,13 @@ func (obj *TypeName) IsAlias() bool {
 		// a different name than the name of the basic type it refers to.
 		// Additionally, we need to look for "byte" and "rune" because they
 		// are aliases but have the same names (for better error messages).
+		//
+		// type x int这样的都认为是alias
 		return obj.pkg != nil || t.name != obj.name || t == universeByte || t == universeRune
 	case *Named:
+		// 每个Named type会和TypeName绑定，后者给出type名称, 此时
+		//   Named.obj = TypeName, TypeName.typ = Named
+		// type alias会新建一个TypeName.typ=Named，此时Named.obj还是原来值
 		return obj != t.obj
 	default:
 		return true
@@ -396,6 +415,7 @@ func writeObject(buf *bytes.Buffer, obj Object, qf Qualifier) {
 	switch obj := obj.(type) {
 	case *PkgName:
 		fmt.Fprintf(buf, "package %s", obj.Name())
+		// import xyz "github.com/abc"
 		if path := obj.imported.path; path != "" && path != obj.name {
 			fmt.Fprintf(buf, " (%q)", path)
 		}

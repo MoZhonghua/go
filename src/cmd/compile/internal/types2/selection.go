@@ -41,7 +41,7 @@ type Selection struct {
 	kind     SelectionKind
 	recv     Type   // type of x
 	obj      Object // object denoted by x.f
-	index    []int  // path from x to x.f
+	index    []int  // path from x to x.f, 因为有embedde field
 	indirect bool   // set if there was any pointer indirection on the path
 }
 

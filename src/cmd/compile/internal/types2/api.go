@@ -224,6 +224,8 @@ type Info struct {
 	//     *syntax.CaseClause    type-specific *Var for each type switch case clause (incl. default)
 	//     *syntax.Field         anonymous parameter *Var (incl. unnamed results)
 	//
+	// 比如import "abc/xyz", 相对于声明了一个xyz对象
+	// switch x.(type) { case int: do(x) }: x是一个int类型对象，不是原来的x
 	Implicits map[syntax.Node]Object
 
 	// Selections maps selector expressions (excluding qualified identifiers)
@@ -258,6 +260,7 @@ type Info struct {
 	// initialization dependency appear in topological order, the others appear
 	// in source order. Variables without an initialization expression do not
 	// appear in this list.
+	// 不能有环，否则报错"initialization cycle"
 	InitOrder []*Initializer
 }
 

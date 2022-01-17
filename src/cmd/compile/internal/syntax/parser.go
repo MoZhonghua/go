@@ -334,7 +334,7 @@ func (p *parser) advance(followlist ...token) {
 			p.print("skip " + p.tok.String())
 		}
 		p.next()
-		if len(followlist) == 0 {
+		if len(followlist) == 0 { // consume exactly one
 			break
 		}
 	}
@@ -388,7 +388,7 @@ func (p *parser) fileOrNil() *File {
 	}
 	f.Pragma = p.takePragma()
 	f.PkgName = p.name()
-	p.want(_Semi)
+	p.want(_Semi) // scanner会把newline转换为semi
 
 	// don't bother continuing if package clause has errors
 	if p.first != nil {
@@ -425,8 +425,10 @@ func (p *parser) fileOrNil() *File {
 		default:
 			if p.tok == _Lbrace && len(f.DeclList) > 0 && isEmptyFuncDecl(f.DeclList[len(f.DeclList)-1]) {
 				// opening { of function declaration on next line
+				// func x(); {}
 				p.syntaxError("unexpected semicolon or newline before {")
 			} else {
+				// func x(){} {}
 				p.syntaxError("non-declaration statement outside function body")
 			}
 			p.advance(_Const, _Type, _Var, _Func)
@@ -526,12 +528,14 @@ func (p *parser) importDecl(group *Group) Decl {
 
 	switch p.tok {
 	case _Name:
+		// import name "path"
 		d.LocalPkgName = p.name()
 	case _Dot:
+		// import . "path"
 		d.LocalPkgName = NewName(p.pos(), ".")
 		p.next()
 	}
-	d.Path = p.oliteral()
+	d.Path = p.oliteral() // "path"
 	if d.Path == nil {
 		p.syntaxError("missing import path")
 		p.advance(_Semi, _Rparen)
@@ -557,11 +561,12 @@ func (p *parser) constDecl(group *Group) Decl {
 	d.Group = group
 	d.Pragma = p.takePragma()
 
-	d.NameList = p.nameList(p.name())
+	// var a, b, c = 1, 2, 3
+	d.NameList = p.nameList(p.name()) // a, b, c
 	if p.tok != _EOF && p.tok != _Semi && p.tok != _Rparen {
 		d.Type = p.typeOrNil()
-		if p.gotAssign() {
-			d.Values = p.exprList()
+		if p.gotAssign() { // = (":="报错但是继续处理)
+			d.Values = p.exprList() // 1, 2, 3
 		}
 	}
 
@@ -580,12 +585,12 @@ func (p *parser) typeDecl(group *Group) Decl {
 	d.Pragma = p.takePragma()
 
 	d.Name = p.name()
-	if p.tok == _Lbrack {
+	if p.tok == _Lbrack { // type name [6]int
 		// array/slice or generic type
 		pos := p.pos()
 		p.next()
 		switch p.tok {
-		case _Rbrack:
+		case _Rbrack: // type name []int
 			p.next()
 			d.Type = p.sliceType(pos)
 		case _Name:
@@ -612,8 +617,8 @@ func (p *parser) typeDecl(group *Group) Decl {
 			d.Type = p.arrayType(pos, nil)
 		}
 	} else {
-		d.Alias = p.gotAssign()
-		d.Type = p.typeOrNil()
+		d.Alias = p.gotAssign()  // type name = x
+		d.Type = p.typeOrNil()  // 处理x，比如struct { a int }
 	}
 
 	if d.Type == nil {
@@ -637,10 +642,10 @@ func (p *parser) varDecl(group *Group) Decl {
 	d.Pragma = p.takePragma()
 
 	d.NameList = p.nameList(p.name())
-	if p.gotAssign() {
+	if p.gotAssign() { // var x = 10
 		d.Values = p.exprList()
 	} else {
-		d.Type = p.type_()
+		d.Type = p.type_() // var x int = 10
 		if p.gotAssign() {
 			d.Values = p.exprList()
 		}
@@ -662,8 +667,8 @@ func (p *parser) funcDeclOrNil() *FuncDecl {
 	f := new(FuncDecl)
 	f.pos = p.pos()
 	f.Pragma = p.takePragma()
-
 	if p.got(_Lparen) {
+		// func (*receiver) name()
 		rcvr := p.paramList(nil, _Rparen, false)
 		switch len(rcvr) {
 		case 0:
@@ -691,7 +696,7 @@ func (p *parser) funcDeclOrNil() *FuncDecl {
 			f.TParamList = p.paramList(nil, _Rbrack, true)
 		}
 	}
-	f.Type = p.funcType()
+	f.Type = p.funcType() // (in_params) (out_params)
 	if p.tok == _Lbrace {
 		f.Body = p.funcBody()
 	}
@@ -1192,6 +1197,7 @@ func (p *parser) type_() Expr {
 }
 
 func newIndirect(pos Pos, typ Expr) Expr {
+	// 比如func (s *Server) Start()中的*Server
 	o := new(Operation)
 	o.pos = pos
 	o.Op = Mul
@@ -1218,7 +1224,7 @@ func (p *parser) typeOrNil() Expr {
 		p.next()
 		return newIndirect(pos, p.type_())
 
-	case _Arrow:
+	case _Arrow: // var x <-chan int
 		// recvchantype
 		p.next()
 		p.want(_Chan)
@@ -1274,7 +1280,7 @@ func (p *parser) typeOrNil() Expr {
 	case _Name:
 		return p.qualifiedName(nil)
 
-	case _Lparen:
+	case _Lparen: // (Type) ?
 		p.next()
 		t := p.type_()
 		p.want(_Rparen)
@@ -1290,7 +1296,7 @@ func (p *parser) typeInstance(typ Expr) Expr {
 	}
 
 	pos := p.pos()
-	p.want(_Lbrack)
+	p.want(_Lbrack)  // typ[int, string]
 	x := new(IndexExpr)
 	x.pos = pos
 	x.X = typ
@@ -1384,6 +1390,7 @@ func (p *parser) structType() *StructType {
 // TypeList      = "type" Type { "," Type } .
 // TODO(gri) remove TypeList syntax if we accept #45346
 func (p *parser) interfaceType() *InterfaceType {
+	// https://tip.golang.org/ref/spec#Interface_types
 	if trace {
 		defer p.trace("interfaceType")()
 	}
@@ -1415,6 +1422,11 @@ func (p *parser) interfaceType() *InterfaceType {
 			return false
 
 		case _Operator:
+			/*
+			interface {
+				~int  // An interface representing all types with underlying type int.
+			}
+			*/
 			if p.op == Tilde && p.mode&AllowGenerics != 0 {
 				typ.MethodList = append(typ.MethodList, p.embeddedElem(nil))
 				return false
@@ -1657,12 +1669,14 @@ func (p *parser) methodDecl() *Field {
 	}
 
 	switch p.tok {
-	case _Lparen:
+	case _Lparen:  // name(params) results
 		// method
 		f.Name = name
 		f.Type = p.funcType()
 
 	case _Lbrack:
+		// Func[T1 bound](params) results
+		// GenericType[T1, T2]
 		if p.mode&AllowGenerics != 0 {
 			// Careful dance: We don't know if we have a generic method m[T C](x T)
 			// or an embedded instantiated type T[P1, P2] (we accept generic methods
@@ -1705,7 +1719,7 @@ func (p *parser) methodDecl() *Field {
 			}
 
 			// len(list) > 0
-			if list[0].Name != nil {
+			if list[0].Name != nil { // [X] X会被当做Type，有Name说明一定是[X Y]
 				// generic method
 				f.Name = name
 				f.Type = p.funcType()
@@ -1746,6 +1760,17 @@ func (p *parser) methodDecl() *Field {
 }
 
 // EmbeddedElem = MethodSpec | EmbeddedTerm { "|" EmbeddedTerm } .
+//
+// constraint interface中嵌入类型可以不是interface，而是具体类型，这个时候的
+//  - type x interface { int }:  只有int类型实现了x
+//  - type x interface { ~int }:  underlying type是int类型实现了x, 比如type MyInt int
+//  - type x interface { ~int|~int32 }:  underlying type是int或者int32类型实现了x
+// 注意包含这种嵌入类型的interface只能用作constraints
+//
+// 当constraint interface只包含一个嵌入类型时可以简写, 注意其他情况不允许
+//  [T *P]              // = [T interface{*P}]
+//  [T ~int]            // = [T interface{~int}]
+//  [T int|string]      // = [T interface{int|string}]
 func (p *parser) embeddedElem(f *Field) *Field {
 	if trace {
 		defer p.trace("embeddedElem")()
@@ -1883,6 +1908,7 @@ func (p *parser) paramList(name *Name, close token, requireNames bool) (list []*
 
 	// distribute parameter types (len(list) > 0)
 	if named == 0 {
+		// func(a, b, c): a, b, c全部按照类型名处理
 		// all unnamed => found names are named types
 		for _, par := range list {
 			if typ := par.Name; typ != nil {
@@ -1943,7 +1969,7 @@ func (p *parser) simpleStmt(lhs Expr, keyword token) SimpleStmt {
 		defer p.trace("simpleStmt")()
 	}
 
-	if keyword == _For && p.tok == _Range {
+	if keyword == _For && p.tok == _Range { // for x := range list
 		// _Range expr
 		if debug && lhs != nil {
 			panic("invalid call of simpleStmt")

@@ -263,6 +263,8 @@ func (s *Signature) Variadic() bool { return s.variadic }
 // Sums are currently used to represent type lists of interfaces
 // and thus the underlying types of type parameters; they are not
 // first class types of Go.
+//
+// 比如给定一个interface，哪些类型实现了这个interface??
 type Sum struct {
 	types []Type // types are unique
 }
@@ -306,11 +308,15 @@ func (s *Sum) is(pred func(Type) bool) bool {
 	return true
 }
 
+//
 // An Interface represents an interface type.
 type Interface struct {
-	methods   []*Func // ordered list of explicitly declared methods
-	types     Type    // (possibly a Sum) type declared with a type list (TODO(gri) need better field name)
-	embeddeds []Type  // ordered list of explicitly embedded types
+	methods []*Func // ordered list of explicitly declared methods
+
+	// type x[T1 any, T2 any] interface{ }
+	// [T1, T2]就是type list?
+	types     Type   // (possibly a Sum) type declared with a type list (TODO(gri) need better field name)
+	embeddeds []Type // ordered list of explicitly embedded types
 
 	allMethods []*Func // ordered list of methods declared with or embedded in this interface (TODO(gri): replace with mset)
 	allTypes   Type    // intersection of all embedded and locally declared types  (TODO(gri) need better field name)
@@ -450,6 +456,8 @@ func (t *Interface) Empty() bool {
 	}, nil)
 }
 
+// type list 是指什么？
+//
 // HasTypeList reports whether interface t has a type list, possibly from an embedded type.
 func (t *Interface) HasTypeList() bool {
 	if t.allMethods != nil {
@@ -648,6 +656,7 @@ func (c *Chan) Elem() Type { return c.elem }
 // TODO(gri) Clean up Named struct below; specifically the fromRHS field (can we use underlying?).
 
 // A Named represents a named (defined) type.
+// 注意这是types2包，Named就代表类型，不会代表变量
 type Named struct {
 	check      *Checker    // for Named.under implementation
 	info       typeInfo    // for cycle detection
@@ -655,8 +664,8 @@ type Named struct {
 	orig       *Named      // original, uninstantiated type
 	fromRHS    Type        // type (on RHS of declaration) this *Named type is derived from (for cycle reporting)
 	underlying Type        // possibly a *Named during setup; never a *Named once set up completely
-	tparams    []*TypeName // type parameters, or nil
-	targs      []Type      // type arguments (after instantiation), or nil
+	tparams    []*TypeName // type parameters, or nil; 只用在generic type?
+	targs      []Type      // type arguments (after instantiation), or nil; 只用在instantiated genereic type?
 	methods    []*Func     // methods declared for this type (not the method set of this type); signatures are type-checked lazily
 }
 
@@ -664,6 +673,8 @@ type Named struct {
 // If the given type name obj doesn't have a type yet, its type is set to the returned named type.
 // The underlying type must not be a *Named.
 func NewNamed(obj *TypeName, underlying Type, methods []*Func) *Named {
+	// 可以是基础类型(*Basic)或者type literal(比如struct {...}, map[int]string)
+	// type X struct {...}中Named=X，underlying=struct{...}
 	if _, ok := underlying.(*Named); ok {
 		panic("types2.NewNamed: underlying type must not be *Named")
 	}
@@ -674,7 +685,7 @@ func NewNamed(obj *TypeName, underlying Type, methods []*Func) *Named {
 func (check *Checker) newNamed(obj *TypeName, orig *Named, underlying Type, tparams []*TypeName, methods []*Func) *Named {
 	typ := &Named{check: check, obj: obj, orig: orig, fromRHS: underlying, underlying: underlying, tparams: tparams, methods: methods}
 	if typ.orig == nil {
-		typ.orig = typ
+		typ.orig = typ // 非泛型类型
 	}
 	if obj.typ == nil {
 		obj.typ = typ
@@ -740,6 +751,8 @@ func nextId() uint64 { return uint64(atomic.AddUint32(&lastId, 1)) }
 
 // A TypeParam represents a type parameter type.
 type TypeParam struct {
+	// 比如type X[T1 bound1, T2 bound2]
+	// obj=T1, index=0, bound=bound1
 	check *Checker  // for lazy type bound completion
 	id    uint64    // unique id, for debugging only
 	obj   *TypeName // corresponding type name
@@ -800,11 +813,11 @@ func optype(typ Type) Type {
 // (without expanding the instantiation). Type instances appear only
 // during type-checking and are replaced by their fully instantiated
 // (expanded) types before the end of type-checking.
-type instance struct {
+type instance struct {  // 注意这个本身不是Named， type X G[int, int]: instance表示G[int,int]
 	check   *Checker     // for lazy instantiation
 	pos     syntax.Pos   // position of type instantiation; for error reporting only
-	base    *Named       // parameterized type to be instantiated
-	targs   []Type       // type arguments
+	base    *Named       // parameterized type to be instantiated: G
+	targs   []Type       // type arguments: [int, int]
 	poslist []syntax.Pos // position of each targ; for error reporting only
 	value   Type         // base(targs...) after instantiation or Typ[Invalid]; nil if not yet set
 }
@@ -843,6 +856,9 @@ func expand(typ Type) Type {
 var expandf func(Type) Type
 
 func init() { expandf = expand }
+
+// 注意这里是lattice, top可以理解为empty bound, bottom理解为一个
+// 定义没有任何Type可以满足的bound
 
 // bottom represents the bottom of the type lattice.
 // It is the underlying type of a type parameter that

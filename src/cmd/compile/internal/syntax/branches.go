@@ -35,12 +35,12 @@ func checkBranches(body *BlockStmt, errh ErrorHandler) {
 			// 这里不允许向内部label跳转，但是go/parser是允许的, 因为按照spec
 			// label的作用域是整个函数
 			/*
-			func x() {
-				goto L1
-				{
-					L1:  // error: jumps into block
+				func x() {
+					goto L1
+					{
+						L1:  // error: jumps into block
+					}
 				}
-			}
 			*/
 			l.used = true // avoid "defined and not used" error
 			ls.err(fwd.Label.Pos(), "goto %s jumps into block starting at %s", name, l.parent.start)
@@ -124,6 +124,16 @@ func (ls *labelScope) enclosingTarget(b *block, name string) *LabeledStmt {
 	if l := ls.labels[name]; l != nil {
 		l.used = true // even if it's not a valid target (see e.g., test/fixedbugs/bug136.go)
 		for ; b != nil; b = b.parent {
+			/*
+				L1: for { break L1 } // ok
+				for { break L1 }   // error: invalid break label
+
+				L1.lstmt = for1
+				break1.Block.lstmt=for1
+
+				break2.Block.lstmt=for2不匹配
+			*/
+			// 注意要求是label.stmt和block.stmt是同一个，比如continue要求匹配一个外层的L1: for{}
 			if l.lstmt == b.lstmt {
 				return l.lstmt
 			}
@@ -186,9 +196,9 @@ func (ls *labelScope) blockBranches(parent *block, ctxt targets, lstmt *LabeledS
 		switch s := stmt.(type) {
 		case *DeclStmt:
 			/*
-			goto L1:
-			var x int // error: jumps over variable declaration
-			L1:
+				goto L1:
+				var x int // error: jumps over variable declaration
+				L1:
 			*/
 			// 注意此时只看到var语句，还不知道L1是否存在
 			for _, d := range s.DeclList {
@@ -228,7 +238,7 @@ func (ls *labelScope) blockBranches(parent *block, ctxt targets, lstmt *LabeledS
 			stmt = s.Stmt
 			goto L
 
-		case *BranchStmt:  // goto, continue, break, fallthrough
+		case *BranchStmt: // goto, continue, break, fallthrough
 			// unlabeled branch statement
 			if s.Label == nil {
 				switch s.Tok {

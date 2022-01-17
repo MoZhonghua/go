@@ -81,6 +81,8 @@ func (s *Scope) Lookup(name string) Object {
 // whose scope is the scope of the package that exported them.
 func (s *Scope) LookupParent(name string, pos syntax.Pos) (*Scope, Object) {
 	for ; s != nil; s = s.parent {
+		// pos比较，比如 { var x int; { x = 10; var x int } }
+		// 要求返回外层的x，而不是当前scope中的x
 		if obj := s.elems[name]; obj != nil && (!pos.IsKnown() || obj.scopePos().Cmp(pos) <= 0) {
 			return s, obj
 		}

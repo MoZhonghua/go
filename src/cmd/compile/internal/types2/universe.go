@@ -11,6 +11,8 @@ import (
 	"strings"
 )
 
+// NewPackage时会创建一个Scope.parent=Universe
+
 // The Universe scope contains all predeclared objects of Go.
 // It is the outermost scope of any chain of nested scopes.
 var Universe *Scope
@@ -20,7 +22,7 @@ var Universe *Scope
 var Unsafe *Package
 
 var (
-	universeIota  *Const
+	universeIota  *Const // 所有的iota都指向这个object，但是每次的值不一样
 	universeByte  *Basic // uint8 alias, but has name "byte"
 	universeRune  *Basic // int32 alias, but has name "rune"
 	universeAny   *Interface
@@ -220,7 +222,7 @@ func defPredeclaredComparable() {
 
 	// set up the defined type for the interface
 	obj := NewTypeName(nopos, nil, "comparable", nil)
-	named := NewNamed(obj, iface, nil)
+	named := NewNamed(obj, iface, nil) // 里面会设置obj.typ = named
 	obj.color_ = black
 	sig.recv = NewVar(nopos, nil, "", named) // complete == signature
 
@@ -276,6 +278,7 @@ func def(obj Object) {
 			unreachable()
 		}
 	}
+	// 会设置object.Parent()=scope
 	if scope.Insert(obj) != nil {
 		panic("internal error: double declaration")
 	}
