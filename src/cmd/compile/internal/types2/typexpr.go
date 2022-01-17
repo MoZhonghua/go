@@ -1021,7 +1021,7 @@ func intersect(x, y Type) (r Type) {
 
 	switch {
 	case x == theBottom || y == theBottom:
-		return theBottom
+		return theBottom // 注意这种return语句也会设置r=theBottom
 	case x == nil || x == theTop:
 		return y
 	case y == nil || x == theTop:

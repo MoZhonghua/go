@@ -35,14 +35,14 @@ const forceStrict = false
 type exprInfo struct {
 	isLhs bool // expression is lhs operand of a shift with delayed type-check
 	mode  operandMode
-	typ   *Basic
+	typ   *Basic // 为什么限制为Basic types?
 	val   constant.Value // constant value; or nil (if not a constant)
 }
 
 // A context represents the context within which an object is type-checked.
 type context struct {
 	decl          *declInfo                 // package-level declaration whose init expression/function body is checked
-	scope         *Scope                    // top-most scope for lookups
+	scope         *Scope                    // top-most scope for lookups: 应该是指最内层的scope
 	pos           syntax.Pos                // if valid, identifiers are looked up as if at position pos (used by Eval)
 	iota          constant.Value            // value of iota in a constant declaration; nil otherwise
 	errpos        syntax.Pos                // if valid, identifier position of a constant with inherited initializer
@@ -120,6 +120,8 @@ type Checker struct {
 }
 
 // addDeclDep adds the dependency edge (check.decl -> to) if check.decl exists
+//
+// 比如var x = y; var y = 100; 第一个decl依赖于第二个decl
 func (check *Checker) addDeclDep(to Object) {
 	from := check.decl
 	if from == nil {
@@ -131,6 +133,7 @@ func (check *Checker) addDeclDep(to Object) {
 	from.addDep(to)
 }
 
+// untyped一般是literal, 因此类型是*Basic(UntypedXxx)
 func (check *Checker) rememberUntyped(e syntax.Expr, lhs bool, mode operandMode, typ *Basic, val constant.Value) {
 	m := check.untyped
 	if m == nil {
@@ -349,7 +352,7 @@ func (check *Checker) recordUntyped() {
 	}
 
 	for x, info := range check.untyped {
-		if debug && isTyped(info.typ) {
+		if debug && isTyped(info.typ) { // 不应该出现这种情况
 			check.dump("%v: %s (type %s) is typed", posFor(x), x, info.typ)
 			unreachable()
 		}
@@ -370,6 +373,7 @@ func (check *Checker) recordTypeAndValue(x syntax.Expr, mode operandMode, typ Ty
 		assert(typ == Typ[Invalid] || is(typ, IsConstType))
 	}
 	if m := check.Types; m != nil {
+		// 为nil时没有创建map
 		m[x] = TypeAndValue{mode, typ, val}
 	}
 }
@@ -450,6 +454,7 @@ func (check *Checker) recordImplicit(node syntax.Node, obj Object) {
 }
 
 func (check *Checker) recordSelection(x *syntax.SelectorExpr, kind SelectionKind, recv Type, obj Object, index []int, indirect bool) {
+	// index是访问方法/字段时的路径，没有嵌入类型时len(index)=1, 有嵌入类型时len(index)>1
 	assert(obj != nil && (recv == nil || len(index) > 0))
 	check.recordUse(x.Sel, obj)
 	if m := check.Selections; m != nil {

@@ -54,7 +54,7 @@ func isNumericOrString(typ Type) bool { return is(typ, IsNumeric|IsString) }
 // isTyped reports whether typ is typed; i.e., not an untyped
 // constant or boolean. isTyped may be called with types that
 // are not fully set up.
-func isTyped(typ Type) bool {
+func isTyped(typ Type) bool { // 就是检查是不是UntypedXxxx
 	// isTyped is called with types that are not fully
 	// set up. Must not call Basic()!
 	// A *Named or *instance type is always typed, so

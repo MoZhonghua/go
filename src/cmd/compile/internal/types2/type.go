@@ -308,20 +308,42 @@ func (s *Sum) is(pred func(Type) bool) bool {
 	return true
 }
 
+// https://github.com/golang/go/issues/45346
+
+// type set的概念
+// Every type has an associated type set. The type set of an ordinary non-interface type T is simply
+// the set {T} which contains just T itself. The type set of an interface type (in this section we
+// only discuss ordinary interface types, without type lists) is the set of all types that declare
+// all the methods of the interface.
+//
+// an interface type used as a constraint is permitted to embed a non-interface type. For example:
+// type Integer interface{ int }. The type set of int is simply {int}. This means that the type set
+// of Integer is also {int}.
+//
+// propose a new syntactic construct, which may be embedded in an interface type used as a
+// constraint. This is an approximation element, written as ~T.
+//
+// new syntactic construct that may be embedded in an interface type used as a constraint: a union
+// element. A union element is written as a sequence of types or approximation elements separated by
+// vertical bars (|)
 //
 // An Interface represents an interface type.
+//
+// interface { int; io.Reader; What() }
+//  - methods: What()
+//  - embeddeds: int, io.Reader
+//  - types ??
 type Interface struct {
-	methods []*Func // ordered list of explicitly declared methods
-
-	// type x[T1 any, T2 any] interface{ }
-	// [T1, T2]就是type list?
-	types     Type   // (possibly a Sum) type declared with a type list (TODO(gri) need better field name)
-	embeddeds []Type // ordered list of explicitly embedded types
+	methods   []*Func // ordered list of explicitly declared methods
+	types     Type    // (possibly a Sum) type declared with a type list (TODO(gri) need better field name)
+	embeddeds []Type  // ordered list of explicitly embedded types
 
 	allMethods []*Func // ordered list of methods declared with or embedded in this interface (TODO(gri): replace with mset)
-	allTypes   Type    // intersection of all embedded and locally declared types  (TODO(gri) need better field name)
 
-	obj Object // type declaration defining this interface; or nil (for better error messages)
+	// allTypes总是是intersect(self.types, embed.allTypes)
+	// 问题在于最开始的types是啥?
+	allTypes Type   // intersection of all embedded and locally declared types  (TODO(gri) need better field name)
+	obj      Object // type declaration defining this interface; or nil (for better error messages)
 }
 
 // unpack unpacks a type into a list of types.
@@ -456,8 +478,6 @@ func (t *Interface) Empty() bool {
 	}, nil)
 }
 
-// type list 是指什么？
-//
 // HasTypeList reports whether interface t has a type list, possibly from an embedded type.
 func (t *Interface) HasTypeList() bool {
 	if t.allMethods != nil {
@@ -802,6 +822,7 @@ func optype(typ Type) Type {
 		// See also issue #39680.
 		if u := t.Bound().allTypes; u != nil && u != typ {
 			// u != typ and u is a type parameter => under(u) != typ, so this is ok
+			// u=allTypes是Sum类型，under(u)=u
 			return under(u)
 		}
 		return theTop
@@ -813,7 +834,7 @@ func optype(typ Type) Type {
 // (without expanding the instantiation). Type instances appear only
 // during type-checking and are replaced by their fully instantiated
 // (expanded) types before the end of type-checking.
-type instance struct {  // 注意这个本身不是Named， type X G[int, int]: instance表示G[int,int]
+type instance struct { // 注意这个本身不是Named， type X G[int, int]: instance表示G[int,int]
 	check   *Checker     // for lazy instantiation
 	pos     syntax.Pos   // position of type instantiation; for error reporting only
 	base    *Named       // parameterized type to be instantiated: G

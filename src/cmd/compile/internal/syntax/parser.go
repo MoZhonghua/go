@@ -1433,6 +1433,11 @@ func (p *parser) interfaceType() *InterfaceType {
 			}
 
 		case _Type:
+			/*
+			interface {
+				type int, int8
+			}
+			*/
 			// TODO(gri) remove TypeList syntax if we accept #45346
 			if p.mode&AllowGenerics != 0 {
 				type_ := NewName(p.pos(), "type") // cannot have a method named "type"

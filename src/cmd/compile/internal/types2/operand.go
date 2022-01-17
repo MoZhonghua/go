@@ -259,7 +259,7 @@ func (x *operand) assignableTo(check *Checker, T Type, reason *string) (bool, er
 	// x is an untyped value representable by a value of type T.
 	if isUntyped(Vu) {
 		if t, ok := Tu.(*Sum); ok {
-			return t.is(func(t Type) bool {
+			return t.is(func(t Type) bool { // 要求列表中每个类型都满足assignableTo
 				// TODO(gri) this could probably be more efficient
 				ok, _ := x.assignableTo(check, t, reason)
 				return ok
@@ -273,6 +273,7 @@ func (x *operand) assignableTo(check *Checker, T Type, reason *string) (bool, er
 	// x's type V and T have identical underlying types
 	// and at least one of V or T is not a named type
 	if check.identical(Vu, Tu) && (!isNamed(V) || !isNamed(T)) {
+		// named和unnamed如果底层的类型相同可以相互赋值
 		return true, 0
 	}
 

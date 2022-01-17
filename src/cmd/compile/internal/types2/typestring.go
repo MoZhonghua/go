@@ -267,6 +267,7 @@ func writeType(buf *bytes.Buffer, typ Type, qf Qualifier, visited []Type) {
 		}
 
 	case *Named:
+		// 只写type name，不是underlying type数据
 		writeTypeName(buf, t.obj, qf)
 		if t.targs != nil {
 			// instantiated type
