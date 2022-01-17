@@ -74,11 +74,14 @@ internal/types2/version.go
 internal/types2/operand.go
 internal/types2/typestring.go
 internal/types2/check.go
+internal/types2/predicates.go
 
-internal/types2/predicates.go ?
-internal/types2/builtins.go ?
+2022-01-18
+internal/types2/resolver.go ?
+internal/types2/typexpr.go ?
 internal/types2/expr.go ?
 
+internal/types2/builtins.go ?
 internal/types2/assignments.go ?
 internal/types2/call.go ?
 internal/types2/conversions.go ?
@@ -92,14 +95,12 @@ internal/types2/instantiate.go ?
 internal/types2/labels.go ?
 internal/types2/lookup.go ?
 internal/types2/objset.go ?
-internal/types2/resolver.go ?
 internal/types2/return.go ?
 internal/types2/sanitize.go ?
 internal/types2/selection.go ?
 internal/types2/sizes.go ?
 internal/types2/stmt.go ?
 internal/types2/subst.go ?
-internal/types2/typexpr.go ?
 internal/types2/unify.go ?
 
 TODO

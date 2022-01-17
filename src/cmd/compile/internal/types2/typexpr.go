@@ -22,7 +22,6 @@ var acceptMethodTypeParams bool
 // If an error occurred, x.mode is set to invalid.
 // For the meaning of def, see Checker.definedType, below.
 // If wantType is set, the identifier e is expected to denote a type.
-//
 func (check *Checker) ident(x *operand, e *syntax.Name, def *Named, wantType bool) {
 	x.mode = invalid
 	x.expr = e

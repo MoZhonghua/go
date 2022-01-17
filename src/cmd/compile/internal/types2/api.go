@@ -171,6 +171,8 @@ func srcimporter_setUsesCgo(conf *Config) {
 // Only the information for which a map is provided is collected.
 // If the package has type errors, the collected information may
 // be incomplete.
+//
+// 输入syntax.Node对象，然后生成对应的types2.Object，并做关联
 type Info struct {
 	// Types maps expressions to their types, and for constant
 	// expressions, also their values. Invalid expressions are

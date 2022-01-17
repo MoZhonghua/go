@@ -85,7 +85,12 @@ func validatedImportPath(path string) (string, error) {
 
 // declarePkgObj declares obj in the package scope, records its ident -> obj mapping,
 // and updates check.objMap. The object must not be a function or method.
+//
+// syntax.Name => Object
+// pkg.Scope[name] = Object
+// check.objMap[obj] = declInfo
 func (check *Checker) declarePkgObj(ident *syntax.Name, obj Object, d *declInfo) {
+	// declInfo可以同时声明多个object，但是object一定是对应单个var/const/type/func
 	assert(ident.Value == obj.Name())
 
 	// spec: "A package-scope or file-scope identifier with name init
@@ -195,7 +200,7 @@ func (check *Checker) importPackage(pos syntax.Pos, path, dir string) *Package {
 // into their respective scopes. It also performs imports and associates
 // methods with receiver base type names.
 func (check *Checker) collectObjects() {
-	pkg := check.pkg
+	pkg := check.pkg   // 可能是NewPackage创建的，就设置了path/name/scope，其他都是nil
 
 	// pkgImports is the set of packages already imported by any package file seen
 	// so far. Used to avoid duplicate entries in pkg.imports. Allocate and populate
@@ -218,11 +223,11 @@ func (check *Checker) collectObjects() {
 	for fileNo, file := range check.files {
 		// The package identifier denotes the current package,
 		// but there is no corresponding package object.
-		check.recordDef(file.PkgName, nil)
+		check.recordDef(file.PkgName, nil)  // syntax.Name -> Object
 
 		fileScope := NewScope(check.pkg.scope, syntax.StartPos(file), syntax.EndPos(file), check.filename(fileNo))
 		fileScopes = append(fileScopes, fileScope)
-		check.recordScope(file, fileScope)
+		check.recordScope(file, fileScope) // syntax.Node -> Scope
 
 		// determine file directory, necessary to resolve imports
 		// FileName may be "" (typically for tests) in which case
@@ -237,7 +242,7 @@ func (check *Checker) collectObjects() {
 			}
 
 			switch s := decl.(type) {
-			case *syntax.ImportDecl:
+			case *syntax.ImportDecl:  // syntax.ImportDecl.LocalPkgName => PkgName or syntax.ImportDecl => PkgName
 				// import package
 				if s.Path == nil || s.Path.Bad {
 					continue // error reported during parsing
@@ -248,6 +253,7 @@ func (check *Checker) collectObjects() {
 					continue
 				}
 
+				// 调用importer来导入*Package, gcimporters会读取pkg.a中的__PKGDEF内容
 				imp := check.importPackage(s.Path.Pos(), path, fileDir)
 				if imp == nil {
 					continue
@@ -298,7 +304,7 @@ func (check *Checker) collectObjects() {
 						check.dotImportMap = make(map[dotImportKey]*PkgName)
 					}
 					// merge imported scope with file scope
-					for _, obj := range imp.scope.elems {
+					for _, obj := range imp.scope.elems { // 有gcimporter负责填入
 						// A package scope may contain non-exported objects,
 						// do not import them!
 						if obj.Exported() {
@@ -313,6 +319,7 @@ func (check *Checker) collectObjects() {
 								err.recordAltDecl(alt)
 								check.report(&err)
 							} else {
+								// 记录下来obj所在的原始PkgName
 								check.dotImportMap[dotImportKey{fileScope, obj}] = pkgName
 							}
 						}
@@ -320,10 +327,14 @@ func (check *Checker) collectObjects() {
 				} else {
 					// declare imported package object in file scope
 					// (no need to provide s.LocalPkgName since we called check.recordDef earlier)
+					//
+					// id=nil不会写入check.Defs, 但是在PkgName object在FileScope中
 					check.declare(fileScope, nil, pkgName, nopos)
 				}
 
-			case *syntax.ConstDecl:
+			case *syntax.ConstDecl: // syntax.ConstDecl.Name[i] => Const + declInfo
+				// 多行的const(...)对应多个ConstDecl
+				//
 				// iota is the index of the current constDecl within the group
 				if first < 0 || file.DeclList[index-1].(*syntax.ConstDecl).Group != s.Group {
 					first = index
@@ -397,11 +408,11 @@ func (check *Checker) collectObjects() {
 					check.arity(s.Pos(), s.NameList, values, false, false)
 				}
 
-			case *syntax.TypeDecl:
+			case *syntax.TypeDecl: // syntax.Name => TypeName
 				obj := NewTypeName(s.Name.Pos(), pkg, s.Name.Value, nil)
 				check.declarePkgObj(s.Name, obj, &declInfo{file: fileScope, tdecl: s})
 
-			case *syntax.FuncDecl:
+			case *syntax.FuncDecl: // syntax.Name => Func
 				d := s // TODO(gri) get rid of this
 				name := d.Name.Value
 				obj := NewFunc(d.Name.Pos(), pkg, name, nil)
@@ -417,6 +428,7 @@ func (check *Checker) collectObjects() {
 					}
 					// don't declare init functions in the package scope - they are invisible
 					if name == "init" {
+						// init()返回不能被调用，可以重复出现，不能也不需要放到Scope中
 						obj.parent = pkg.scope
 						check.recordDef(d.Name, obj)
 						// init functions must have a body
@@ -425,6 +437,7 @@ func (check *Checker) collectObjects() {
 							check.softErrorf(obj.pos, "missing function body")
 						}
 					} else {
+						// declare会把object放到scope中
 						check.declare(pkg.scope, d.Name, obj, nopos)
 					}
 				} else {

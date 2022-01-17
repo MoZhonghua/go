@@ -173,7 +173,7 @@ func (p *ifacePair) identical(q *ifacePair) bool {
 // For changes to this code the corresponding changes should be made to unifier.nify.
 func (check *Checker) identical0(x, y Type, cmpTags bool, p *ifacePair) bool {
 	// types must be expanded for comparison
-	x = expandf(x)
+	x = expandf(x)  // 把generic instantiation转换为实际类型
 	y = expandf(y)
 
 	if x == y {
@@ -403,7 +403,6 @@ func (check *Checker) identicalTParams(x, y []*TypeName, cmpTags bool, p *ifaceP
 // Default returns the default "typed" type for an "untyped" type;
 // it returns the incoming type for all other types. The default type
 // for untyped nil is untyped nil.
-//
 func Default(typ Type) Type {
 	if t, ok := typ.(*Basic); ok {
 		switch t.kind {

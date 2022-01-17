@@ -95,7 +95,7 @@ type Checker struct {
 	// pkgPathMap is allocated lazily, so that we don't pay the price of building
 	// it on the happy path. seenPkgMap tracks the packages that we've already
 	// walked.
-	pkgPathMap map[string]map[string]bool
+	pkgPathMap map[string]map[string]bool  // 有两个package, 路径为a/hello, b/hello, 此时name都是hello, 仅错误信息使用
 	seenPkgMap map[*Package]bool
 
 	// information collected during type-checking of a set of package files
