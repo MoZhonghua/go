@@ -49,7 +49,6 @@ func (check *Checker) funcBody(decl *declInfo, name string, sig *Signature, body
 		check.labels(body)
 	}
 
-	fmt.Printf("check func %v(): isTerminating\n",  name)
 	if sig.results.Len() > 0 && !check.isTerminating(body, "") {
 		check.error(body.Rbrace, "missing return")
 	}

@@ -6,6 +6,8 @@
 
 package types2
 
+import "fmt"
+
 // LookupFieldOrMethod looks up a field or method with given package and name
 // in T and returns the corresponding *Var or *Func, an index sequence, and a
 // bool indicating if there were any pointer indirections on the path to the
@@ -27,10 +29,11 @@ package types2
 //
 //	- If index != nil, the index sequence points to an ambiguous entry
 //	(the same name appeared more than once at the same embedding level).
+//  注意必须是同层的。浅层的永远是覆盖掉深层的，此时不存在异议。
 //
 //	- If indirect is set, a method with a pointer receiver type was found
-//      but there was no pointer on the path from the actual receiver type to
-//	the method's formal receiver base type, nor was the receiver addressable.
+//    but there was no pointer on the path from the actual receiver type to
+//	  the method's formal receiver base type, nor was the receiver addressable.
 //
 func LookupFieldOrMethod(T Type, addressable bool, pkg *Package, name string) (obj Object, index []int, indirect bool) {
 	return (*Checker)(nil).lookupFieldOrMethod(T, addressable, pkg, name)
@@ -46,6 +49,8 @@ func LookupFieldOrMethod(T Type, addressable bool, pkg *Package, name string) (o
 // lookupFieldOrMethod is like the external version but completes interfaces
 // as necessary.
 func (check *Checker) lookupFieldOrMethod(T Type, addressable bool, pkg *Package, name string) (obj Object, index []int, indirect bool) {
+
+	fmt.Printf("lookupFieldOrMethod: %v %v\n", T, name)
 	// Methods cannot be associated to a named pointer type
 	// (spec: "The type denoted by T is called the receiver base type;
 	// it must not be a pointer or interface type and it must be declared
@@ -54,8 +59,10 @@ func (check *Checker) lookupFieldOrMethod(T Type, addressable bool, pkg *Package
 	// pointer type but discard the result if it is a method since we would
 	// not have found it for T (see also issue 8590).
 	if t := asNamed(T); t != nil {
+		fmt.Printf("  methods: %v\n", t.methods)
 		if p, _ := t.underlying.(*Pointer); p != nil {
 			obj, index, indirect = check.rawLookupFieldOrMethod(p, false, pkg, name)
+			fmt.Printf("  bad: %v %v %v\n", obj, index, indirect)
 			if _, ok := obj.(*Func); ok {
 				return nil, nil, false
 			}
@@ -100,6 +107,7 @@ func (check *Checker) rawLookupFieldOrMethod(T Type, addressable bool, pkg *Pack
 	// the map key comparison, as we do in consolidateMultiples.)
 	var seen map[*Named]bool
 
+	// 一个广度优先搜索
 	// search current depth
 	for len(current) > 0 {
 		var next []embeddedType // embedded types found at current depth
@@ -441,6 +449,9 @@ func (check *Checker) assertableTo(V *Interface, T Type) (method, wrongType *Fun
 
 // deref dereferences typ if it is a *Pointer and returns its base and true.
 // Otherwise it returns (typ, false).
+//
+// 注意不是检查underlying是否为指针，而是自己是否为指针; 特别的Named不是指针！
+// type x *int;  // x是Named，deref(Named)=Named!
 func deref(typ Type) (Type, bool) {
 	if p, _ := typ.(*Pointer); p != nil {
 		return p.base, true
