@@ -6,8 +6,6 @@
 
 package types2
 
-import "fmt"
-
 // LookupFieldOrMethod looks up a field or method with given package and name
 // in T and returns the corresponding *Var or *Func, an index sequence, and a
 // bool indicating if there were any pointer indirections on the path to the
@@ -49,8 +47,6 @@ func LookupFieldOrMethod(T Type, addressable bool, pkg *Package, name string) (o
 // lookupFieldOrMethod is like the external version but completes interfaces
 // as necessary.
 func (check *Checker) lookupFieldOrMethod(T Type, addressable bool, pkg *Package, name string) (obj Object, index []int, indirect bool) {
-
-	fmt.Printf("lookupFieldOrMethod: %v %v\n", T, name)
 	// Methods cannot be associated to a named pointer type
 	// (spec: "The type denoted by T is called the receiver base type;
 	// it must not be a pointer or interface type and it must be declared
@@ -59,10 +55,9 @@ func (check *Checker) lookupFieldOrMethod(T Type, addressable bool, pkg *Package
 	// pointer type but discard the result if it is a method since we would
 	// not have found it for T (see also issue 8590).
 	if t := asNamed(T); t != nil {
-		fmt.Printf("  methods: %v\n", t.methods)
 		if p, _ := t.underlying.(*Pointer); p != nil {
+			// 注意参数: T=underlying type && addressable = false
 			obj, index, indirect = check.rawLookupFieldOrMethod(p, false, pkg, name)
-			fmt.Printf("  bad: %v %v %v\n", obj, index, indirect)
 			if _, ok := obj.(*Func); ok {
 				return nil, nil, false
 			}
@@ -231,6 +226,7 @@ func (check *Checker) rawLookupFieldOrMethod(T Type, addressable bool, pkg *Pack
 				// determine if method has a pointer receiver
 				hasPtrRecv := tpar == nil && ptrRecv(f)
 				if hasPtrRecv && !indirect && !addressable {
+					// 注意这里再次检查base type T是指针的情况
 					return nil, nil, true // pointer/addressable receiver required
 				}
 			}
@@ -254,6 +250,13 @@ type embeddedType struct {
 // consolidateMultiples collects multiple list entries with the same type
 // into a single entry marked as containing multiples. The result is the
 // consolidated list.
+// DFS时同一层相同类型可能出现多次
+/*
+type x struct {}
+type y1 struct { x }
+type y2 struct { x }
+type z struct { y1; y2 } // DFS z的第二层时x出现了两次
+*/
 func (check *Checker) consolidateMultiples(list []embeddedType) []embeddedType {
 	if len(list) <= 1 {
 		return list // at most one entry - nothing to do
@@ -299,6 +302,14 @@ func (check *Checker) lookupType(m map[Type]int, typ Type) (int, bool) {
 // present in V have matching types (e.g., for a type assertion x.(T) where
 // x is of interface type V).
 //
+// 根据参数检查两种情况:
+//  - V实现了T的所有方法且类型: V是类型 || static=true
+//
+//  - V和T的同名方法类型一样: : V是接口 && static=false
+//    type V interface { nop() }
+//    type T interface { nop() int; nop2() }
+//    var x V
+//    x.(T) // 这个时候只知道x真正类型有一个nop()方法，只能检查nop()类型是否一样
 func MissingMethod(V Type, T *Interface, static bool) (method *Func, wrongType bool) {
 	m, typ := (*Checker)(nil).missingMethod(V, T, static)
 	return m, typ != nil
@@ -330,6 +341,7 @@ func (check *Checker) missingMethod(V Type, T *Interface, static bool) (method, 
 			if f == nil {
 				// if m is the magic method == we're ok (interfaces are comparable)
 				if m.name == "==" || !static {
+					// T是接口 && static=false: 只检查同名方法类型一样，不存在不是错误
 					continue
 				}
 				return m, f
@@ -438,12 +450,21 @@ func (check *Checker) missingMethod(V Type, T *Interface, static bool) (method, 
 // If the global constant forceStrict is set, assertions that are known to fail
 // are not permitted.
 func (check *Checker) assertableTo(V *Interface, T Type) (method, wrongType *Func) {
+	/*
+		type T interface { nop() }
+		type V interface { nop() int }
+		var x T
+		_ = x.(V) // forceStrict=true是报错: x (variable of type T) cannot have dynamic type V
+	*/
 	// no static check is required if T is an interface
 	// spec: "If T is an interface type, x.(T) asserts that the
 	//        dynamic type of x implements the interface T."
 	if asInterface(T) != nil && !forceStrict {
 		return
 	}
+
+	// 如果T是类型: T实现V的所有方法
+	// 如果T是接口: T和V的同名方法必须类型相同，但是T不用实现所有V的方法(static=false)
 	return check.missingMethod(T, V, false)
 }
 

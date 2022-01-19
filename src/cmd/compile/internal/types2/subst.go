@@ -24,6 +24,8 @@ type substMap struct {
 
 // makeSubstMap creates a new substitution map mapping tpars[i] to targs[i].
 // If targs[i] is nil, tpars[i] is not substituted.
+//
+// TypeName.typ 一定是 *TypeParam; 实际就两种情况: *Named或者*TypeParam
 func makeSubstMap(tpars []*TypeName, targs []Type) *substMap {
 	assert(len(tpars) == len(targs))
 	proj := make(map[*TypeParam]Type, len(tpars))
@@ -53,6 +55,16 @@ func (m *substMap) lookup(tpar *TypeParam) Type {
 	return tpar
 }
 
+// 用targs中类型替换Type中的type params; typ可以是普通类型或者泛型函数
+// type T[A, B any] struct { ... }
+// func F[A, B any] (a A, b B) { }
+//
+// 特别注意: targs本是可能也是TypeParam，比如在泛型函数中调用另外一个泛型函数
+/*
+func F2[A any] () }
+func F[A, B any] (a A, b B) { F2[A]() }
+*/
+// 先检查bound是否满足，然后做替换
 func (check *Checker) instantiate(pos syntax.Pos, typ Type, targs []Type, poslist []syntax.Pos) (res Type) {
 	if check.conf.Trace {
 		check.trace(pos, "-- instantiating %s with %s", typ, typeListString(targs))
@@ -150,6 +162,8 @@ func (check *Checker) instantiate(pos syntax.Pos, typ Type, targs []Type, poslis
 				check.errorf(pos, "%s has no methods", targ)
 				break
 			}
+
+			// 注意这个时候不管targ是类型还是接口，要求targ实现iface的全部方法
 			if m, wrong := check.missingMethod(targ, iface, true); m != nil {
 				// TODO(gri) needs to print updated name to avoid major confusion in error message!
 				//           (print warning for now)
@@ -196,7 +210,7 @@ func (check *Checker) instantiate(pos syntax.Pos, typ Type, targs []Type, poslis
 		}
 
 		// Otherwise, targ's type or underlying type must also be one of the interface types listed, if any.
-		if !iface.isSatisfiedBy(targ) {
+		if !iface.isSatisfiedBy(targ) { // 注意implement和satisfy的区别
 			check.softErrorf(pos, "%s does not satisfy %s (%s not found in %s)", targ, tpar.bound, under(targ), iface.allTypes)
 			break
 		}
@@ -210,6 +224,9 @@ func (check *Checker) instantiate(pos syntax.Pos, typ Type, targs []Type, poslis
 // subst is functional in the sense that it doesn't modify the incoming
 // type. If a substitution took place, the result type is different from
 // from the incoming type.
+//
+// 注意我们处理的不是type params本身([]*TypeName)，而是引用type params的地方(*TypeParam)
+// 不需要处理函数体
 func (check *Checker) subst(pos syntax.Pos, typ Type, smap *substMap) Type {
 	if smap.empty() {
 		return typ

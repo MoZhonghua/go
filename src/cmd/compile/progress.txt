@@ -91,21 +91,21 @@ internal/types2/stmt.go
 internal/types2/assignments.go
 internal/types2/labels.go
 internal/types2/return.go
-internal/types2/lookup.go *
-internal/types2/infer.go
+internal/types2/lookup.go
 internal/types2/subst.go
+internal/types2/infer.go
+internal/types2/unify.go
 
+2022-01-20
 internal/types2/builtins.go
 internal/types2/assignments.go
 internal/types2/conversions.go
 internal/types2/gccgosizes.go
 internal/types2/initorder.go
 internal/types2/instantiate.go
-internal/types2/return.go
 internal/types2/sanitize.go
 internal/types2/selection.go
 internal/types2/sizes.go
-internal/types2/unify.go
 
 TODO
 internal/typecheck/dcl.go

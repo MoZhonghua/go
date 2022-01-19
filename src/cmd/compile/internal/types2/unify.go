@@ -8,6 +8,17 @@ package types2
 
 import "bytes"
 
+// 给定x,y两个类型列表，列表中有具体类型，也有TypeParam类型
+// 通过推断/替换列表中TypeParam，使得两个列表最终一致?
+//
+// 同样需要iteration直到稳定, 比如:
+//    x = [int, A, *A]
+//    y = [B, C, *string]
+//  iteration1: x.A = string, x=[int, string, *string]
+//  iteration2: y.B = int, y=[int, C, *string]
+//  iteration3: y.C = string, y=[int, string, *string]
+// 此时已经已经稳定，且x=y可以结束
+
 // The unifier maintains two separate sets of type parameters x and y
 // which are used to resolve type parameters in the x and y arguments
 // provided to the unify call. For unidirectional unification, only
@@ -47,7 +58,7 @@ type unifier struct {
 // direction of channels is ignored.
 func newUnifier(check *Checker, exact bool) *unifier {
 	u := &unifier{check: check, exact: exact}
-	u.x.unifier = u
+	u.x.unifier = u // self reference
 	u.y.unifier = u
 	return u
 }
@@ -161,8 +172,9 @@ func (d *tparamsList) index(typ Type) int {
 // must have a (possibly nil) type slot associated with it.
 func (d *tparamsList) setIndex(i, tj int) {
 	ti := d.indices[i]
-	assert(ti != 0 && tj != 0)
+	assert(ti != 0 && tj != 0) // !=0两种情况: <0 => nil type; >0 => good type
 	for k, tk := range d.indices {
+		// 注意这里是把所有指向ti的都更新为tj，一定包括i
 		if tk == ti {
 			d.indices[k] = tj
 		}
@@ -211,6 +223,7 @@ func (d *tparamsList) types() (list []Type, index int) {
 	return
 }
 
+// ifacePair是见过的iface pair链表，记录已经见过的pair，避免无限循环和重复处理
 func (u *unifier) nifyEq(x, y Type, p *ifacePair) bool {
 	return x == y || u.nify(x, y, p)
 }
@@ -244,12 +257,13 @@ func (u *unifier) nify(x, y Type, p *ifacePair) bool {
 	case i >= 0 && j >= 0:
 		// both x and y are type parameters
 		if u.join(i, j) {
+			// 只有一种情况返回false: i, j都指向特定typ，且不是同一个
 			return true
 		}
 		// both x and y have an inferred type - they must match
 		return u.nifyEq(u.x.at(i), u.y.at(j), p)
 
-	case i >= 0:
+	case i >= 0: // && j < 0, 也就是i是type param， 而j是normal type
 		// x is a type parameter, y is not
 		if tx := u.x.at(i); tx != nil {
 			return u.nifyEq(tx, y, p)
@@ -258,7 +272,7 @@ func (u *unifier) nify(x, y Type, p *ifacePair) bool {
 		u.x.set(i, y)
 		return true
 
-	case j >= 0:
+	case j >= 0: // && i <= 0
 		// y is a type parameter, x is not
 		if ty := u.y.at(j); ty != nil {
 			return u.nifyEq(x, ty, p)
@@ -267,6 +281,8 @@ func (u *unifier) nify(x, y Type, p *ifacePair) bool {
 		u.y.set(j, x)
 		return true
 	}
+
+	// 这里说明x, y 都是不是type param
 
 	// For type unification, do not shortcut (x == y) for identical
 	// types. Instead keep comparing them element-wise to unify the

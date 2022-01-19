@@ -28,6 +28,16 @@ const useConstraintTypeInference = true
 //
 // Constraint type inference is used after each step to expand the set of type arguments.
 //
+/*
+func nop[T1, T2 any](a T2, _ int, b T1) {}
+nop[int]("", 1, 1)
+// tparams: [T1, T2]
+// targs:   [int]
+// params:  [a T2, _ int, b T2]
+// args:    [string, int, int]
+=>
+[int, string]
+*/
 func (check *Checker) infer(pos syntax.Pos, tparams []*TypeName, targs []Type, params *Tuple, args []*operand, report bool) (result []Type) {
 	if debug {
 		defer func() {
@@ -158,6 +168,7 @@ func (check *Checker) infer(pos syntax.Pos, tparams []*TypeName, targs []Type, p
 					return nil
 				}
 			} else {
+				// 第i个参数类型generic parameter, 且调用传入的参数是untyped
 				indices = append(indices, i)
 			}
 		}
@@ -256,6 +267,8 @@ func typeNamesString(list []*TypeName) string {
 }
 
 // IsParameterized reports whether typ contains any of the type parameters of tparams.
+//
+// 就是检查typ中是否引用了tparams中任意一个
 func isParameterized(tparams []*TypeName, typ Type) bool {
 	w := tpWalker{
 		seen:    make(map[Type]bool),
@@ -380,6 +393,8 @@ func (w *tpWalker) isParameterizedList(list []Type) bool {
 // first type argument in that list that couldn't be inferred (and thus is nil). If all
 // type arguments were inferred successfully, index is < 0. The number of type arguments
 // provided may be less than the number of type parameters, but there must be at least one.
+//
+// 根据bound中的type constraint来推断; 内部可能需要多次循环替换
 func (check *Checker) inferB(tparams []*TypeName, targs []Type, report bool) (types []Type, index int) {
 	assert(len(tparams) >= len(targs) && len(targs) > 0)
 
@@ -399,6 +414,8 @@ func (check *Checker) inferB(tparams []*TypeName, targs []Type, report bool) (ty
 	// Unify type parameters with their structural constraints, if any.
 	for _, tpar := range tparams {
 		typ := tpar.typ.(*TypeParam)
+		// 如果cosntraint interface有且只有一个type，那么我们可以推断type param必然是这个类型
+		// type bound interface { type int }
 		sbound := check.structuralType(typ.bound)
 		if sbound != nil {
 			if !u.unify(typ, sbound) {
@@ -417,6 +434,8 @@ func (check *Checker) inferB(tparams []*TypeName, targs []Type, report bool) (ty
 	// was given, unification produced the type list [int, []C, *A]. We eliminate the
 	// remaining type parameters by substituting the type parameters in this type list
 	// until nothing changes anymore.
+	//
+	// lattice，不断循环一定会达到稳态，也就是循环一定会结束
 	types, _ = u.x.types()
 	if debug {
 		for i, targ := range targs {
@@ -474,6 +493,9 @@ func (check *Checker) inferB(tparams []*TypeName, targs []Type, report bool) (ty
 }
 
 // structuralType returns the structural type of a constraint, if any.
+//
+// type bound interface { type int }: 这个语法要废弃
+// type bound interface { ~int }: 这个是放在bound.embededs中，不会出现在allTypes中
 func (check *Checker) structuralType(constraint Type) Type {
 	if iface, _ := under(constraint).(*Interface); iface != nil {
 		check.completeInterface(nopos, iface)
@@ -483,5 +505,7 @@ func (check *Checker) structuralType(constraint Type) Type {
 		}
 		return nil
 	}
+	// 应该不可能出现这种情况, 因为bound一定是*Named或者*Interface
+	// 而*Name.underlying一定是*Interface
 	return constraint
 }

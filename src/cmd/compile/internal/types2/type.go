@@ -207,6 +207,9 @@ type Signature struct {
 	// and store it in the Func Object) because when type-checking a function
 	// literal we call the general type checker which returns a general Type.
 	// We then unpack the *Signature and use the scope for the literal body.
+
+	// 普通函数有tparams, method有rparams，也就是method本身不允许是泛型函数
+	// 但是可以使用reciever type中的泛型参数
 	rparams  []*TypeName // receiver type parameters from left to right; or nil
 	tparams  []*TypeName // type parameters from left to right; or nil
 	scope    *Scope      // function scope, present for package-local signatures
