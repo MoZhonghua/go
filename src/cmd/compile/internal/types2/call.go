@@ -8,12 +8,15 @@ package types2
 
 import (
 	"cmd/compile/internal/syntax"
+	"fmt"
 	"strings"
 	"unicode"
 )
 
 // funcInst type-checks a function instantiation inst and returns the result in x.
 // The operand x must be the evaluation of inst.X and its type must be a signature.
+//
+// func f[Key, Value any](k Key) {};  f[int, int](100) => inst=f[int, int], x.typ=*Signature
 func (check *Checker) funcInst(x *operand, inst *syntax.IndexExpr) {
 	xlist := unpackExpr(inst.Index)
 	targs := check.typeList(xlist)
@@ -66,9 +69,12 @@ func (check *Checker) funcInst(x *operand, inst *syntax.IndexExpr) {
 	x.expr = inst
 }
 
+// x为函数调用结果: 实际就是signature.results，如果只返回一个值的话则直接返回Tuple的第一个元素
+// 否则返回Tuple
 func (check *Checker) callExpr(x *operand, call *syntax.CallExpr) exprKind {
 	var inst *syntax.IndexExpr // function instantiation, if any
 	if iexpr, _ := call.Fun.(*syntax.IndexExpr); iexpr != nil {
+		// call.Fun = Func[int]
 		if check.indexExpr(x, iexpr) {
 			// Delay function instantiation to argument checking,
 			// where we combine type and value arguments for type
@@ -79,6 +85,8 @@ func (check *Checker) callExpr(x *operand, call *syntax.CallExpr) exprKind {
 		x.expr = iexpr
 		check.record(x)
 	} else {
+		// call.Fun 可能是多种形式，比如函数名，Selector
+		// x()(): x()返回一个函数，此时会x()() -> x() 递归进来
 		check.exprOrType(x, call.Fun)
 	}
 
@@ -89,6 +97,8 @@ func (check *Checker) callExpr(x *operand, call *syntax.CallExpr) exprKind {
 		return statement
 
 	case typexpr:
+		// (*int)(x)
+		//
 		// conversion
 		T := x.typ
 		x.mode = invalid
@@ -194,6 +204,8 @@ func (check *Checker) callExpr(x *operand, call *syntax.CallExpr) exprKind {
 		x.mode = invalid
 	}
 
+	// TODO(mzh): should return expression when having results??
+	// 注意不管函数是否有返回值都会处理返回statement，和builtin的行为不一致
 	return statement
 }
 
@@ -206,7 +218,7 @@ func (check *Checker) exprList(elist []syntax.Expr, allowCommaOk bool) (xlist []
 		// single (possibly comma-ok) value, or function returning multiple values
 		e := elist[0]
 		var x operand
-		check.multiExpr(&x, e)
+		check.multiExpr(&x, e) // func x()(int, int); x() 这个函数调用返回*Tuple
 		if t, ok := x.typ.(*Tuple); ok && x.mode != invalid {
 			// multiple values
 			xlist = make([]*operand, t.Len())
@@ -216,6 +228,9 @@ func (check *Checker) exprList(elist []syntax.Expr, allowCommaOk bool) (xlist []
 			break
 		}
 
+		// 不是返回tuple，单个值，但是是特殊类型，比如var m map; m[0]返回一个值
+		// 但是也可以用在v, ok := m[0]; 其他的比如type assertion也支持这种用法
+		//
 		// exactly one (possibly invalid or comma-ok) value
 		xlist = []*operand{&x}
 		if allowCommaOk && (x.mode == mapindex || x.mode == commaok || x.mode == commaerr) {
@@ -237,6 +252,9 @@ func (check *Checker) exprList(elist []syntax.Expr, allowCommaOk bool) (xlist []
 	return
 }
 
+// func T[T1, T2 any](x T1, y int) {}
+//
+// T[string, int]("abc", 1)
 func (check *Checker) arguments(call *syntax.CallExpr, sig *Signature, targs []Type, args []*operand) (rsig *Signature) {
 	rsig = sig
 
@@ -289,6 +307,7 @@ func (check *Checker) arguments(call *syntax.CallExpr, sig *Signature, targs []T
 				for len(vars) < nargs {
 					vars = append(vars, NewParam(last.pos, last.pkg, last.name, typ))
 				}
+				// 注意不是把调用的参数打包成Slice，而是把函数定义中参数列表展开到调用参数个数!
 				sigParams = NewTuple(vars...) // possibly nil!
 				adjusted = true
 				npars = nargs
@@ -335,6 +354,7 @@ func (check *Checker) arguments(call *syntax.CallExpr, sig *Signature, targs []T
 		// need to compute it from the adjusted list; otherwise we can
 		// simply use the result signature's parameter list.
 		if adjusted {
+			// sigParams: func x[T any](c T...) {}; x(1, 2, 3); => sigParams=[T, T, T]
 			sigParams = check.subst(call.Pos(), sigParams, makeSubstMap(sig.tparams, targs)).(*Tuple)
 		} else {
 			sigParams = rsig.params
@@ -360,6 +380,9 @@ var cgoPrefixes = [...]string{
 	"_Cmacro_", // function to evaluate the expanded expression
 }
 
+// 注意和CallExpr类似，也可以是嵌套，比如x()()和x.y.z
+//
+// 注意syntax tree是: (x.y).z，也就是先计算(x.y).z，会递归计算x.y
 func (check *Checker) selector(x *operand, e *syntax.SelectorExpr) {
 	// these must be declared before the "goto Error" statements
 	var (
@@ -375,7 +398,7 @@ func (check *Checker) selector(x *operand, e *syntax.SelectorExpr) {
 	// selector expressions.
 	if ident, ok := e.X.(*syntax.Name); ok {
 		obj := check.lookup(ident.Value)
-		if pname, _ := obj.(*PkgName); pname != nil {
+		if pname, _ := obj.(*PkgName); pname != nil { // fmt.Printf
 			assert(pname.pkg == check.pkg)
 			check.recordUse(ident, pname)
 			pname.used = true
@@ -392,7 +415,7 @@ func (check *Checker) selector(x *operand, e *syntax.SelectorExpr) {
 				} else {
 					funcMode = cgofunc
 				}
-				for _, prefix := range cgoPrefixes {
+				for _, prefix := range cgoPrefixes { // 比如go tool cgo会把.go中的C.nop()改写成_Cfunc_nop
 					// cgo objects are part of the current package (in file
 					// _cgo_gotypes.go). Use regular lookup.
 					_, exp = check.scope.LookupParent(prefix+sel, check.pos)
@@ -426,7 +449,7 @@ func (check *Checker) selector(x *operand, e *syntax.SelectorExpr) {
 
 			// Simplified version of the code for *syntax.Names:
 			// - imported objects are always fully initialized
-			switch exp := exp.(type) {
+			switch exp := exp.(type) { // exp是X.Sel对应的Object
 			case *Const:
 				assert(exp.Val() != nil)
 				x.mode = constant_
@@ -461,13 +484,18 @@ func (check *Checker) selector(x *operand, e *syntax.SelectorExpr) {
 		}
 	}
 
-	check.exprOrType(x, e.X)
+	// type X struct {}; func (x *X) nop();
+	// _ = X.nop;
+	// var v X; v.nop();
+	check.exprOrType(x, e.X) // X.Sel中的X => operand， 可能是typexpr，也可能是value
+
 	if x.mode == invalid {
 		goto Error
 	}
 
 	check.instantiatedOperand(x)
 
+	// 检查X的类型是否有Sel字段或者方法
 	obj, index, indirect = check.lookupFieldOrMethod(x.typ, x.mode == variable, check.pkg, sel)
 	if obj == nil {
 		switch {
@@ -512,7 +540,7 @@ func (check *Checker) selector(x *operand, e *syntax.SelectorExpr) {
 	// methods may not have a fully set up signature yet
 	if m, _ := obj.(*Func); m != nil {
 		// check.dump("### found method %s", m)
-		check.objDecl(m, nil)
+		check.objDecl(m, nil) // 检查x.nop对应的FuncDecl
 		// If m has a parameterized receiver type, infer the type arguments from
 		// the actual receiver provided and then substitute the type parameters in
 		// the signature accordingly.
@@ -547,6 +575,9 @@ func (check *Checker) selector(x *operand, e *syntax.SelectorExpr) {
 			// the receiver type arguments here, the receiver must be be otherwise invalid
 			// and an error has been reported elsewhere.
 			arg := operand{mode: variable, expr: x.expr, typ: recv}
+			
+			// method参数不允许有type params，但是recv可以是泛型类型, 推断recv的type params
+			// type X[T any] struct {...}; func (x *X[T]) nop();  var v X[int]; x.nop => nop(x *X[int])
 			targs := check.infer(m.pos, sig.rparams, nil, NewTuple(sig.recv), []*operand{&arg}, false /* no error reporting */)
 			//check.dump("### inferred targs = %s", targs)
 			if targs == nil {
@@ -565,7 +596,7 @@ func (check *Checker) selector(x *operand, e *syntax.SelectorExpr) {
 		//           12/20/2019: Is this TODO still correct?
 	}
 
-	if x.mode == typexpr {
+	if x.mode == typexpr { // X.Sel: X一定是instantiated type, 不需要考虑type param的问题
 		// method expression
 		m, _ := obj.(*Func)
 		if m == nil {
@@ -592,13 +623,23 @@ func (check *Checker) selector(x *operand, e *syntax.SelectorExpr) {
 		}
 
 		check.addDeclDep(m)
-
 	} else {
 		// regular selector
-		switch obj := obj.(type) {
+		switch obj := obj.(type) { // obj 是X.Sel对应的object
 		case *Var:
 			check.recordSelection(e, FieldVal, x.typ, obj, index, indirect)
+			/*
+			type T struct { v int }
+			var t *T; t.v => variable // t is variable
+			var t T;  t.v => variable // t is variable
+			var m map[int]T;  m[0].v => value: m[0] is mapindex and !indirect
+			var m map[int]*T; m[0].v => variable: m[0] is mapindex but indirect
+			*/
+			fmt.Printf("indirect: %v %v\n", x.mode == variable, indirect)
 			if x.mode == variable || indirect {
+				// map[key].field: 根据value是不是指针类型会返回不同的mode:
+				//  - map[int]*T => variable
+				//  - map[int]T  => value
 				x.mode = variable
 			} else {
 				x.mode = value
@@ -613,7 +654,7 @@ func (check *Checker) selector(x *operand, e *syntax.SelectorExpr) {
 			x.mode = value
 
 			// remove receiver
-			sig := *obj.typ.(*Signature)
+			sig := *obj.typ.(*Signature) // x.nop返回函数不需要recv参数, 注意复制一份
 			sig.recv = nil
 			x.typ = &sig
 
@@ -638,6 +679,8 @@ Error:
 // (and variables are "used") in the presence of other errors.
 // The arguments may be nil.
 // TODO(gri) make this accept a []syntax.Expr and use an unpack function when we have a ListExpr?
+//
+// 比如type-check函数调用时，operand由函数sig决定，入参只需要type-check一下，不需要向外暴露
 func (check *Checker) use(arg ...syntax.Expr) {
 	var x operand
 	for _, e := range arg {
@@ -657,6 +700,8 @@ func (check *Checker) use(arg ...syntax.Expr) {
 // It should be called instead of use if the arguments are
 // expressions on the lhs of an assignment.
 // The arguments must not be nil.
+//
+// var x int; x = 100; => error: x declared but not used
 func (check *Checker) useLHS(arg ...syntax.Expr) {
 	var x operand
 	for _, e := range arg {

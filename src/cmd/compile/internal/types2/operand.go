@@ -52,11 +52,10 @@ var operandModeString = [...]string{
 // the operand, the operand's type, a value for constants, and an id
 // for built-in functions.
 // The zero value of operand is a ready to use invalid operand.
-//
 type operand struct {
 	mode operandMode
 	expr syntax.Expr
-	typ  Type
+	typ  Type  // 支持mode=constants_, typ=typed
 	val  constant.Value
 	id   builtinId
 }
@@ -241,6 +240,8 @@ func (x *operand) isNil() bool { return x.mode == nilvalue }
 // is only valid if the (first) result is false. The check parameter may be nil
 // if assignableTo is invoked through an exported API call, i.e., when all
 // methods have been type-checked.
+//
+// x, y同类型、底层表示相同且至少一个是unnamed type、一个是Lit且能赋值给另一个
 func (x *operand) assignableTo(check *Checker, T Type, reason *string) (bool, errorCode) {
 	if x.mode == invalid || T == Typ[Invalid] {
 		return true, 0 // avoid spurious errors

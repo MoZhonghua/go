@@ -8,6 +8,7 @@ package types2
 
 import (
 	"cmd/compile/internal/syntax"
+	"fmt"
 	"go/constant"
 	"sort"
 )
@@ -48,6 +49,7 @@ func (check *Checker) funcBody(decl *declInfo, name string, sig *Signature, body
 		check.labels(body)
 	}
 
+	fmt.Printf("check func %v(): isTerminating\n",  name)
 	if sig.results.Len() > 0 && !check.isTerminating(body, "") {
 		check.error(body.Rbrace, "missing return")
 	}
@@ -76,6 +78,7 @@ func (check *Checker) usage(scope *Scope) {
 		check.softErrorf(v.pos, "%s declared but not used", v.name)
 	}
 
+	// 递归检查内部的scope中的变量
 	for _, scope := range scope.children {
 		// Don't go inside function literal scopes a second time;
 		// they are handled explicitly by funcBody.
@@ -98,7 +101,7 @@ const (
 	fallthroughOk
 
 	// additional context information
-	finalSwitchCase
+	finalSwitchCase // 最后一个case不能有fallthrough语句!
 )
 
 func (check *Checker) simpleStmt(s syntax.Stmt) {
@@ -116,6 +119,15 @@ func trimTrailingEmptyStmts(list []syntax.Stmt) []syntax.Stmt {
 	return nil
 }
 
+/*
+case 1:
+	fallthrough // error: fallthrough statement out of place
+	nop()
+	fallthrough // ok:
+case 2
+	fallthrough // error: cannot fallthrough final case in switch
+*/
+
 func (check *Checker) stmtList(ctxt stmtContext, list []syntax.Stmt) {
 	ok := ctxt&fallthroughOk != 0
 	inner := ctxt &^ fallthroughOk
@@ -123,6 +135,7 @@ func (check *Checker) stmtList(ctxt stmtContext, list []syntax.Stmt) {
 	for i, s := range list {
 		inner := inner
 		if ok && i+1 == len(list) {
+			// 一个block中只有最后一条语句可以是fallthrough
 			inner |= fallthroughOk
 		}
 		check.stmt(inner, s)
@@ -132,7 +145,7 @@ func (check *Checker) stmtList(ctxt stmtContext, list []syntax.Stmt) {
 func (check *Checker) multipleSwitchDefaults(list []*syntax.CaseClause) {
 	var first *syntax.CaseClause
 	for _, c := range list {
-		if c.Cases == nil {
+		if c.Cases == nil { // nil means default clause
 			if first != nil {
 				check.errorf(c, "multiple defaults (first at %s)", first.Pos())
 				// TODO(gri) probably ok to bail out after first error (and simplify this code)
@@ -146,7 +159,7 @@ func (check *Checker) multipleSwitchDefaults(list []*syntax.CaseClause) {
 func (check *Checker) multipleSelectDefaults(list []*syntax.CommClause) {
 	var first *syntax.CommClause
 	for _, c := range list {
-		if c.Comm == nil {
+		if c.Comm == nil { // nil means default clause
 			if first != nil {
 				check.errorf(c, "multiple defaults (first at %s)", first.Pos())
 				// TODO(gri) probably ok to bail out after first error (and simplify this code)
@@ -174,12 +187,15 @@ func (check *Checker) closeScope() {
 func (check *Checker) suspendedCall(keyword string, call *syntax.CallExpr) {
 	var x operand
 	var msg string
-	switch check.rawExpr(&x, call, nil) {
+	switch check.rawExpr(&x, call, nil) { // 最终处理是在check.callExpr()
 	case conversion:
 		msg = "requires function call, not conversion"
 	case expression:
+		// 比如 defer len(x): defer discards result of len(x)
 		msg = "discards result of"
 	case statement:
+		// 非builtin函数都会返回statement，不管是否有返回值!
+		fmt.Printf("is statement\n")
 		return
 	default:
 		unreachable()
@@ -229,6 +245,7 @@ type (
 	}
 )
 
+// switch x { case values: }
 func (check *Checker) caseValues(x *operand, values []syntax.Expr, seen valueMap) {
 L:
 	for _, e := range values {
@@ -237,7 +254,10 @@ L:
 		if x.mode == invalid || v.mode == invalid {
 			continue L
 		}
-		check.convertUntyped(&v, x.typ)
+
+		// case 1: untyped
+		// case myInt(1): typed
+		check.convertUntyped(&v, x.typ) // 如果v是untyped值则转换(如果类型不匹配或者overflow会报错)，否则nop
 		if v.mode == invalid {
 			continue L
 		}
@@ -247,9 +267,14 @@ L:
 		if res.mode == invalid {
 			continue L
 		}
-		if v.mode != constant_ {
+
+		if v.mode != constant_ { // 不是Lit且可比较，没检查case k; case k; 这样的重复条件
 			continue L // we're done
 		}
+
+		// case 1: => v.mode=constant_, v.typ=int
+		// case myInt(1): v.mode=constant_, v.typ=myInt
+		//
 		// look for duplicate values
 		if val := goVal(v.val); val != nil {
 			// look for duplicate types for a given value
@@ -268,6 +293,7 @@ L:
 	}
 }
 
+// 注意只返回最后一个Type
 func (check *Checker) caseTypes(x *operand, xtyp *Interface, types []syntax.Expr, seen map[Type]syntax.Expr) (T Type) {
 L:
 	for _, e := range types {
@@ -304,6 +330,7 @@ L:
 
 // stmt typechecks statement s.
 func (check *Checker) stmt(ctxt stmtContext, s syntax.Stmt) {
+	fmt.Printf("Stmt: %T: %v\n", s, syntax.String(s))
 	// statements must end with the same top scope as they started with
 	if debug {
 		defer func(scope *Scope) {
@@ -324,10 +351,13 @@ func (check *Checker) stmt(ctxt stmtContext, s syntax.Stmt) {
 		// ignore
 
 	case *syntax.DeclStmt:
+		// var x int
+		// var x = []int{1, 2}
+		// type x int
 		check.declStmt(s.DeclList)
 
 	case *syntax.LabeledStmt:
-		check.hasLabel = true
+		check.hasLabel = true // 这里没有记录label name
 		check.stmt(ctxt, s.Stmt)
 
 	case *syntax.ExprStmt:
@@ -343,7 +373,7 @@ func (check *Checker) stmt(ctxt stmtContext, s syntax.Stmt) {
 				return
 			}
 			msg = "is not used"
-		case builtin:
+		case builtin: // len; => len (built-in) must be called
 			msg = "must be called"
 		case typexpr:
 			msg = "is not an expression"
@@ -372,6 +402,9 @@ func (check *Checker) stmt(ctxt stmtContext, s syntax.Stmt) {
 		check.assignment(&x, tch.elem, "send")
 
 	case *syntax.AssignStmt:
+		// x := 1
+		// x = 1
+		// x++
 		lhs := unpackExpr(s.Lhs)
 		if s.Rhs == nil {
 			// x++ or x--
@@ -394,7 +427,7 @@ func (check *Checker) stmt(ctxt stmtContext, s syntax.Stmt) {
 
 		rhs := unpackExpr(s.Rhs)
 		switch s.Op {
-		case 0:
+		case 0: // x = 0: 注意此时Op=0
 			check.assignVars(lhs, rhs)
 			return
 		case syntax.Def:
@@ -402,6 +435,8 @@ func (check *Checker) stmt(ctxt stmtContext, s syntax.Stmt) {
 			return
 		}
 
+		// 其他的比如 a += 1
+		//
 		// assignment operations
 		if len(lhs) != 1 || len(rhs) != 1 {
 			check.errorf(s, "assignment operation %s requires single-valued expressions", s.Op)
@@ -431,6 +466,7 @@ func (check *Checker) stmt(ctxt stmtContext, s syntax.Stmt) {
 				// list in a "return" statement if a different entity (constant, type, or variable)
 				// with the same name as a result parameter is in scope at the place of the return."
 				for _, obj := range res.vars {
+					// func x() (x int) { { var x int; return } }
 					if alt := check.lookup(obj.name); alt != nil && alt != obj {
 						var err error_
 						err.errorf(s, "result parameter %s not in scope at return", obj.name)
@@ -444,11 +480,12 @@ func (check *Checker) stmt(ctxt stmtContext, s syntax.Stmt) {
 				check.initVars(res.vars, results, s.Pos())
 			}
 		} else if len(results) > 0 {
+			// 函数没有返回值，但是return有返回值
 			check.error(results[0], "no result values expected")
 			check.use(results...)
 		}
 
-	case *syntax.BranchStmt:
+	case *syntax.BranchStmt: // break, continue, fallthrough, goto
 		if s.Label != nil {
 			check.hasLabel = true
 			break // checked in 2nd pass (check.labels)
@@ -514,7 +551,7 @@ func (check *Checker) stmt(ctxt stmtContext, s syntax.Stmt) {
 		}
 
 	case *syntax.SwitchStmt:
-		inner |= breakOk
+		inner |= breakOk // 注意只设置了break，因为fallthrough不允许在最后一个case出现
 		check.openScope(s, "switch")
 		defer check.closeScope()
 
@@ -527,6 +564,7 @@ func (check *Checker) stmt(ctxt stmtContext, s syntax.Stmt) {
 		}
 
 	case *syntax.SelectStmt:
+		// 注意select里不支持fallthrough/continue, 但是支持break
 		inner |= breakOk
 
 		check.multipleSelectDefaults(s.Body)
@@ -536,6 +574,8 @@ func (check *Checker) stmt(ctxt stmtContext, s syntax.Stmt) {
 				continue // error reported before
 			}
 
+			// select中的每个case条件必须是单个expr
+
 			// clause.Comm must be a SendStmt, RecvStmt, or default case
 			valid := false
 			var rhs syntax.Expr // rhs of RecvStmt, or nil
@@ -543,10 +583,12 @@ func (check *Checker) stmt(ctxt stmtContext, s syntax.Stmt) {
 			case nil, *syntax.SendStmt:
 				valid = true
 			case *syntax.AssignStmt:
+				// case elem, ok := <-c:
 				if _, ok := s.Rhs.(*syntax.ListExpr); !ok {
 					rhs = s.Rhs
 				}
 			case *syntax.ExprStmt:
+				// case <-c:
 				rhs = s.X
 			}
 
@@ -567,6 +609,7 @@ func (check *Checker) stmt(ctxt stmtContext, s syntax.Stmt) {
 			}
 			check.openScopeUntil(clause, end, "case")
 			if clause.Comm != nil {
+				// type-check case条件， 比如case x = <-c: x的类型是否合法, c是否是channel等等
 				check.stmt(inner, clause.Comm)
 			}
 			check.stmtList(inner, clause.Body)
@@ -583,6 +626,7 @@ func (check *Checker) stmt(ctxt stmtContext, s syntax.Stmt) {
 			break
 		}
 
+		// Init/Cond/Post都必须是单条语句: for x=1, y=1; ; {} 语法检查就报错
 		check.simpleStmt(s.Init)
 		if s.Cond != nil {
 			var x operand
@@ -608,11 +652,14 @@ func (check *Checker) stmt(ctxt stmtContext, s syntax.Stmt) {
 	}
 }
 
+// switch x
 func (check *Checker) switchStmt(inner stmtContext, s *syntax.SwitchStmt) {
 	// init statement already handled
 
 	var x operand
 	if s.Tag != nil {
+		// switch x { }
+		// switch x.(int) { }
 		check.expr(&x, s.Tag)
 		// By checking assignment of x to an invisible temporary
 		// (as a compiler would), we get all the relevant checks.
@@ -622,6 +669,7 @@ func (check *Checker) switchStmt(inner stmtContext, s *syntax.SwitchStmt) {
 			x.mode = invalid
 		}
 	} else {
+		// switch { }
 		// spec: "A missing switch expression is
 		// equivalent to the boolean value true."
 		x.mode = constant_
@@ -635,7 +683,7 @@ func (check *Checker) switchStmt(inner stmtContext, s *syntax.SwitchStmt) {
 		x.expr = syntax.NewName(pos, "true")
 	}
 
-	check.multipleSwitchDefaults(s.Body)
+	check.multipleSwitchDefaults(s.Body) // 检查多个default clause
 
 	seen := make(valueMap) // map of seen case values to positions and types
 	for i, clause := range s.Body {
@@ -658,6 +706,14 @@ func (check *Checker) switchStmt(inner stmtContext, s *syntax.SwitchStmt) {
 	}
 }
 
+// switch v := x.(type) { }; case中v的类型和case中的type列表数有关:
+/*
+	switch v := x.(type) {
+		case int:           // type(v) = int
+		case int32, string: // type(v) = type(x)
+	}
+*/
+// switch x.(type) { }; case中可以引用x，类型还是原来类型
 func (check *Checker) typeSwitchStmt(inner stmtContext, s *syntax.SwitchStmt, guard *syntax.TypeSwitchGuard) {
 	// init statement already handled
 
@@ -680,7 +736,7 @@ func (check *Checker) typeSwitchStmt(inner stmtContext, s *syntax.SwitchStmt, gu
 
 	// check rhs
 	var x operand
-	check.expr(&x, guard.X)
+	check.expr(&x, guard.X) // 注意switch x.(type) {} => guard.X仅仅是x，不是x.(type)
 	if x.mode == invalid {
 		return
 	}
@@ -688,7 +744,7 @@ func (check *Checker) typeSwitchStmt(inner stmtContext, s *syntax.SwitchStmt, gu
 	//          to switch on a suitably constrained type parameter (for
 	//          now).
 	// TODO(gri) Need to revisit this.
-	xtyp, _ := under(x.typ).(*Interface)
+	xtyp, _ := under(x.typ).(*Interface) // x变量类型必须是接口，可以是interface{}, io.Reader等
 	if xtyp == nil {
 		check.errorf(&x, "%s is not an interface type", &x)
 		return
@@ -719,6 +775,7 @@ func (check *Checker) typeSwitchStmt(inner stmtContext, s *syntax.SwitchStmt, gu
 			// the implicit block in each clause. In clauses with a case listing
 			// exactly one type, the variable has that type; otherwise, the variable
 			// has the type of the expression in the TypeSwitchGuard."
+			//
 			if len(cases) != 1 || T == nil {
 				T = x.typ
 			}
@@ -758,6 +815,7 @@ func (check *Checker) typeSwitchStmt(inner stmtContext, s *syntax.SwitchStmt, gu
 	}
 }
 
+// for LHS := range X { }
 func (check *Checker) rangeStmt(inner stmtContext, s *syntax.ForStmt, rclause *syntax.RangeClause) {
 	// scope already opened
 

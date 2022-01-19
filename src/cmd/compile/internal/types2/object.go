@@ -16,13 +16,18 @@ import (
 // 各种object:
 //  - PkgName: an imported Go package.
 //  - TypeName: a name for a (defined or alias) type.
-//    * 把Type和TypeName拆分开，因为同一个Type可能有多个名字?
 //  - Const: declared constant.
 //  - Var: declared variable (including function parameters and results, and struct fields)
 //  - Func:
 //  - Label:
 //  - Builtin: builtin functions
 //  - Nil
+
+// 注意每个object都有Type，特别是TypeName也有type。TypeName.typ有两种:
+//  - Named: type X int: TypeName=X, TypeName.typ.underlying=int
+//  - TypeParam:
+//    - type X[T1 any] []T1:  TypeName=T1, TypeName.typ=TypeParam, TypeParam.bound=any
+//    - func (recv X[T1]):  TypeName=T1, TypeName.typ=TypeParam, TypeParam.bound=emptyInterface{}?
 
 // An Object describes a named language entity such as a package,
 // constant, type, variable, function (incl. methods), or label.

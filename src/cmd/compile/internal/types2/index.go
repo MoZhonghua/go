@@ -23,6 +23,8 @@ func (check *Checker) indexExpr(x *operand, e *syntax.IndexExpr) (isFuncInst boo
 		return false
 
 	case typexpr:
+		// type T[K any] struct { ... }; T[int]
+		//
 		// type instantiation
 		x.mode = invalid
 		x.typ = check.varType(e)
@@ -32,18 +34,20 @@ func (check *Checker) indexExpr(x *operand, e *syntax.IndexExpr) (isFuncInst boo
 		return false
 
 	case value:
+		// func f[K any]() {}; f[int]()
 		if sig := asSignature(x.typ); sig != nil && len(sig.tparams) > 0 {
 			// function instantiation
 			return true
 		}
 	}
 
+	// var x []int; x[0]
 	// ordinary index expression
 	valid := false
 	length := int64(-1) // valid if >= 0
 	switch typ := optype(x.typ).(type) {
 	case *Basic:
-		if isString(typ) {
+		if isString(typ) { // var s string; s[0] => byte
 			valid = true
 			if x.mode == constant_ {
 				length = int64(len(constant.StringVal(x.val)))
@@ -283,10 +287,10 @@ func (check *Checker) sliceExpr(x *operand, e *syntax.SliceExpr) {
 			if _, v := check.index(expr, max); v >= 0 {
 				x = v
 			}
-		case i == 0:
+		case i == 0: // s[:100]: 第一个index为0
 			// default is 0 for the first index
 			x = 0
-		case length >= 0:
+		case length >= 0: // s[:]: 第二，三个值默认都是capacity
 			// default is length (== capacity) otherwise
 			x = length
 		}

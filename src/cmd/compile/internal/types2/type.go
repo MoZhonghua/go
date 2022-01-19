@@ -332,16 +332,14 @@ func (s *Sum) is(pred func(Type) bool) bool {
 // interface { int; io.Reader; What() }
 //  - methods: What()
 //  - embeddeds: int, io.Reader
-//  - types ??
+//  - types: interface { type string, int32}, 语法已经废弃
 type Interface struct {
-	methods   []*Func // ordered list of explicitly declared methods
-	types     Type    // (possibly a Sum) type declared with a type list (TODO(gri) need better field name)
-	embeddeds []Type  // ordered list of explicitly embedded types
-
+	methods    []*Func // ordered list of explicitly declared methods
+	types      Type    // (possibly a Sum) type declared with a type list (TODO(gri) need better field name)
+	embeddeds  []Type  // ordered list of explicitly embedded types
 	allMethods []*Func // ordered list of methods declared with or embedded in this interface (TODO(gri): replace with mset)
 
 	// allTypes总是是intersect(self.types, embed.allTypes)
-	// 问题在于最开始的types是啥?
 	allTypes Type   // intersection of all embedded and locally declared types  (TODO(gri) need better field name)
 	obj      Object // type declaration defining this interface; or nil (for better error messages)
 }
@@ -820,9 +818,8 @@ func optype(typ Type) Type {
 		// for a type parameter list of the form:
 		// (type T interface { type T }).
 		// See also issue #39680.
-		if u := t.Bound().allTypes; u != nil && u != typ {
+		if u := t.Bound().allTypes; u != nil && u != typ { //???
 			// u != typ and u is a type parameter => under(u) != typ, so this is ok
-			// u=allTypes是Sum类型，under(u)=u
 			return under(u)
 		}
 		return theTop
@@ -867,7 +864,7 @@ func (t *instance) expand() Type {
 // not recurse.
 func expand(typ Type) Type {
 	if t, _ := typ.(*instance); t != nil {
-		return t.expand()
+		return t.expand() // *instance => *Named
 	}
 	return typ
 }

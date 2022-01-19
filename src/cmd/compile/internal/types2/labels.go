@@ -8,6 +8,8 @@ import (
 	"cmd/compile/internal/syntax"
 )
 
+// 和 ../syntax/branches.go 中算法一样
+
 // labels checks correct label use in body.
 func (check *Checker) labels(body *syntax.BlockStmt) {
 	// set of all labels in this body
@@ -23,6 +25,7 @@ func (check *Checker) labels(body *syntax.BlockStmt) {
 		var msg string
 		name := jmp.Label.Value
 		if alt := all.Lookup(name); alt != nil {
+			// 注意Label的scope是整个函数，因此所有label都在这里
 			msg = "goto %s jumps into block"
 			alt.(*Label).used = true // avoid another error
 		} else {

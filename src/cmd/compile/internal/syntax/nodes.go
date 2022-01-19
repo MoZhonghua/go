@@ -221,7 +221,7 @@ type (
 	// Lhs := X.(type)
 	TypeSwitchGuard struct {
 		Lhs *Name // nil means no Lhs :=
-		X   Expr  // X.(type)
+		X   Expr  // X.(type); X仅仅是X(*Name)，不是X.(type)
 		expr
 	}
 
@@ -412,6 +412,8 @@ type (
 
 	SwitchStmt struct {
 		Init   SimpleStmt
+		// switch init; tag { }
+		// tag可以是none, x, x.(int), x.(type)
 		Tag    Expr // incl. *TypeSwitchGuard
 		Body   []*CaseClause
 		Rbrace Pos

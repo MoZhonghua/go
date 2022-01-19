@@ -157,26 +157,28 @@ var op2str2 = [...]string{
 	syntax.Shl: "shift",
 }
 
-func (check *Checker) unary(x *operand, e *syntax.Operation) {
+func (check *Checker) unary(x *operand, e *syntax.Operation) { // op X
 	check.expr(x, e.X)
 	if x.mode == invalid {
 		return
 	}
 
 	switch e.Op {
-	case syntax.And:
+	case syntax.And: // &X
 		// spec: "As an exception to the addressability
 		// requirement x may also be a composite literal."
 		if _, ok := unparen(e.X).(*syntax.CompositeLit); !ok && x.mode != variable {
+			// 必须是变量或者CompositeLit
 			check.errorf(x, invalidOp+"cannot take address of %s", x)
 			x.mode = invalid
 			return
 		}
+		// 注意到这里mode不是variable，因此&(&x)是非法的
 		x.mode = value
 		x.typ = &Pointer{base: x.typ}
 		return
 
-	case syntax.Recv:
+	case syntax.Recv: // <-X; 注意send操作是binary op，不在这里处理
 		typ := asChan(x.typ)
 		if typ == nil {
 			check.errorf(x, invalidOp+"cannot receive from non-channel %s", x)
@@ -208,7 +210,7 @@ func (check *Checker) unary(x *operand, e *syntax.Operation) {
 		if isUnsigned(x.typ) {
 			prec = uint(check.conf.sizeof(x.typ) * 8)
 		}
-		x.val = constant.UnaryOp(op2tok[e.Op], x.val, prec)
+		x.val = constant.UnaryOp(op2tok[e.Op], x.val, prec) // 比如取反操作需要考虑精度，否则~0会变成无穷多个1
 		x.expr = e
 		check.overflow(x)
 		return
@@ -283,7 +285,7 @@ func representableConst(x constant.Value, check *Checker, typ *Basic, rounded *c
 
 	switch {
 	case isInteger(typ):
-		x := constant.ToInt(x)
+		x := constant.ToInt(x) // 可能返回unknown，比如x是string
 		if x.Kind() != constant.Int {
 			return false
 		}
@@ -494,6 +496,7 @@ func (check *Checker) invalidConversion(code errorCode, x *operand, target Type)
 // and if x is the (formerly untyped) lhs operand of a non-constant
 // shift, it must be an integer value.
 //
+// x << 1: 注意lhs指的是x在op左边，和左值右值无关
 func (check *Checker) updateExprType(x syntax.Expr, typ Type, final bool) {
 	old, found := check.untyped[x]
 	if !found {
@@ -551,6 +554,7 @@ func (check *Checker) updateExprType(x syntax.Expr, typ Type, final bool) {
 	// 	check.updateExprType(x.X, typ, final)
 
 	case *syntax.Operation:
+		// 不用考虑==这样的操作符，因为最终类型一定是bool，不可能是untyped
 		if x.Y == nil {
 			// unary expression
 			if x.Op == syntax.Mul {
@@ -583,6 +587,8 @@ func (check *Checker) updateExprType(x syntax.Expr, typ Type, final bool) {
 		} else if isShift(x.Op) {
 			// The result type depends only on lhs operand.
 			// The rhs type was updated when checking the shift.
+			//
+			// X << Y: 只更新了X，不更新Y
 			check.updateExprType(x.X, typ, final)
 		} else {
 			// The operand types match the result type.
@@ -619,6 +625,8 @@ func (check *Checker) updateExprType(x syntax.Expr, typ Type, final bool) {
 		// int type requested (was issue #22969). Fall through here.
 	}
 	if old.val != nil {
+		// var x int = 1 + 2 走到这里, 因为old.val != nil; Lit会直接计算出最终值
+		//
 		// If x is a constant, it must be representable as a value of typ.
 		c := operand{old.mode, x, old.typ, old.val, 0}
 		check.convertUntyped(&c, typ)
@@ -640,6 +648,8 @@ func (check *Checker) updateExprVal(x syntax.Expr, val constant.Value) {
 }
 
 // convertUntyped attempts to set the type of an untyped value to the target type.
+//
+// 如果x.typ不是untyped，相当于nop，即什么都没做
 func (check *Checker) convertUntyped(x *operand, target Type) {
 	newType, val, code := check.implicitTypeAndValue(x, target)
 	if code != 0 {
@@ -663,9 +673,11 @@ func (check *Checker) convertUntyped(x *operand, target Type) {
 //
 // If x is a constant operand, the returned constant.Value will be the
 // representation of x in this context.
+//
 func (check *Checker) implicitTypeAndValue(x *operand, target Type) (Type, constant.Value, errorCode) {
 	target = expand(target)
 	if x.mode == invalid || isTyped(x.typ) || target == Typ[Invalid] {
+		// 注意这里x.typ不是untyped，直接返回x.typ，不报错
 		return x.typ, nil, 0
 	}
 
@@ -796,12 +808,15 @@ func (check *Checker) comparison(x, y *operand, op syntax.Operator) {
 		// time will be materialized. Update the expression trees.
 		// If the current types are untyped, the materialized type
 		// is the respective default type.
+		//
+		// x == 100: 一个操作符是ConstLit，一个是替他类型
 		check.updateExprType(x.expr, Default(x.typ), true)
 		check.updateExprType(y.expr, Default(y.typ), true)
 	}
 
 	// spec: "Comparison operators compare two operands and yield
 	//        an untyped boolean value."
+	// 注意一定是untyped bool！！
 	x.typ = Typ[UntypedBool]
 }
 
@@ -953,6 +968,7 @@ func init() {
 // If e != nil, it must be the binary expression; it may be nil for non-constant expressions
 // (when invoked for an assignment operation where the binary expression is implicit).
 func (check *Checker) binary(x *operand, e syntax.Expr, lhs, rhs syntax.Expr, op syntax.Operator) {
+	fmt.Printf("binary: %v %v %v\n", lhs, op, rhs)
 	var y operand
 
 	check.expr(x, lhs)
@@ -968,7 +984,8 @@ func (check *Checker) binary(x *operand, e syntax.Expr, lhs, rhs syntax.Expr, op
 	}
 
 	if isShift(op) {
-		check.shift(x, &y, e, op)
+		// var x int; var y int64; _ = x << y 合法
+		check.shift(x, &y, e, op) // 移位操作特殊，因为左右操作数类型不必一样
 		return
 	}
 
@@ -988,6 +1005,8 @@ func (check *Checker) binary(x *operand, e syntax.Expr, lhs, rhs syntax.Expr, op
 	}
 
 	if !check.identical(x.typ, y.typ) {
+		// var x int; var y int64; z := x + y
+		//
 		// only report an error if we have valid types
 		// (otherwise we had an error reported elsewhere already)
 		if x.typ != Typ[Invalid] && y.typ != Typ[Invalid] {
@@ -1051,13 +1070,12 @@ type exprKind int
 const (
 	conversion exprKind = iota
 	expression
-	statement
+	statement  // statement一般是指没有返回值的语句，比如copy()是statement，而len()是expression
 )
 
 // rawExpr typechecks expression e and initializes x with the expression
 // value or type. If an error occurred, x.mode is set to invalid.
 // If hint != nil, it is the type of a composite literal element.
-//
 func (check *Checker) rawExpr(x *operand, e syntax.Expr, hint Type) exprKind {
 	if check.conf.Trace {
 		check.trace(e.Pos(), "expr %s", e)
@@ -1077,6 +1095,8 @@ func (check *Checker) rawExpr(x *operand, e syntax.Expr, hint Type) exprKind {
 // exprInternal contains the core of type checking of expressions.
 // Must only be called by rawExpr.
 //
+// hint: 比如var x []T = { {1, 2}, {2, 3}}
+// 计算里面的CompositeLit时的类型应该是T
 func (check *Checker) exprInternal(x *operand, e syntax.Expr, hint Type) exprKind {
 	// make sure x has a valid state in case of bailout
 	// (was issue 5770)
@@ -1170,10 +1190,18 @@ func (check *Checker) exprInternal(x *operand, e syntax.Expr, hint Type) exprKin
 				base = typ
 				break
 			}
-			typ = check.typ(e.Type)
+			/*
+				_ = struct { int } { 1 }
+				_ = T{ 1 }
+			*/
+			typ = check.typ(e.Type) // e.Type = struct {int}; or T
 			base = typ
 
 		case hint != nil:
+			// 只有数组中的CompositeLit可以不提供类型，其他都必须提供
+			//	 var x = [...]T{{0} }
+			// 注意这里有两层CompositeLit: 一个是[...]T{{0}}, 一个{0}, 这个分支处理的是{0}
+			//
 			// no composite literal type present - use hint (element type of enclosing type)
 			typ = hint
 			base, _ = deref(under(typ)) // *T implies &T{}
@@ -1184,6 +1212,8 @@ func (check *Checker) exprInternal(x *operand, e syntax.Expr, hint Type) exprKin
 			goto Error
 		}
 
+		// 注意struct这样的我们只需要type-check每个字段，不需要记录值。因为最后给
+		// 外层expr看到的是struct整体
 		switch utyp := optype(base).(type) {
 		case *Struct:
 			if len(e.ElemList) == 0 {
@@ -1262,6 +1292,9 @@ func (check *Checker) exprInternal(x *operand, e syntax.Expr, hint Type) exprKin
 				check.error(e, "illegal cycle in type declaration")
 				goto Error
 			}
+			// 处理这些情况:
+			// _ = [100]int { 200: 0 }: 报错, out of bounds
+			// _ = [...]int { 200: 0 }: 返回n=200
 			n := check.indexedElts(e.ElemList, utyp.elem, utyp.len)
 			// If we have an array of unknown length (usually [...]T arrays, but also
 			// arrays [n]T where n is invalid) set the length now that we know it and
@@ -1278,6 +1311,7 @@ func (check *Checker) exprInternal(x *operand, e syntax.Expr, hint Type) exprKin
 				// that case there is nothing to record (there is no type in
 				// the source at that point).
 				if e.Type != nil {
+					// 记录 [...]T 的真正类型
 					check.recordTypeAndValue(e.Type, typexpr, utyp, nil)
 				}
 			}
@@ -1358,7 +1392,7 @@ func (check *Checker) exprInternal(x *operand, e syntax.Expr, hint Type) exprKin
 		x.typ = typ
 
 	case *syntax.ParenExpr:
-		kind := check.rawExpr(x, e.X, nil)
+		kind := check.rawExpr(x, e.X, nil) // ({0}) 语法错误
 		x.expr = e
 		return kind
 
@@ -1366,7 +1400,8 @@ func (check *Checker) exprInternal(x *operand, e syntax.Expr, hint Type) exprKin
 		check.selector(x, e)
 
 	case *syntax.IndexExpr:
-		if check.indexExpr(x, e) {
+		// 两种情况 T[int], s[0]
+		if check.indexExpr(x, e) { // 返回true表示是T[int]
 			check.funcInst(x, e)
 		}
 		if x.mode == invalid {
@@ -1386,10 +1421,12 @@ func (check *Checker) exprInternal(x *operand, e syntax.Expr, hint Type) exprKin
 		}
 		xtyp, _ := under(x.typ).(*Interface)
 		if xtyp == nil {
+			// x.(Type): x必须是interface, 可以是interface{}/any, 但是必须不能是具体类型
+			// var x MyInt; x.(Type): 报错
 			check.errorf(x, "%s is not an interface type", x)
 			goto Error
 		}
-		check.ordinaryType(x.Pos(), xtyp)
+		check.ordinaryType(x.Pos(), xtyp) // x本身类型不能是constraint interface
 		// x.(type) expressions are encoded via TypeSwitchGuards
 		if e.Type == nil {
 			check.error(e, invalidAST+"invalid use of AssertExpr")
@@ -1439,13 +1476,13 @@ func (check *Checker) exprInternal(x *operand, e syntax.Expr, hint Type) exprKin
 	case *syntax.Operation:
 		if e.Y == nil {
 			// unary expression
-			if e.Op == syntax.Mul {
+			if e.Op == syntax.Mul { // *X
 				// pointer indirection
 				check.exprOrType(x, e.X)
 				switch x.mode {
 				case invalid:
 					goto Error
-				case typexpr:
+				case typexpr: // X是类型，比如(*int)(x)
 					x.typ = &Pointer{base: x.typ}
 				default:
 					if typ := asPointer(x.typ); typ != nil {
@@ -1505,6 +1542,7 @@ Error:
 	return statement // avoid follow-up errors
 }
 
+// 处理map[int]string { 1: "x" }: 中的1
 func keyVal(x constant.Value) interface{} {
 	switch x.Kind() {
 	case constant.Bool:
@@ -1531,6 +1569,9 @@ func keyVal(x constant.Value) interface{} {
 
 // typeAssertion checks that x.(T) is legal; xtyp must be the type of x.
 func (check *Checker) typeAssertion(pos syntax.Pos, x *operand, xtyp *Interface, T Type) {
+	/*
+	var x io.Reader; x.(int) 报错，因为int没有实现接口io.Reader
+	*/
 	method, wrongType := check.assertableTo(xtyp, T)
 	if method == nil {
 		return
@@ -1555,7 +1596,6 @@ func (check *Checker) typeAssertion(pos syntax.Pos, x *operand, xtyp *Interface,
 // expr typechecks expression e and initializes x with the expression value.
 // The result must be a single value.
 // If an error occurred, x.mode is set to invalid.
-//
 func (check *Checker) expr(x *operand, e syntax.Expr) {
 	check.rawExpr(x, e, nil)
 	check.exclude(x, 1<<novalue|1<<builtin|1<<typexpr)

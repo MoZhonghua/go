@@ -35,6 +35,7 @@ func (check *Checker) declare(scope *Scope, id *syntax.Name, obj Object, pos syn
 		obj.setScopePos(pos)
 	}
 	if id != nil {
+		// 局部变量也会调用这个流程，名字相同不会是同一个*syntax.Name, 不存在冲突问题
 		check.recordDef(id, obj)
 	}
 }
@@ -104,7 +105,7 @@ func (check *Checker) objDecl(obj Object, def *Named) {
 		// All color values other than white and black are considered grey.
 		// Because black and white are < grey, all values >= grey are grey.
 		// Use those values to encode the object's index into the object path.
-		obj.setColor(grey + color(check.push(obj)))
+		obj.setColor(grey + color(check.push(obj))) // 所有>=grey值都认为是grey
 		defer func() {
 			check.pop().setColor(black)
 		}()
@@ -274,6 +275,11 @@ func (check *Checker) cycle(obj Object) (isCycle bool) {
 	// A cycle involving only types (and possibly functions) must have at least
 	// one type definition to be permitted: If there is no type definition, we
 	// have a sequence of alias type names which will expand ad infinitum.
+	/*
+	type X = Y
+	type Y struct { x *X}
+	*/
+	// cycle中没有出现var/const, 说明都是类型def/alias且其中至少有一个def
 	if nval == 0 && ndef > 0 {
 		return false // cycle is permitted
 	}
@@ -395,6 +401,7 @@ func firstInSrc(path []Object) int {
 	return fst
 }
 
+// 参数就是对应declInfo中的字段
 func (check *Checker) constDecl(obj *Const, typ, init syntax.Expr, inherited bool) {
 	assert(obj.typ == nil)
 
@@ -403,7 +410,7 @@ func (check *Checker) constDecl(obj *Const, typ, init syntax.Expr, inherited boo
 		check.iota = iota
 		check.errpos = errpos
 	}(check.iota, check.errpos)
-	check.iota = obj.val
+	check.iota = obj.val // obj.val是已经计算好的iota，最终值需要通过把iota值带入init获得
 	check.errpos = nopos
 
 	// provide valid constant value under all circumstances
@@ -411,8 +418,9 @@ func (check *Checker) constDecl(obj *Const, typ, init syntax.Expr, inherited boo
 
 	// determine type, if any
 	if typ != nil {
+		// 注意这里的typ是syntax.Expr，需要根据Expr找到对应的types2.Type
 		t := check.typ(typ)
-		if !isConstType(t) {
+		if !isConstType(t) { // 必须是基础类型，且是number或者string
 			// don't report an error if the type is an invalid C (defined) type
 			// (issue #22090)
 			if under(t) != Typ[Invalid] {
@@ -436,7 +444,7 @@ func (check *Checker) constDecl(obj *Const, typ, init syntax.Expr, inherited boo
 			// (see issues #42991, #42992).
 			check.errpos = obj.pos
 		}
-		check.expr(&x, init)
+		check.expr(&x, init) // 计算init值，注意iota已经存放在check.iota字段
 	}
 	check.initConst(obj, &x)
 }
@@ -529,7 +537,7 @@ func (n0 *Named) under() Type {
 
 	// If the underlying type of a defined type is not a defined
 	// type, then that is the desired underlying type.
-	n := asNamed(u)
+	n := asNamed(u) // 注意这里的defined type概念，指有名字的type，而[2]int这种不算
 	if n == nil {
 		return u // common case
 	}
@@ -588,6 +596,7 @@ func (check *Checker) typeDecl(obj *TypeName, tdecl *syntax.TypeDecl, def *Named
 	assert(obj.typ == nil)
 
 	check.later(func() {
+		// 这里closure var是obj，因此obj.typ是更新后的值
 		check.validType(obj.typ, nil)
 	})
 
@@ -615,6 +624,7 @@ func (check *Checker) typeDecl(obj *TypeName, tdecl *syntax.TypeDecl, def *Named
 	} else {
 		// defined type declaration
 
+		// 会设置obj.typ=named
 		named := check.newNamed(obj, nil, nil, nil, nil)
 		def.setUnderlying(named)
 
@@ -658,6 +668,7 @@ func (check *Checker) collectTypeParams(list []*syntax.Field) (tparams []*TypeNa
 	// The scope of type parameters starts at the beginning of the type parameter
 	// list (so we can have mutually recursive parameterized interfaces).
 	for _, f := range list {
+		// tparams[i].typ is *TypeParam
 		tparams = check.declareTypeParam(tparams, f.Name)
 	}
 

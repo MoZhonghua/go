@@ -33,6 +33,7 @@ const forceStrict = false
 
 // exprInfo stores information about an untyped expression.
 type exprInfo struct {
+	// 100 << X: 这个表达式的类型和X类型一样
 	isLhs bool // expression is lhs operand of a shift with delayed type-check
 	mode  operandMode
 	typ   *Basic // 为什么限制为Basic types?
@@ -360,6 +361,7 @@ func (check *Checker) recordUntyped() {
 	}
 }
 
+// 记录一个syntax.Exprd对应的类型和值(const)
 func (check *Checker) recordTypeAndValue(x syntax.Expr, mode operandMode, typ Type, val constant.Value) {
 	assert(x != nil)
 	assert(typ != nil)
@@ -373,7 +375,7 @@ func (check *Checker) recordTypeAndValue(x syntax.Expr, mode operandMode, typ Ty
 		assert(typ == Typ[Invalid] || is(typ, IsConstType))
 	}
 	if m := check.Types; m != nil {
-		// 为nil时没有创建map
+		// 注意为nil时没有创建map
 		m[x] = TypeAndValue{mode, typ, val}
 	}
 }
@@ -437,6 +439,12 @@ func (check *Checker) recordDef(id *syntax.Name, obj Object) {
 	}
 }
 
+/*
+var x int
+x = 100
+*/
+// 同一个名字会对应多个syntax.Name, x有两个syntax.Name, 第一个记录在Defs，
+// 第二个记录再Uses
 func (check *Checker) recordUse(id *syntax.Name, obj Object) {
 	assert(id != nil)
 	assert(obj != nil)

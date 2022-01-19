@@ -61,7 +61,6 @@ internal/syntax/testing.go
 internal/syntax/syntax.go
 internal/syntax/branches.go
 internal/syntax/parser.go
-
 internal/types2/api.go
 internal/types2/scope.go
 internal/types2/type.go
@@ -77,35 +76,40 @@ internal/types2/check.go
 internal/types2/predicates.go
 
 2022-01-18
-internal/types2/resolver.go ?
-internal/types2/typexpr.go ?
-internal/types2/expr.go ?
+internal/types2/resolver.go
+internal/types2/errors.go
+internal/types2/decl.go
+internal/types2/objset.go
+internal/types2/typexpr.go
+internal/types2/expr.go
+internal/types2/index.go
+internal/types2/call.go
 
-internal/types2/builtins.go ?
-internal/types2/assignments.go ?
-internal/types2/call.go ?
-internal/types2/conversions.go ?
-internal/types2/decl.go ?
-internal/types2/errors.go ?
-internal/types2/gccgosizes.go ?
-internal/types2/index.go ?
-internal/types2/infer.go ?
-internal/types2/initorder.go ?
-internal/types2/instantiate.go ?
-internal/types2/labels.go ?
-internal/types2/lookup.go ?
-internal/types2/objset.go ?
-internal/types2/return.go ?
-internal/types2/sanitize.go ?
-internal/types2/selection.go ?
-internal/types2/sizes.go ?
-internal/types2/stmt.go ?
-internal/types2/subst.go ?
-internal/types2/unify.go ?
+
+2022-01-19
+internal/types2/stmt.go
+internal/types2/assignments.go
+internal/types2/labels.go
+internal/types2/return.go
+internal/types2/lookup.go *
+internal/types2/infer.go
+internal/types2/subst.go
+
+internal/types2/builtins.go
+internal/types2/assignments.go
+internal/types2/conversions.go
+internal/types2/gccgosizes.go
+internal/types2/initorder.go
+internal/types2/instantiate.go
+internal/types2/return.go
+internal/types2/sanitize.go
+internal/types2/selection.go
+internal/types2/sizes.go
+internal/types2/unify.go
 
 TODO
-internal/typecheck/dcl.go ?
-internal/amd64/ssa.go ?
+internal/typecheck/dcl.go
+internal/amd64/ssa.go
 internal/devirtualize/devirtualize.go
 internal/deadcode/deadcode.go
 internal/dwarfgen/dwarf.go

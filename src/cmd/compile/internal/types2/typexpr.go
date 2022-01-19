@@ -22,12 +22,21 @@ var acceptMethodTypeParams bool
 // If an error occurred, x.mode is set to invalid.
 // For the meaning of def, see Checker.definedType, below.
 // If wantType is set, the identifier e is expected to denote a type.
+//
+// operand的value或者value由id指定
 func (check *Checker) ident(x *operand, e *syntax.Name, def *Named, wantType bool) {
 	x.mode = invalid
 	x.expr = e
 
 	// Note that we cannot use check.lookup here because the returned scope
 	// may be different from obj.Parent(). See also Scope.LookupParent doc.
+	//
+	/*
+	type Y X
+	type X int
+	*/
+	// 注意最开始阶段会收集所有的package-level decl，因此如果没找到就确实不存在
+	// 在type-check前，X和Y已经加入到pkg.Scope，但是只记录了declInfo
 	scope, obj := check.scope.LookupParent(e.Value, check.pos)
 	if obj == nil {
 		if e.Value == "_" {
@@ -53,6 +62,8 @@ func (check *Checker) ident(x *operand, e *syntax.Name, def *Named, wantType boo
 	// will issue (see issue #25790).
 	typ := obj.Type()
 	if _, gotType := obj.(*TypeName); typ == nil || gotType && wantType {
+		// 通过check.objMap[obj]获得对应的declInfo
+		// 创建Named，同时设置def.underlying=Named
 		check.objDecl(obj, def)
 		typ = obj.Type() // type must have been assigned by Checker.objDecl
 	}
@@ -72,7 +83,7 @@ func (check *Checker) ident(x *operand, e *syntax.Name, def *Named, wantType boo
 		return
 
 	case *Const:
-		check.addDeclDep(obj)
+		check.addDeclDep(obj) // check.decl为当前正在处理的语句，引用了obj，添加依赖关系
 		if typ == Typ[Invalid] {
 			return
 		}
@@ -139,6 +150,8 @@ func (check *Checker) varType(e syntax.Expr) Type {
 
 // ordinaryType reports an error if typ is an interface type containing
 // type lists or is (or embeds) the predeclared type comparable.
+//
+// 简单来说就是不能是包含类型的constraint interface, 比如interface { ~int }
 func (check *Checker) ordinaryType(pos syntax.Pos, typ Type) {
 	// We don't want to call under() (via Interface) or complete interfaces while we
 	// are in the middle of type-checking parameter declarations that might belong to
@@ -171,6 +184,10 @@ func (check *Checker) anyType(e syntax.Expr) Type {
 // in a type declaration, and def.underlying will be set to the type of e before
 // any components of e are type-checked.
 //
+// type X struct{...}, 这里def=X, e=strut{...}
+// var z X: 这里e=X, def=nil
+//
+// Named一定不是type spec。type spec是Array/Slice/Map/Struct/Interface这些
 func (check *Checker) definedType(e syntax.Expr, def *Named) Type {
 	typ := check.typInternal(e, def)
 	assert(isTyped(typ))
@@ -212,7 +229,7 @@ func isubst(x syntax.Expr, smap map[*syntax.Name]*syntax.Name) syntax.Expr {
 	// 		new.X = X
 	// 		return &new
 	// 	}
-	case *syntax.Operation:
+	case *syntax.Operation: // *X
 		if n.Op == syntax.Mul && n.Y == nil {
 			X := isubst(n.X, smap)
 			if X != n.X {
@@ -221,14 +238,14 @@ func isubst(x syntax.Expr, smap map[*syntax.Name]*syntax.Name) syntax.Expr {
 				return &new
 			}
 		}
-	case *syntax.IndexExpr:
+	case *syntax.IndexExpr: // X[Index]
 		Index := isubst(n.Index, smap)
 		if Index != n.Index {
 			new := *n
 			new.Index = Index
 			return &new
 		}
-	case *syntax.ListExpr:
+	case *syntax.ListExpr: // X, Y
 		var elems []syntax.Expr
 		for i, elem := range n.ElemList {
 			new := isubst(elem, smap)
@@ -255,180 +272,6 @@ func isubst(x syntax.Expr, smap map[*syntax.Name]*syntax.Name) syntax.Expr {
 	return x
 }
 
-// funcType type-checks a function or method type.
-func (check *Checker) funcType(sig *Signature, recvPar *syntax.Field, tparams []*syntax.Field, ftyp *syntax.FuncType) {
-	check.openScope(ftyp, "function")
-	check.scope.isFunc = true
-	check.recordScope(ftyp, check.scope)
-	sig.scope = check.scope
-	defer check.closeScope()
-
-	var recvTyp syntax.Expr // rewritten receiver type; valid if != nil
-	if recvPar != nil {
-		// collect generic receiver type parameters, if any
-		// - a receiver type parameter is like any other type parameter, except that it is declared implicitly
-		// - the receiver specification acts as local declaration for its type parameters, which may be blank
-		_, rname, rparams := check.unpackRecv(recvPar.Type, true)
-		if len(rparams) > 0 {
-			// Blank identifiers don't get declared and regular type-checking of the instantiated
-			// parameterized receiver type expression fails in Checker.collectParams of receiver.
-			// Identify blank type parameters and substitute each with a unique new identifier named
-			// "n_" (where n is the parameter index) and which cannot conflict with any user-defined
-			// name.
-			var smap map[*syntax.Name]*syntax.Name // substitution map from "_" to "!n" identifiers
-			for i, p := range rparams {
-				if p.Value == "_" {
-					new := *p
-					new.Value = fmt.Sprintf("%d_", i)
-					rparams[i] = &new // use n_ identifier instead of _ so it can be looked up
-					if smap == nil {
-						smap = make(map[*syntax.Name]*syntax.Name)
-					}
-					smap[p] = &new
-				}
-			}
-			if smap != nil {
-				// blank identifiers were found => use rewritten receiver type
-				recvTyp = isubst(recvPar.Type, smap)
-			}
-			// TODO(gri) rework declareTypeParams
-			sig.rparams = nil
-			for _, rparam := range rparams {
-				sig.rparams = check.declareTypeParam(sig.rparams, rparam)
-			}
-			// determine receiver type to get its type parameters
-			// and the respective type parameter bounds
-			var recvTParams []*TypeName
-			if rname != nil {
-				// recv should be a Named type (otherwise an error is reported elsewhere)
-				// Also: Don't report an error via genericType since it will be reported
-				//       again when we type-check the signature.
-				// TODO(gri) maybe the receiver should be marked as invalid instead?
-				if recv := asNamed(check.genericType(rname, false)); recv != nil {
-					recvTParams = recv.tparams
-				}
-			}
-			// provide type parameter bounds
-			// - only do this if we have the right number (otherwise an error is reported elsewhere)
-			if len(sig.rparams) == len(recvTParams) {
-				// We have a list of *TypeNames but we need a list of Types.
-				list := make([]Type, len(sig.rparams))
-				for i, t := range sig.rparams {
-					list[i] = t.typ
-				}
-				smap := makeSubstMap(recvTParams, list)
-				for i, tname := range sig.rparams {
-					bound := recvTParams[i].typ.(*TypeParam).bound
-					// bound is (possibly) parameterized in the context of the
-					// receiver type declaration. Substitute parameters for the
-					// current context.
-					// TODO(gri) should we assume now that bounds always exist?
-					//           (no bound == empty interface)
-					if bound != nil {
-						bound = check.subst(tname.pos, bound, smap)
-						tname.typ.(*TypeParam).bound = bound
-					}
-				}
-			}
-		}
-	}
-
-	if tparams != nil {
-		sig.tparams = check.collectTypeParams(tparams)
-		// Always type-check method type parameters but complain if they are not enabled.
-		// (A separate check is needed when type-checking interface method signatures because
-		// they don't have a receiver specification.)
-		if recvPar != nil && !acceptMethodTypeParams {
-			check.error(ftyp, "methods cannot have type parameters")
-		}
-	}
-
-	// Value (non-type) parameters' scope starts in the function body. Use a temporary scope for their
-	// declarations and then squash that scope into the parent scope (and report any redeclarations at
-	// that time).
-	scope := NewScope(check.scope, nopos, nopos, "function body (temp. scope)")
-	var recvList []*Var // TODO(gri) remove the need for making a list here
-	if recvPar != nil {
-		recvList, _ = check.collectParams(scope, []*syntax.Field{recvPar}, recvTyp, false) // use rewritten receiver type, if any
-	}
-	params, variadic := check.collectParams(scope, ftyp.ParamList, nil, true)
-	results, _ := check.collectParams(scope, ftyp.ResultList, nil, false)
-	scope.Squash(func(obj, alt Object) {
-		var err error_
-		err.errorf(obj, "%s redeclared in this block", obj.Name())
-		err.recordAltDecl(alt)
-		check.report(&err)
-	})
-
-	if recvPar != nil {
-		// recv parameter list present (may be empty)
-		// spec: "The receiver is specified via an extra parameter section preceding the
-		// method name. That parameter section must declare a single parameter, the receiver."
-		var recv *Var
-		switch len(recvList) {
-		case 0:
-			// error reported by resolver
-			recv = NewParam(nopos, nil, "", Typ[Invalid]) // ignore recv below
-		default:
-			// more than one receiver
-			check.error(recvList[len(recvList)-1].Pos(), "method must have exactly one receiver")
-			fallthrough // continue with first receiver
-		case 1:
-			recv = recvList[0]
-		}
-
-		// TODO(gri) We should delay rtyp expansion to when we actually need the
-		//           receiver; thus all checks here should be delayed to later.
-		rtyp, _ := deref(recv.typ)
-		rtyp = expand(rtyp)
-
-		// spec: "The receiver type must be of the form T or *T where T is a type name."
-		// (ignore invalid types - error was reported before)
-		if t := rtyp; t != Typ[Invalid] {
-			var err string
-			if T := asNamed(t); T != nil {
-				// spec: "The type denoted by T is called the receiver base type; it must not
-				// be a pointer or interface type and it must be declared in the same package
-				// as the method."
-				if T.obj.pkg != check.pkg {
-					err = "type not defined in this package"
-					if check.conf.CompilerErrorMessages {
-						check.errorf(recv.pos, "cannot define new methods on non-local type %s", recv.typ)
-						err = ""
-					}
-				} else {
-					switch u := optype(T).(type) {
-					case *Basic:
-						// unsafe.Pointer is treated like a regular pointer
-						if u.kind == UnsafePointer {
-							err = "unsafe.Pointer"
-						}
-					case *Pointer, *Interface:
-						err = "pointer or interface type"
-					}
-				}
-			} else if T := asBasic(t); T != nil {
-				err = "basic or unnamed type"
-				if check.conf.CompilerErrorMessages {
-					check.errorf(recv.pos, "cannot define new methods on non-local type %s", recv.typ)
-					err = ""
-				}
-			} else {
-				check.errorf(recv.pos, "invalid receiver type %s", recv.typ)
-			}
-			if err != "" {
-				check.errorf(recv.pos, "invalid receiver type %s (%s)", recv.typ, err)
-				// ok to continue
-			}
-		}
-		sig.recv = recv
-	}
-
-	sig.params = NewTuple(params...)
-	sig.results = NewTuple(results...)
-	sig.variadic = variadic
-}
-
 // goTypeName returns the Go type name for typ and
 // removes any occurrences of "types2." from that name.
 func goTypeName(typ Type) string {
@@ -438,6 +281,11 @@ func goTypeName(typ Type) string {
 // typInternal drives type checking of types.
 // Must only be called by definedType or genericType.
 //
+// e0有两种情况：
+//   - 为一个类型名称，e0为syntax.Name或者syntax.SelectorExpr, def=nil
+//   - 为一个type spec, 此时def为类型名称
+//
+// def!=nil时的唯一动作就是def.setUnderlying(e0的类型)
 func (check *Checker) typInternal(e0 syntax.Expr, def *Named) (T Type) {
 	if check.conf.Trace {
 		check.trace(e0.Pos(), "type %s", e0)
@@ -465,6 +313,8 @@ func (check *Checker) typInternal(e0 syntax.Expr, def *Named) (T Type) {
 		// ignore - error reported before
 
 	case *syntax.Name:
+		// var x MyInt: e=MyInt, def=nil
+		// type X Y: e=Y, def=X
 		var x operand
 		check.ident(&x, e, def, true)
 
@@ -499,6 +349,8 @@ func (check *Checker) typInternal(e0 syntax.Expr, def *Named) (T Type) {
 		}
 
 	case *syntax.IndexExpr:
+		// func (recv X[T1, T2]) nop()
+		// e.X=X, e.Index=[T1, T2]
 		return check.instantiatedType(e.X, unpackExpr(e.Index), def)
 
 	case *syntax.ParenExpr:
@@ -636,7 +488,7 @@ func (check *Checker) typOrNil(e syntax.Expr) Type {
 	case novalue:
 		check.errorf(&x, "%s used as type", &x)
 	case typexpr:
-		check.instantiatedOperand(&x)
+		check.instantiatedOperand(&x) // 必须已经实例化
 		return x.typ
 	case nilvalue:
 		return nil
@@ -646,6 +498,205 @@ func (check *Checker) typOrNil(e syntax.Expr) Type {
 	return Typ[Invalid]
 }
 
+/*
+type T[T1 any, T2 any] struct { v1 T1; v2 T2 }
+func (s *T[T1, T2]) Hello() {}
+*/
+// funcType type-checks a function or method type.
+func (check *Checker) funcType(sig *Signature, recvPar *syntax.Field, tparams []*syntax.Field, ftyp *syntax.FuncType) {
+	check.openScope(ftyp, "function")
+	check.scope.isFunc = true
+	check.recordScope(ftyp, check.scope)
+	sig.scope = check.scope
+	defer check.closeScope()
+
+	var recvTyp syntax.Expr // rewritten receiver type; valid if != nil
+	if recvPar != nil {
+		// collect generic receiver type parameters, if any
+		// - a receiver type parameter is like any other type parameter, except that it is declared implicitly
+		// - the receiver specification acts as local declaration for its type parameters, which may be blank
+		//
+		//  func (s *T[T1, T2]) Hello() {} => rname=T, rparams=[T1, T2]
+		_, rname, rparams := check.unpackRecv(recvPar.Type, true)
+		fmt.Printf("  rname=%v; %d rparams\n", rname.Value, len(rparams))
+		for _, p := range rparams {
+			fmt.Printf("  rparams=%v\n", p.Value)
+		}
+		if len(rparams) > 0 {
+			// Blank identifiers don't get declared and regular type-checking of the instantiated
+			// parameterized receiver type expression fails in Checker.collectParams of receiver.
+			// Identify blank type parameters and substitute each with a unique new identifier named
+			// "n_" (where n is the parameter index) and which cannot conflict with any user-defined
+			// name.
+			var smap map[*syntax.Name]*syntax.Name // substitution map from "_" to "!n" identifiers
+			for i, p := range rparams {
+				if p.Value == "_" {
+					new := *p
+					new.Value = fmt.Sprintf("%d_", i)
+					rparams[i] = &new // use n_ identifier instead of _ so it can be looked up
+					if smap == nil {
+						smap = make(map[*syntax.Name]*syntax.Name)
+					}
+					smap[p] = &new
+				}
+			}
+			if smap != nil {
+				// blank identifiers were found => use rewritten receiver type
+				//
+				// T[_, T2] => T[0_, T2]
+				recvTyp = isubst(recvPar.Type, smap)
+			}
+			// TODO(gri) rework declareTypeParams
+			sig.rparams = nil
+			for _, rparam := range rparams {
+				// 注意是添加到当前func scope; 这里的TypeName.typ = *TypeParam
+				sig.rparams = check.declareTypeParam(sig.rparams, rparam)
+			}
+			// determine receiver type to get its type parameters
+			// and the respective type parameter bounds
+			var recvTParams []*TypeName
+			if rname != nil {
+				// recv should be a Named type (otherwise an error is reported elsewhere)
+				// Also: Don't report an error via genericType since it will be reported
+				//       again when we type-check the signature.
+				// TODO(gri) maybe the receiver should be marked as invalid instead?
+				if recv := asNamed(check.genericType(rname, false)); recv != nil {
+					// 有rparams因此必须是generic type，否则报错
+					recvTParams = recv.tparams // type X[T1, T2] => [T1, T2]
+				}
+			}
+			// provide type parameter bounds
+			// - only do this if we have the right number (otherwise an error is reported elsewhere)
+			if len(sig.rparams) == len(recvTParams) {
+				// We have a list of *TypeNames but we need a list of Types.
+				list := make([]Type, len(sig.rparams))
+				for i, t := range sig.rparams {
+					list[i] = t.typ  // t.typ = *TypeParam
+				}
+
+				// type X[T1 bound1, T2 bound2] <==> func (recv X[C1, C2])
+				smap := makeSubstMap(recvTParams, list)
+				for i, tname := range sig.rparams {
+					bound := recvTParams[i].typ.(*TypeParam).bound
+					// bound is (possibly) parameterized in the context of the
+					// receiver type declaration. Substitute parameters for the
+					// current context.
+					// TODO(gri) should we assume now that bounds always exist?
+					//           (no bound == empty interface)
+					if bound != nil {
+						// declareTypeParam()生成TypeParam.bound=emptyInterface，这里替换为实际值
+						bound = check.subst(tname.pos, bound, smap)
+						tname.typ.(*TypeParam).bound = bound
+					}
+				}
+			}
+		}
+	}
+
+	// func (recv X[T1, T2]) What[T3, T4 any]() {}
+	if tparams != nil { // [T3, T4 any]
+		sig.tparams = check.collectTypeParams(tparams)
+		// Always type-check method type parameters but complain if they are not enabled.
+		// (A separate check is needed when type-checking interface method signatures because
+		// they don't have a receiver specification.)
+		if recvPar != nil && !acceptMethodTypeParams {
+			check.error(ftyp, "methods cannot have type parameters")
+		}
+	}
+
+	// Value (non-type) parameters' scope starts in the function body. Use a temporary scope for their
+	// declarations and then squash that scope into the parent scope (and report any redeclarations at
+	// that time).
+	scope := NewScope(check.scope, nopos, nopos, "function body (temp. scope)")
+	var recvList []*Var // TODO(gri) remove the need for making a list here
+	if recvPar != nil {
+		// 会解析每个param的type， 比如func (recv X[T1, T2]) nop() {}
+		// 会把IndexExpr(X[T1, T2])，查找泛型类型X，然后用[T1, T2]实例化，返回一个*instance类型
+		recvList, _ = check.collectParams(scope, []*syntax.Field{recvPar}, recvTyp, false) // use rewritten receiver type, if any
+	}
+	params, variadic := check.collectParams(scope, ftyp.ParamList, nil, true)
+	results, _ := check.collectParams(scope, ftyp.ResultList, nil, false)
+	scope.Squash(func(obj, alt Object) {
+		var err error_
+		err.errorf(obj, "%s redeclared in this block", obj.Name())
+		err.recordAltDecl(alt)
+		check.report(&err)
+	})
+
+	if recvPar != nil {
+		// recv parameter list present (may be empty)
+		// spec: "The receiver is specified via an extra parameter section preceding the
+		// method name. That parameter section must declare a single parameter, the receiver."
+		var recv *Var
+		switch len(recvList) {
+		case 0:
+			// error reported by resolver
+			recv = NewParam(nopos, nil, "", Typ[Invalid]) // ignore recv below
+		default:
+			// more than one receiver
+			check.error(recvList[len(recvList)-1].Pos(), "method must have exactly one receiver")
+			fallthrough // continue with first receiver
+		case 1:
+			recv = recvList[0]
+		}
+
+		// TODO(gri) We should delay rtyp expansion to when we actually need the
+		//           receiver; thus all checks here should be delayed to later.
+		rtyp, _ := deref(recv.typ)
+		rtyp = expand(rtyp)
+
+		// spec: "The receiver type must be of the form T or *T where T is a type name."
+		// (ignore invalid types - error was reported before)
+		if t := rtyp; t != Typ[Invalid] {
+			var err string
+			if T := asNamed(t); T != nil {
+				// spec: "The type denoted by T is called the receiver base type; it must not
+				// be a pointer or interface type and it must be declared in the same package
+				// as the method."
+				if T.obj.pkg != check.pkg {
+					err = "type not defined in this package"
+					if check.conf.CompilerErrorMessages {
+						check.errorf(recv.pos, "cannot define new methods on non-local type %s", recv.typ)
+						err = ""
+					}
+				} else {
+					switch u := optype(T).(type) {
+					case *Basic:
+						// unsafe.Pointer is treated like a regular pointer
+						if u.kind == UnsafePointer {
+							err = "unsafe.Pointer"
+						}
+					case *Pointer, *Interface:
+						err = "pointer or interface type"
+					}
+				}
+			} else if T := asBasic(t); T != nil {
+				err = "basic or unnamed type"
+				if check.conf.CompilerErrorMessages {
+					check.errorf(recv.pos, "cannot define new methods on non-local type %s", recv.typ)
+					err = ""
+				}
+			} else {
+				check.errorf(recv.pos, "invalid receiver type %s", recv.typ)
+			}
+			if err != "" {
+				check.errorf(recv.pos, "invalid receiver type %s (%s)", recv.typ, err)
+				// ok to continue
+			}
+		}
+		sig.recv = recv
+	}
+
+	sig.params = NewTuple(params...)
+	sig.results = NewTuple(results...)
+	sig.variadic = variadic
+}
+
+/*
+type X[T1, T2] struct {...}
+type x X[int, int]
+*/
+// x=X, targs=[int, int], def=x
 func (check *Checker) instantiatedType(x syntax.Expr, targs []syntax.Expr, def *Named) Type {
 	b := check.genericType(x, true) // TODO(gri) what about cycles?
 	if b == Typ[Invalid] {
@@ -667,7 +718,7 @@ func (check *Checker) instantiatedType(x syntax.Expr, targs []syntax.Expr, def *
 	typ.base = base
 
 	// evaluate arguments (always)
-	typ.targs = check.typeList(targs)
+	typ.targs = check.typeList(targs) // 每个syntax.Expr都对应一个Type
 	if typ.targs == nil {
 		def.setUnderlying(Typ[Invalid]) // avoid later errors due to lazy instantiation
 		return Typ[Invalid]
@@ -762,6 +813,7 @@ func (check *Checker) collectParams(scope *Scope, list []*syntax.Field, type0 sy
 			}
 			typ = check.varType(ftype)
 		}
+
 		// The parser ensures that f.Tag is nil and we don't
 		// care if a constructed AST contains a non-nil tag.
 		if field.Name != nil {
@@ -817,6 +869,8 @@ func (check *Checker) interfaceType(ityp *Interface, iface *syntax.InterfaceType
 	var types []syntax.Expr
 	for _, f := range iface.MethodList {
 		if f.Name != nil {
+			// interface { nop() int }: Name=nop, type=func() int
+			//
 			// We have a method with name f.Name, or a type
 			// of a type list (f.Name.Value == "type").
 			name := f.Name.Value
@@ -830,6 +884,8 @@ func (check *Checker) interfaceType(ityp *Interface, iface *syntax.InterfaceType
 			}
 
 			if name == "type" {
+				// interface { type int } 这个语法会废弃
+				//
 				// Always collect all type list entries, even from
 				// different type lists, under the assumption that
 				// the author intended to include all types.
@@ -841,7 +897,7 @@ func (check *Checker) interfaceType(ityp *Interface, iface *syntax.InterfaceType
 				continue
 			}
 
-			typ := check.typ(f.Type)
+			typ := check.typ(f.Type) // f.Type: *syntax.FuncType
 			sig, _ := typ.(*Signature)
 			if sig == nil {
 				if typ != Typ[Invalid] {
@@ -868,6 +924,9 @@ func (check *Checker) interfaceType(ityp *Interface, iface *syntax.InterfaceType
 			check.recordDef(f.Name, m)
 			ityp.methods = append(ityp.methods, m)
 		} else {
+			// interface { int }   // 这里不检查int是接口，之后检查
+			// interface { io.Reader }
+			//
 			// We have an embedded type. completeInterface will
 			// eventually verify that we have an interface.
 			ityp.embeddeds = append(ityp.embeddeds, check.typ(f.Type))
@@ -1167,6 +1226,7 @@ func (check *Checker) structType(styp *Struct, e *syntax.StructType) {
 				addInvalid(name, pos)
 				continue
 			}
+
 			add(name, true, pos)
 
 			// Because we have a name, typ must be of the form T or *T, where T is the name
@@ -1177,7 +1237,7 @@ func (check *Checker) structType(styp *Struct, e *syntax.StructType) {
 			embeddedPos := pos
 			check.later(func() {
 				t, isPtr := deref(embeddedTyp)
-				switch t := optype(t).(type) {
+				switch t := optype(t).(type) { // 注意这里检查的是underlying type
 				case *Basic:
 					if t == Typ[Invalid] {
 						// error was reported before
@@ -1188,6 +1248,13 @@ func (check *Checker) structType(styp *Struct, e *syntax.StructType) {
 						check.error(embeddedPos, "embedded field type cannot be unsafe.Pointer")
 					}
 				case *Pointer:
+					/*
+					type x *int
+					type z struct { *x } // embeddedTyp=Pointer, deref=Named(x), optype=*Pointer
+					type z struct { x } // embedded=Named(x), deref=Named(x), optype=*Pointer
+					*/
+					// 注意这两种都会报这个错误，特别是后一个也会报错
+					//
 					check.error(embeddedPos, "embedded field type cannot be a pointer")
 				case *Interface:
 					if isPtr {
@@ -1214,8 +1281,9 @@ func embeddedFieldIdent(e syntax.Expr) *syntax.Name {
 			}
 		}
 	case *syntax.SelectorExpr:
+		// 注意指返回了Sel部分，比如struct { time.Duration }，返回的是Duration
 		return e.Sel
-	case *syntax.IndexExpr:
+	case *syntax.IndexExpr: // Map[int, string]
 		return embeddedFieldIdent(e.X)
 	}
 	return nil // invalid embedded field

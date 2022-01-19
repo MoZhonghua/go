@@ -53,6 +53,9 @@ func (err *error_) pos() syntax.Pos {
 	return err.desc[0].pos
 }
 
+// pos0: first desc
+//     pos1: next desc
+//     pos2: next desc
 func (err *error_) msg(qf Qualifier) string {
 	if err.empty() {
 		return "no error"

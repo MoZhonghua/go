@@ -83,6 +83,8 @@ func IsInterface(typ Type) bool {
 }
 
 // Comparable reports whether values of type T are comparable.
+//
+// 递归检查每个basic component可比较
 func Comparable(T Type) bool {
 	return comparable(T, nil)
 }

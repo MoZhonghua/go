@@ -6,7 +6,10 @@
 
 package types2
 
-import "cmd/compile/internal/syntax"
+import (
+	"cmd/compile/internal/syntax"
+	dbg "runtime/debug"
+)
 
 // assignment reports whether x can be assigned to a variable of type T,
 // if necessary by attempting to convert untyped values to the appropriate
@@ -41,8 +44,15 @@ func (check *Checker) assignment(x *operand, T Type, context string) {
 				return
 			}
 		} else if T == nil || IsInterface(T) {
+			// var x io.Reader; x = 100;
+			// 注意这个时候"100"的类型应该是int，而不是io.Reader
 			target = Default(x.typ)
 		}
+
+
+		// var target io.Reader; target = 100;
+		// 此时x=100, target=int
+		// 注意这里不检查int是否实现了io.Reader接口
 		newType, val, code := check.implicitTypeAndValue(x, target)
 		if code != 0 {
 			msg := check.sprintf("cannot use %s as %s value in %s", x, target, context)
@@ -61,10 +71,15 @@ func (check *Checker) assignment(x *operand, T Type, context string) {
 			check.updateExprVal(x.expr, val)
 		}
 		if newType != x.typ {
+			// var target int
+			// target = 1: 最开始"1"这个expr的类型是untyped int，此时更新为int
 			x.typ = newType
 			check.updateExprType(x.expr, newType, false)
 		}
 	}
+
+	// 到这里x的类型已经确定
+	//
 	// x.typ is typed
 
 	// A generic (non-instantiated) function value cannot be assigned to a variable.
@@ -75,12 +90,13 @@ func (check *Checker) assignment(x *operand, T Type, context string) {
 	// spec: "If a left-hand side is the blank identifier, any typed or
 	// non-constant value except for the predeclared identifier nil may
 	// be assigned to it."
-	if T == nil {
+	if T == nil { // T == nil表示LHS是"_"
 		return
 	}
 
 	reason := ""
 	if ok, _ := x.assignableTo(check, T, &reason); !ok {
+		// 检查int是否实现了io.Reader: T=io.Reader, x.typ=int
 		if check.conf.CompilerErrorMessages {
 			check.errorf(x, "incompatible type: cannot use %s as %s value", x, T)
 		} else {
@@ -94,6 +110,7 @@ func (check *Checker) assignment(x *operand, T Type, context string) {
 	}
 }
 
+// const lhs = 100; // x is 100
 func (check *Checker) initConst(lhs *Const, x *operand) {
 	if x.mode == invalid || x.typ == Typ[Invalid] || lhs.typ == Typ[Invalid] {
 		if lhs.typ == nil {
@@ -110,11 +127,11 @@ func (check *Checker) initConst(lhs *Const, x *operand) {
 		}
 		return
 	}
-	assert(isConstType(x.typ))
+	assert(isConstType(x.typ)) // 必须是number或者string
 
 	// If the lhs doesn't have a type yet, use the type of x.
 	if lhs.typ == nil {
-		lhs.typ = x.typ
+		lhs.typ = x.typ // const c = 100; c本身也可以是untyped
 	}
 
 	check.assignment(x, lhs.typ, "constant declaration")
@@ -125,6 +142,7 @@ func (check *Checker) initConst(lhs *Const, x *operand) {
 	lhs.val = x.val
 }
 
+// var lhs = x;
 func (check *Checker) initVar(lhs *Var, x *operand, context string) Type {
 	if x.mode == invalid || x.typ == Typ[Invalid] || lhs.typ == Typ[Invalid] {
 		if lhs.typ == nil {
@@ -139,6 +157,7 @@ func (check *Checker) initVar(lhs *Var, x *operand, context string) Type {
 	// If the lhs doesn't have a type yet, use the type of x.
 	if lhs.typ == nil {
 		typ := x.typ
+		// var lhs = 100; => type(lhs)=Default(type(100))
 		if isUntyped(typ) {
 			// convert untyped types to default types
 			if typ == Typ[UntypedNil] {
@@ -159,6 +178,7 @@ func (check *Checker) initVar(lhs *Var, x *operand, context string) Type {
 	return x.typ
 }
 
+// lhs = x
 func (check *Checker) assignVar(lhs syntax.Expr, x *operand) Type {
 	if x.mode == invalid || x.typ == Typ[Invalid] {
 		check.useLHS(lhs)
@@ -216,6 +236,12 @@ func (check *Checker) assignVar(lhs syntax.Expr, x *operand) Type {
 		check.error(&z, "cannot assign to nil") // default would print "untyped nil"
 		return nil
 	default:
+		// type T struct {v int}
+		// var m map[int]T
+		// m[0].v=10 // errror: cannot assign to struct field m[0].v in map
+		//
+		// var m map[int]*T
+		// m[0].v=10 // ok, m[0].mode=variable
 		if sel, ok := z.expr.(*syntax.SelectorExpr); ok {
 			var op operand
 			check.expr(&op, sel.X)
@@ -238,7 +264,17 @@ func (check *Checker) assignVar(lhs syntax.Expr, x *operand) Type {
 
 // If returnPos is valid, initVars is called to type-check the assignment of
 // return expressions, and returnPos is the position of the return statement.
+//
+// var x, y = 1, 2
+// x, y := 1, 2
 func (check *Checker) initVars(lhs []*Var, orig_rhs []syntax.Expr, returnPos syntax.Pos) {
+	// lhs是两个的情况会允许一些特殊语句:
+	//   var m map[int]int
+	//   x, ok := m[0]  // exprList() => [int, untyped bool]
+	//   x := m[0]      // exprList() => [int]
+	// 在计算m[0]的时候不知道左面是两个还是一个值，通过额外参数告知
+	//
+	// 注意return语句不允许这种行为: func x()(int, bool) { return m[100] }报错
 	rhs, commaOk := check.exprList(orig_rhs, len(lhs) == 2 && !returnPos.IsKnown())
 
 	if len(lhs) != len(rhs) {
@@ -281,6 +317,7 @@ func (check *Checker) initVars(lhs []*Var, orig_rhs []syntax.Expr, returnPos syn
 	}
 }
 
+// x, y = 1, 2，此时x，y必须是已知变量; 而x, y := 1, 2是新定义变量
 func (check *Checker) assignVars(lhs, orig_rhs []syntax.Expr) {
 	rhs, commaOk := check.exprList(orig_rhs, len(lhs) == 2)
 
@@ -325,6 +362,10 @@ func unpackExpr(x syntax.Expr) []syntax.Expr {
 	return nil
 }
 
+// 处理x, y := 1, 2
+//
+// 注意对左边的变量名有要求: 至少有一个是当前scope未声明变量; 而var x, y要求当前scope
+// 都是未声明的; 在check.declare()中检查
 func (check *Checker) shortVarDecl(pos syntax.Pos, lhs, rhs []syntax.Expr) {
 	top := len(check.delayed)
 	scope := check.scope
@@ -404,4 +445,8 @@ func (check *Checker) shortVarDecl(pos syntax.Pos, lhs, rhs []syntax.Expr) {
 	for _, obj := range newVars {
 		check.declare(scope, nil, obj, scopePos) // id = nil: recordDef already called
 	}
+}
+
+func callstack() {
+	dbg.PrintStack()
 }
