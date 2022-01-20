@@ -106,6 +106,26 @@ internal/types2/selection.go
 internal/types2/sanitize.go
 internal/types2/initorder.go
 
+internal/noder/noder.go * LoadPackage()
+internal/noder/stmt.go
+internal/noder/scopes.go
+internal/noder/decl.go
+internal/noder/stencil.go
+internal/noder/helpers.go
+internal/noder/import.go
+internal/noder/validate.go
+internal/noder/expr.go
+internal/noder/lex_test.go
+internal/noder/irgen.go
+internal/noder/func.go
+internal/noder/object.go
+internal/noder/lex.go
+internal/noder/types.go
+internal/noder/sizes.go
+internal/noder/posmap.go
+internal/noder/transform.go
+
+
 internal/typecheck/stmt.go
 internal/typecheck/typecheck.go *
 internal/typecheck/expr.go
@@ -126,25 +146,6 @@ internal/typecheck/universe.go
 internal/typecheck/mkbuiltin.go
 internal/typecheck/bexport.go
 internal/typecheck/builtin.go
-
-internal/noder/noder.go * LoadPackage()
-internal/noder/stmt.go
-internal/noder/scopes.go
-internal/noder/decl.go
-internal/noder/stencil.go
-internal/noder/helpers.go
-internal/noder/import.go
-internal/noder/validate.go
-internal/noder/expr.go
-internal/noder/lex_test.go
-internal/noder/irgen.go
-internal/noder/func.go
-internal/noder/object.go
-internal/noder/lex.go
-internal/noder/types.go
-internal/noder/sizes.go
-internal/noder/posmap.go
-internal/noder/transform.go
 
 TODO
 internal/amd64/ssa.go

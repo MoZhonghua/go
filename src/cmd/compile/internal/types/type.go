@@ -85,7 +85,7 @@ const (
 	TCHAN
 	TMAP
 	TINTER // interface
-	TFORW  // forward, what's this?
+	TFORW  // forward: type T []int: []int=>SliceType, T->TFORW
 	TANY
 	TSTRING
 	TUNSAFEPTR
@@ -1706,7 +1706,7 @@ func (t *Type) Obj() Object {
 }
 
 
-// TFORW是一个虚构出来的中转类型?
+// TFORW在NewNamed()中返回，就是代表一个类型名称，比如type T []int中的T
 //
 // SetUnderlying sets the underlying type. SetUnderlying automatically updates any
 // types that were waiting for this type to be completed.
@@ -1717,6 +1717,9 @@ func (t *Type) SetUnderlying(underlying *Type) {
 		return
 	}
 
+	// type T struct {...}
+	// t: T, TFORW
+	// underlying: struct {...}, TSTRUCT
 	ft := t.ForwardType()
 
 	// TODO(mdempsky): Fix Type rekinding.
@@ -1724,7 +1727,7 @@ func (t *Type) SetUnderlying(underlying *Type) {
 	t.Extra = underlying.Extra
 	t.Width = underlying.Width
 	t.Align = underlying.Align
-	t.underlying = underlying.underlying // ???
+	t.underlying = underlying.underlying // 如果underlyging已经是type spec，那么underlying.underlying=underlying
 
 	if underlying.NotInHeap() {
 		t.SetNotInHeap(true)

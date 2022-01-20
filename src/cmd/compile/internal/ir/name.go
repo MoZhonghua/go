@@ -59,7 +59,10 @@ type Name struct {
 	// The function, method, or closure in which local variable or param is declared.
 	Curfn *Func  // nil说明是package全局变量?
 
-	Ntype    Ntype // 类型信息对应的Node，真正的types.Type在miniExpr.typ
+	// type T struct{...}: Name是T，NType是*ir.StructType(OTYPE)
+	// var x T: Name是x, NType是*ir.Name(OFORW)
+	Ntype    Ntype // 类型信息对应的Node
+
 	Heapaddr *Name // temp holding heap address of param
 
 	// ONAME closure linkage

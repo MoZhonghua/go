@@ -544,7 +544,7 @@ func typecheck1(n ir.Node, top int) ir.Node {
 		return n
 
 	// types (ODEREF is with exprs)
-	case ir.OTYPE:
+	case ir.OTYPE: // 用在具体的类型名，通常是*ir.Name
 		return n
 
 	case ir.OTSLICE:
@@ -1741,6 +1741,16 @@ func CheckMapKeys() {
 // their runtime type descriptors.
 var TypeGen int32
 
+/*
+type T struct { ... }
+
+n = *ir.Name(ONAME)
+  - n.typ = *types.Type(TFORW)
+            - underlying = *types.Type(TSTRUCT)
+  - n.sym = "T"
+  - n.Ntype = *ir.StructType(OTYPE)
+              - ir.StructType.typ = *types.Type(TSTRUCT)
+*/
 func typecheckdeftype(n *ir.Name) {
 	if base.EnableTrace && base.Flag.LowerT {
 		defer tracePrint("typecheckdeftype", n)(nil)
@@ -1764,6 +1774,8 @@ func typecheckdeftype(n *ir.Name) {
 	errorsBefore := base.Errors()
 	n.Ntype = typecheckNtype(n.Ntype)
 	if underlying := n.Ntype.Type(); underlying != nil {
+		// 注意underlying.Underlying()=underlying
+		// t.kind更新为underlying.kind, 不再是TFORW; 可以简单理解为*t=*underlying
 		t.SetUnderlying(underlying)
 	} else {
 		n.SetDiag(true)
@@ -1870,6 +1882,12 @@ func typecheckdef(n *ir.Name) {
 		}
 
 	case ir.ONAME:
+		/* var n T
+		 n: *ir.Name(ONAME)
+		 T: *ir.Name(OTYPE)
+		 n.NType = T
+		 T.typ = *types.Type(TSTRUCT) // 原来应该是TFORW, SetUnderlying()设置为TSTRUCT
+		 */
 		if n.Ntype != nil {
 			n.Ntype = typecheckNtype(n.Ntype)
 			n.SetType(n.Ntype.Type())
