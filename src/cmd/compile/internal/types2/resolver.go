@@ -666,6 +666,7 @@ func (check *Checker) packageObjects() {
 			continue
 		}
 
+		// 这里从package-level decl递归进去处理所有代码
 		check.objDecl(obj, nil)
 	}
 	// phase 2

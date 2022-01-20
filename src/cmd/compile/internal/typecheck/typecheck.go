@@ -139,6 +139,9 @@ var typecheckdefstack []*ir.Name
 
 // Resolve ONONAME to definition, if any.
 func Resolve(n ir.Node) (res ir.Node) {
+	// ONONAME:
+	// Unnamed arg or return value: f(int, string) (int, error) { etc }
+	// Also used for a qualified package identifier that hasn't been resolved yet.
 	if n == nil || n.Op() != ir.ONONAME {
 		return n
 	}
@@ -159,6 +162,7 @@ func Resolve(n ir.Node) (res ir.Node) {
 		return expandDecl(n)
 	}
 
+	// case: sym.Pkg == types.LocalPkg
 	r := ir.AsNode(n.Sym().Def)
 	if r == nil {
 		return n
@@ -229,7 +233,7 @@ func cycleFor(start ir.Node) []ir.Node {
 	// Find the start node in typecheck_tcstack.
 	// We know that it must exist because each time we mark
 	// a node with n.SetTypecheck(2) we push it on the stack,
-	// and each time we mark a node with n.SetTypecheck(2) we
+	// and each time we mark a node with n.SetTypecheck(1) we
 	// pop it from the stack. We hit a cycle when we encounter
 	// a node marked 2 in which case is must be on the stack.
 	i := len(typecheck_tcstack) - 1

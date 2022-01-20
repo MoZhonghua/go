@@ -16,7 +16,6 @@ import (
 // reports whether the call is valid, with *x holding the result;
 // but x.expr is not set. If the call is invalid, the result is
 // false, and *x is undefined.
-//
 func (check *Checker) builtin(x *operand, call *syntax.CallExpr, id builtinId) (_ bool) {
 	// append is the only built-in that permits the use of ... for the last argument
 	bin := predeclaredFuncs[id]
@@ -32,7 +31,7 @@ func (check *Checker) builtin(x *operand, call *syntax.CallExpr, id builtinId) (
 	// false for the evaluation of x so that we can check it afterwards.
 	// Note: We must do this _before_ calling exprList because exprList evaluates
 	//       all arguments.
-	if id == _Len || id == _Cap {
+	if id == _Len || id == _Cap { // 为什么要知道这个？
 		defer func(b bool) {
 			check.hasCallOrRecv = b
 		}(check.hasCallOrRecv)
@@ -45,12 +44,12 @@ func (check *Checker) builtin(x *operand, call *syntax.CallExpr, id builtinId) (
 	switch id {
 	default:
 		// make argument getter
-		xlist, _ := check.exprList(call.ArgList, false)
+		xlist, _ := check.exprList(call.ArgList, false) // returns []*operand
 		arg = func(x *operand, i int) { *x = *xlist[i]; x.typ = expand(x.typ) }
 		nargs = len(xlist)
 		// evaluate first argument, if present
 		if nargs > 0 {
-			arg(x, 0)
+			arg(x, 0)  // now x is result of first arg
 			if x.mode == invalid {
 				return
 			}
@@ -96,6 +95,8 @@ func (check *Checker) builtin(x *operand, call *syntax.CallExpr, id builtinId) (
 		// to type []byte with a second argument of string type followed by ... .
 		// This form appends the bytes of the string.
 		if nargs == 2 && call.HasDots {
+			// var x []byte; var y string; append(x, y...)
+			// 特例是因为y的类型不是[]byte
 			if ok, _ := x.assignableTo(check, NewSlice(universeByte), nil); ok {
 				arg(x, 1)
 				if x.mode == invalid {
@@ -116,6 +117,9 @@ func (check *Checker) builtin(x *operand, call *syntax.CallExpr, id builtinId) (
 			}
 		}
 
+		// append本质上来说是一个泛型函数，推断出type param，构造一个*Signature，然后走
+		// 正常的函数type-check流程
+		//
 		// check general case by creating custom signature
 		sig := makeSig(S, S, NewSlice(T)) // []T required for variadic signature
 		sig.variadic = true
@@ -161,6 +165,10 @@ func (check *Checker) builtin(x *operand, call *syntax.CallExpr, id builtinId) (
 			// if the type of s is an array or pointer to an array and
 			// the expression s does not contain channel receives or
 			// function calls; in this case s is not evaluated."
+			//
+			// 这个行为决定了是否可以用来个const赋值。同时常量的话最终输出的代码
+			// 可以直接优化掉对len(arg)中的arg的计算
+			// 而函数和channel操作是有其他副作用的，不能优化掉
 			if !check.hasCallOrRecv {
 				mode = constant_
 				if t.len >= 0 {
@@ -261,6 +269,8 @@ func (check *Checker) builtin(x *operand, call *syntax.CallExpr, id builtinId) (
 			//    both of them to float64 since they must have the
 			//    same type to succeed (this will result in an error
 			//    because shifts of floats are not permitted)
+			//
+			// 移位操作的值和类型相关因此不是常量?
 			if x.mode == constant_ && y.mode == constant_ {
 				toFloat := func(x *operand) {
 					if isNumeric(x.typ) && constant.Sign(constant.Imag(x.val)) == 0 {
@@ -471,6 +481,8 @@ func (check *Checker) builtin(x *operand, call *syntax.CallExpr, id builtinId) (
 			if m+1 < max {
 				max = m + 1
 			}
+			// slice/chan  => min=2, max=3, make(slice, len), make(slice, len, buf)
+			// map         => min=1, max=2, make(map), make(map, cap)
 			return true
 		}
 
@@ -490,6 +502,8 @@ func (check *Checker) builtin(x *operand, call *syntax.CallExpr, id builtinId) (
 		types := []Type{T}
 		var sizes []int64 // constant integer arguments, if any
 		for _, arg := range call.ArgList[1:] {
+			// 注意index()和indexExpr(), 前者只是计算index值并检查是否超过范围。后者是
+			// 计算整个IndexExpr的值
 			typ, size := check.index(arg, -1) // ok to continue with typ == Typ[Invalid]
 			types = append(types, typ)
 			if size >= 0 {
@@ -656,7 +670,7 @@ func (check *Checker) builtin(x *operand, call *syntax.CallExpr, id builtinId) (
 		// TODO(gri) Should we pass x.typ instead of base (and indirect report if derefStructPtr indirected)?
 		check.recordSelection(selx, FieldVal, base, obj, index, false)
 
-		offs := check.conf.offsetof(base, index)
+		offs := check.conf.offsetof(base, index) // see sizes.go
 		x.mode = constant_
 		x.val = constant.MakeInt64(offs)
 		x.typ = Typ[Uintptr]
@@ -805,7 +819,6 @@ func makeSig(res Type, args ...Type) *Signature {
 
 // implicitArrayDeref returns A if typ is of the form *A and A is an array;
 // otherwise it returns typ.
-//
 func implicitArrayDeref(typ Type) Type {
 	if p, ok := typ.(*Pointer); ok {
 		if a := asArray(p.base); a != nil {

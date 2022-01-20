@@ -14,6 +14,8 @@ type Sizes interface {
 
 	// Offsetsof returns the offsets of the given struct fields, in bytes.
 	// Offsetsof must implement the offset guarantees required by the spec.
+	//
+	// 给定一个struct中的所有fields，然后计算各个field在struct中的偏移量
 	Offsetsof(fields []*Var) []int64
 
 	// Sizeof returns the size of a variable of type T.

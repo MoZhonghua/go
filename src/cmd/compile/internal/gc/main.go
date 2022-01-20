@@ -34,6 +34,24 @@ import (
 	"runtime"
 )
 
+// type-check流程有两个分支: types2(泛型), types+ir+typecheck
+/*
+types2流程
+noder.LoadPackage()
+ synatx.Parse() -> *syntax.File
+ types2.Check(*syntax.File) -> types2.Info
+ types2.Info -> ir.Node + types.Type
+
+types+ir+typecheck
+noder.LoadPackage()
+ synatx.Parse() -> *syntax.File
+ syntax.Node -> ir.Node
+ typecheck.check(ir.Node) -> ir.Node + types.Type + types.Sym
+
+最终结果都是生成ir.Node + types.Type
+types2直接处理syntax.Node，而typecheck流程中noder会把syntax.Node转换为ir.Node, 然后做typecheck
+*/
+
 func hidePanic() {
 	if base.Debug.Panic == 0 && base.Errors() > 0 {
 		// If we've already complained about things

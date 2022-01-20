@@ -10,7 +10,6 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"unicode"
@@ -35,7 +34,8 @@ func LoadPackage(filenames []string) {
 	}
 
 	// Limit the number of simultaneously open files.
-	sem := make(chan struct{}, runtime.GOMAXPROCS(0)+10)
+	// sem := make(chan struct{}, runtime.GOMAXPROCS(0)+10)
+	sem := make(chan struct{}, 1)
 
 	noders := make([]*noder, len(filenames))
 	for i, filename := range filenames {

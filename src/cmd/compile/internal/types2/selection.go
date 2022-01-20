@@ -75,7 +75,7 @@ func (s *Selection) Type() Type {
 		// TODO(gri) Compute this eagerly to avoid allocations.
 		sig := *s.obj.(*Func).typ.(*Signature)
 		arg0 := *sig.recv
-		sig.recv = nil
+		sig.recv = nil // 此时把recv做为显式参数: arg0=recv, recv=nil
 		arg0.typ = s.recv
 		var params []*Var
 		if sig.params != nil {

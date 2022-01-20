@@ -14,6 +14,14 @@ import (
 	"fmt"
 )
 
+// type T[T1, T2 any] struct { x T1; y T2 }
+//
+// *Named=>T[T1, T2 any]，underlying=>*Struct{ x T1; y T2 }
+//
+// Named.tparams[0].typ=*TypeParam(T1)
+// underlying.fields[0].typ=*TypeParam(T1)
+// 注意这两个*TypeParam指向同一个地址
+
 type substMap struct {
 	// The targs field is currently needed for *Named type substitution.
 	// TODO(gri) rewrite that code, get rid of this field, and make this
@@ -88,8 +96,12 @@ func (check *Checker) instantiate(pos syntax.Pos, typ Type, targs []Type, poslis
 	var tparams []*TypeName
 	switch t := typ.(type) {
 	case *Named:
+		// *Named是Type!
+		// type T[T1 any] ...
 		tparams = t.tparams
 	case *Signature:
+		// 注意这里函数类型不是和函数名绑定的, *Func不是Type!
+		// func [T1 any]()
 		tparams = t.tparams
 		defer func() {
 			// If we had an unexpected failure somewhere don't panic below when

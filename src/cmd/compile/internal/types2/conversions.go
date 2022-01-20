@@ -60,8 +60,10 @@ func (check *Checker) conversion(x *operand, T Type) {
 		if x.typ == Typ[UntypedNil] {
 			// ok
 		} else if IsInterface(T) || constArg && !isConstType(T) {
+			// type I interface{}; _ = I(0); 此时需要把"0"的类型设置为int
 			final = Default(x.typ)
 		} else if isInteger(x.typ) && isString(T) {
+			// x := string(97) => x="a"!
 			final = x.typ
 		}
 		check.updateExprType(x.expr, final, true)
@@ -139,6 +141,9 @@ func (x *operand) convertibleTo(check *Checker, T Type) bool {
 
 	// "x is a slice, T is a pointer-to-array type,
 	// and the slice and array types have identical element types."
+	//
+	// typ T *[3]int; var x []int; _ = T(x)
+	// T(x)虽然type-check，但是会做runtime检查，即要求len(x)=3，否则运行时panic
 	if s := asSlice(V); s != nil {
 		if p := asPointer(T); p != nil {
 			if a := asArray(p.Elem()); a != nil {

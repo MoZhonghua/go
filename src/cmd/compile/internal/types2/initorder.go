@@ -17,7 +17,7 @@ func (check *Checker) initOrder() {
 
 	// Compute the object dependency graph and initialize
 	// a priority queue with the list of graph nodes.
-	pq := nodeQueue(dependencyGraph(check.objMap))
+	pq := nodeQueue(dependencyGraph(check.objMap)) //objMap是package-level object和method
 	heap.Init(&pq)
 
 	const debug = false
@@ -59,7 +59,7 @@ func (check *Checker) initOrder() {
 	// cycles.
 	emitted := make(map[*declInfo]bool)
 	for len(pq) > 0 {
-		// get the next node
+		// get the next node: 依赖项最小的，如果没有cycle，那没一定是返回无依赖项的
 		n := heap.Pop(&pq).(*graphNode)
 
 		if debug {
@@ -69,6 +69,7 @@ func (check *Checker) initOrder() {
 
 		// if n still depends on other nodes, we have a cycle
 		if n.ndeps > 0 {
+			// 注意虽然有cycle，但是n不一定在cycle中!
 			cycle := findPath(check.objMap, n.obj, n.obj, make(map[Object]bool))
 			// If n.obj is not part of the cycle (e.g., n.obj->b->c->d->c),
 			// cycle will be nil. Don't report anything in that case since
@@ -90,13 +91,16 @@ func (check *Checker) initOrder() {
 		// and update priority queue
 		for p := range n.pred {
 			p.ndeps--
-			heap.Fix(&pq, p.index)
+			heap.Fix(&pq, p.index) // Swap会更新p.index
 		}
 
 		// record the init order for variables with initializers only
 		v, _ := n.obj.(*Var)
 		info := check.objMap[v]
 		if v == nil || !info.hasInitializer() {
+			// var x int
+			// var y = x
+			// 没必要记录x的init order
 			continue
 		}
 
@@ -111,6 +115,7 @@ func (check *Checker) initOrder() {
 
 		infoLhs := info.lhs // possibly nil (see declInfo.lhs field comment)
 		if infoLhs == nil {
+			// var _ = z(); 要保证z()被调用!
 			infoLhs = []*Var{v}
 		}
 		init := &Initializer{infoLhs, info.init}
@@ -174,6 +179,14 @@ func (check *Checker) reportCycle(cycle []Object) {
 // expression. Only constants, variables, and functions can be dependencies.
 // Constants are here because constant expression cycles are reported during
 // initialization order computation.
+//
+// 函数和变量之间可以有依赖关系
+/*
+var x int = z() // error: initialization cycle for x
+func z() int {
+	return x
+}
+*/
 type dependency interface {
 	Object
 	isDependency()
@@ -234,16 +247,17 @@ func dependencyGraph(objMap map[Object]*declInfo) []*graphNode {
 	// in correct order.)
 	var G []*graphNode
 	for obj, n := range M {
+		// x -> Func -> x ==> x -> x
 		if _, ok := obj.(*Func); ok {
 			// connect each predecessor p of n with each successor s
 			// and drop the function node (don't collect it in G)
 			for p := range n.pred {
-				// ignore self-cycles
+				// ignore self-cycles: Func0 -> Func0
 				if p != n {
 					// Each successor s of n becomes a successor of p, and
 					// each predecessor p of n becomes a predecessor of s.
 					for s := range n.succ {
-						// ignore self-cycles
+						// ignore self-cycles: Func0 -> Func0
 						if s != n {
 							p.succ.add(s)
 							s.pred.add(p)

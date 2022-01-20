@@ -74,7 +74,7 @@ func (s sanitizer) typ(typ Type) Type {
 	if t, found := s[typ]; found {
 		return t
 	}
-	s[typ] = typ
+	s[typ] = typ // typ不变
 
 	switch t := typ.(type) {
 	case *Basic, *bottom, *top:
@@ -149,6 +149,7 @@ func (s sanitizer) typ(typ Type) Type {
 		}
 
 	case *instance:
+		// 核心逻辑就是把*instance展开为实际类型
 		typ = t.expand()
 		s[t] = typ
 

@@ -11,6 +11,23 @@ import (
 	"sync"
 )
 
+// types 和 ir 相互依赖: type T struct {...} type-check流程
+// ir.Node == types.Object
+/*
+type T struct {...} => syntax.TypeDecl
+	- T => syntax.Name
+	- struct {...} => syntax.StructType
+
+struct {...} => syntax.StructType => types.StructType
+
+T => syntax.Name => ir.Name + types.Sym
+                    - ir.Name.sym = types.Sym
+                    - ir.Name.Ntype = types.StructType(struct{...})
+					- types.Sym.Def = ir.Name
+
+type-check最终输出的是ir.Node列表
+*/
+
 // Object represents an ir.Node, but without needing to import cmd/compile/internal/ir,
 // which would cause an import cycle. The uses in other packages must type assert
 // values of type Object to ir.Node or a more specific type.
