@@ -54,14 +54,14 @@ type Name struct {
 	// For a closure var, the ONAME node of the outer captured variable.
 	// For the case-local variables of a type switch, the type switch guard (OTYPESW).
 	// For the name of a function, points to corresponding Func node.
-	Defn Node  // 定义这个named node的语句Node
+	Defn Node  // 定义这个named node的语句Node, *Decl(op=ODCLXxxx)
 
 	// The function, method, or closure in which local variable or param is declared.
 	Curfn *Func  // nil说明是package全局变量?
 
 	// type T struct{...}: Name是T，NType是*ir.StructType(OTYPE)
 	// var x T: Name是x, NType是*ir.Name(OFORW)
-	Ntype    Ntype // 类型信息对应的Node
+	Ntype    Ntype // 类型信息对应的Node, 不是type spec本身(在.typ字段)
 
 	Heapaddr *Name // temp holding heap address of param
 

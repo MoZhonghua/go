@@ -82,6 +82,7 @@ func check2(noders []*noder) {
 	}
 }
 
+// 把types2的结果转换为ir.Node + types.Type
 type irgen struct {
 	target *ir.Package
 	self   *types2.Package

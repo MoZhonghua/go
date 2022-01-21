@@ -92,7 +92,7 @@ func pragmaFlag(verb string) ir.PragmaFlag {
 func (p *noder) pragcgo(pos syntax.Pos, text string) {
 	f := pragmaFields(text)
 
-	verb := strings.TrimPrefix(f[0], "go:")
+	verb := strings.TrimPrefix(f[0], "go:")  // f[0]=go:cgo_xxxx
 	f[0] = verb
 
 	switch verb {
@@ -101,6 +101,7 @@ func (p *noder) pragcgo(pos syntax.Pos, text string) {
 		case len(f) == 2 && !isQuoted(f[1]):
 		case len(f) == 3 && !isQuoted(f[1]) && !isQuoted(f[2]):
 		default:
+			// 注意local和remote参数不允许带引号, 函数名不允许空格，因此用了""一般是有问题
 			p.error(syntax.Error{Pos: pos, Msg: fmt.Sprintf(`usage: //go:%s local [remote]`, verb)})
 			return
 		}
@@ -157,6 +158,9 @@ func (p *noder) pragcgo(pos syntax.Pos, text string) {
 // splits before the start and after the end of a double quoted region.
 // pragmaFields does not recognize escaped quotes. If a quote in s is not
 // closed the part after the opening quote will not be returned as a field.
+//
+// 主要是cgo指令中可能有含有空格的参数, 用"abc def"来表示
+// "abc def" abc => ["abc def", "abc"]
 func pragmaFields(s string) []string {
 	var a []string
 	inQuote := false

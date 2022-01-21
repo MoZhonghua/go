@@ -212,7 +212,7 @@ func NewFileBase(filename, absFilename string) *PosBase {
 		col:         1,
 		inl:         -1,
 	}
-	base.pos = MakePos(base, 1, 1)
+	base.pos = MakePos(base, 1, 1) // base.pos.base = base
 	return base
 }
 

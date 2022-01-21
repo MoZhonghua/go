@@ -10,6 +10,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"unicode"
@@ -25,6 +26,29 @@ import (
 	"cmd/internal/src"
 )
 
+/*
+const x int = 100
+	- ir.Name (op=OLITERAL)
+	- Ntype: ir.Ident (op=ONONAME) // 需要之后解析类型变成op=OTYPE
+	- ir.Decl (op=ODCL)
+
+var v int = 100
+	- ir.Name (op=ONAME)
+	- Ntype: ir.Ident (op=ONONAME) // 需要之后解析类型变成op=OTYPE
+	- ir.Decl (op=ODCL)
+	- ir.AssignStmt (op=OAS/OAS2)
+
+type T struct{..}
+ - ir.Name (op=ONAME)
+ - Ntype: ir.StructType (op=OTSTRUCT)
+ - ir.Decl (op=ODCLTYPE)
+
+func F() {}
+ - ir.Name (op=ONAME)
+ - Ntype: ir.FuncType (op=OTFUNC)
+ - ir.Func (op=ODCLFUNC)
+*/
+
 func LoadPackage(filenames []string) {
 	base.Timer.Start("fe", "parse")
 
@@ -34,8 +58,7 @@ func LoadPackage(filenames []string) {
 	}
 
 	// Limit the number of simultaneously open files.
-	// sem := make(chan struct{}, runtime.GOMAXPROCS(0)+10)
-	sem := make(chan struct{}, 1)
+	sem := make(chan struct{}, runtime.GOMAXPROCS(0)+10)
 
 	noders := make([]*noder, len(filenames))
 	for i, filename := range filenames {
@@ -82,7 +105,7 @@ func LoadPackage(filenames []string) {
 	}
 
 	for _, p := range noders {
-		p.node()
+		p.node()     // syntax.Node -> ir.Node
 		p.file = nil // release memory
 	}
 
@@ -96,7 +119,7 @@ func LoadPackage(filenames []string) {
 	}
 
 	// Typecheck.
-	types.LocalPkg.Height = myheight
+	types.LocalPkg.Height = myheight // max(height of imported packages) + 1
 	typecheck.DeclareUniverse()
 	typecheck.TypecheckAllowed = true
 
@@ -170,6 +193,7 @@ func LoadPackage(filenames []string) {
 
 func (p *noder) errorAt(pos syntax.Pos, format string, args ...interface{}) {
 	base.ErrorfAt(p.makeXPos(pos), format, args...)
+	base.FlushErrors()
 }
 
 // TODO(gri) Can we eliminate fileh in favor of absFilename?
@@ -181,16 +205,16 @@ func absFilename(name string) string {
 	return objabi.AbsFile(base.Ctxt.Pathname, name, base.Flag.TrimPath)
 }
 
-// noder transforms package syntax's AST into a Node tree.
+// noder transforms package syntax's AST into a Node tree. (syntax.Node -> ir.Node)
 type noder struct {
 	posMap
 
 	file           *syntax.File
 	linknames      []linkname
-	pragcgobuf     [][]string
+	pragcgobuf     [][]string // cgo指令列表, 每条指令对应一个[]string, 已经拆分为field
 	err            chan syntax.Error
-	importedUnsafe bool
-	importedEmbed  bool
+	importedUnsafe bool // 当前文件是否import "unsafe"
+	importedEmbed  bool // 当前文件是否import "embed"
 	trackScopes    bool
 
 	funcState *funcState
@@ -274,9 +298,11 @@ func (p *noder) node() {
 	p.importedUnsafe = false
 	p.importedEmbed = false
 
-	p.setlineno(p.file.PkgName)
-	mkpackage(p.file.PkgName.Value)
+	p.setlineno(p.file.PkgName)     // 更新base.Pos
+	mkpackage(p.file.PkgName.Value) // 设置types.LocalPkg.Name
 
+	// 在syntax解析过程中会不断takePragma()并绑定到syntax.Node上
+	// p.file.Pragma就是在package abc之前的pragma，只能是//go:build或者// +build
 	if pragma, ok := p.file.Pragma.(*pragmas); ok {
 		pragma.Flag &^= ir.GoBuildPragma
 		p.checkUnused(pragma)
@@ -338,11 +364,19 @@ func (p *noder) decls(decls []syntax.Decl) (l []ir.Node) {
 	return
 }
 
+// syntax.ImportDecl -> ir.PkgName + syntax.Sym; Sym.Def=PkgName, PkgName.Sym=Sym
 func (p *noder) importDecl(imp *syntax.ImportDecl) {
 	if imp.Path == nil || imp.Path.Bad {
 		return // avoid follow-on errors if there was a syntax error
 	}
 
+	// import不能有pragma，注意如果是一个非法名字反而不报错
+	//
+	/*
+		//go:noinline // error: misplaced compiler directive
+		//go:badname  // ok!
+		import "fmt"
+	*/
 	if pragma, ok := imp.Pragma.(*pragmas); ok {
 		p.checkUnused(pragma)
 	}
@@ -364,6 +398,7 @@ func (p *noder) importDecl(imp *syntax.ImportDecl) {
 
 	var my *types.Sym
 	if imp.LocalPkgName != nil {
+		// 好像没区别，都是在typecheck.LocalPkg.Syms中创建一项 ??
 		my = p.name(imp.LocalPkgName)
 	} else {
 		my = typecheck.Lookup(ipkg.Name)
@@ -389,12 +424,17 @@ func (p *noder) importDecl(imp *syntax.ImportDecl) {
 	my.Block = 1 // at top level
 }
 
+// 返回[]*ir.Decl
 func (p *noder) varDecl(decl *syntax.VarDecl) []ir.Node {
-	names := p.declNames(ir.ONAME, decl.NameList)
+	names := p.declNames(ir.ONAME, decl.NameList) // []*ir.Name with op=ONAME, 同时创建syntax.Sym
 	typ := p.typeExprOrNil(decl.Type)
 	exprs := p.exprList(decl.Values)
 
 	if pragma, ok := decl.Pragma.(*pragmas); ok {
+		/*
+			//go:embed xxx.txt
+			var content []byte
+		*/
 		varEmbed(p.makeXPos, names[0], decl, pragma, p.importedEmbed)
 		p.checkUnused(pragma)
 	}
@@ -402,7 +442,9 @@ func (p *noder) varDecl(decl *syntax.VarDecl) []ir.Node {
 	var init []ir.Node
 	p.setlineno(decl)
 
+	// var x, y int = dimension2d()
 	if len(names) > 1 && len(exprs) == 1 {
+		// 拆分为: var x int; var y int; x, y = dimension2d()
 		as2 := ir.NewAssignListStmt(base.Pos, ir.OAS2, nil, exprs)
 		for _, v := range names {
 			as2.Lhs.Append(v)
@@ -410,13 +452,15 @@ func (p *noder) varDecl(decl *syntax.VarDecl) []ir.Node {
 			v.Ntype = typ
 			v.Defn = as2
 			if ir.CurFunc != nil {
+				// 注意仅当在函数中会添加var x int。全局变量不会添加
 				init = append(init, ir.NewDecl(base.Pos, ir.ODCL, v))
 			}
 		}
-
-		return append(init, as2)
+		init = append(init, as2)
+		return init
 	}
 
+	// var x, y int = 1, 2
 	for i, v := range names {
 		var e ir.Node
 		if i < len(exprs) {
@@ -430,6 +474,7 @@ func (p *noder) varDecl(decl *syntax.VarDecl) []ir.Node {
 			init = append(init, ir.NewDecl(base.Pos, ir.ODCL, v))
 		}
 		as := ir.NewAssignStmt(base.Pos, v, e)
+		// 拆分为单个变量赋值
 		init = append(init, as)
 		if e != nil || ir.CurFunc == nil {
 			v.Defn = as
@@ -453,6 +498,14 @@ type constState struct {
 	iota   int64
 }
 
+/*
+const (
+	x = iota
+	y
+)
+*/
+// 会拆分为两个syntax.ConstDecl，但是Group是同一个;
+// 返回[]*ir.Decl
 func (p *noder) constDecl(decl *syntax.ConstDecl, cs *constState) []ir.Node {
 	if decl.Group == nil || decl.Group != cs.group {
 		*cs = constState{
@@ -464,7 +517,7 @@ func (p *noder) constDecl(decl *syntax.ConstDecl, cs *constState) []ir.Node {
 		p.checkUnused(pragma)
 	}
 
-	names := p.declNames(ir.OLITERAL, decl.NameList)
+	names := p.declNames(ir.OLITERAL, decl.NameList) // []*ir.Name op=OLITERAL
 	typ := p.typeExprOrNil(decl.Type)
 
 	var values []ir.Node
@@ -475,6 +528,13 @@ func (p *noder) constDecl(decl *syntax.ConstDecl, cs *constState) []ir.Node {
 		if typ != nil {
 			base.Errorf("const declaration cannot have type without expression")
 		}
+		// 用前一个const var的变量和值
+		/*
+			const (
+				x = 10
+				y // y = 10
+			)
+		*/
 		typ, values = cs.typ, cs.values
 	}
 
@@ -511,6 +571,9 @@ func (p *noder) typeDecl(decl *syntax.TypeDecl) ir.Node {
 	typecheck.Declare(n, typecheck.DeclContext)
 
 	// decl.Type may be nil but in that case we got a syntax error during parsing
+	//
+	// struct{...} => *ir.StructType op = OTSTRUCT
+	// 注意和syntax.Types=TSTRUCT不是一个
 	typ := p.typeExprOrNil(decl.Type)
 
 	n.Ntype = typ
@@ -538,18 +601,21 @@ func (p *noder) declNames(op ir.Op, names []*syntax.Name) []*ir.Name {
 	return nodes
 }
 
+// - lookup/create syntax.Sym in types.LocalPkg
+// - create *ir.Name with op = op
+// - Name.sym = Sym
 func (p *noder) declName(op ir.Op, name *syntax.Name) *ir.Name {
 	return ir.NewDeclNameAt(p.pos(name), op, p.name(name))
 }
 
 func (p *noder) funcDecl(fun *syntax.FuncDecl) ir.Node {
 	name := p.name(fun.Name)
-	t := p.signature(fun.Recv, fun.Type)
-	f := ir.NewFunc(p.pos(fun))
+	t := p.signature(fun.Recv, fun.Type) // *ir.FuncType(op=OTFUNC)
+	f := ir.NewFunc(p.pos(fun))          // *ir.Func(op=ODCLFUNC)
 
 	if fun.Recv == nil {
 		if name.Name == "init" {
-			name = renameinit()
+			name = renameinit() // init.NNN
 			if len(t.Params) > 0 || len(t.Results) > 0 {
 				base.ErrorfAt(f.Pos(), "func init must have no arguments and no return values")
 			}
@@ -683,16 +749,17 @@ func (p *noder) expr(expr syntax.Expr) ir.Node {
 	case nil, *syntax.BadExpr:
 		return nil
 	case *syntax.Name:
-		return p.mkname(expr)
+		n := p.mkname(expr)  // ir.Ident(op=ONONAME), ir.Name(op=ONAME/OTYPE/OLITERAL)
+		return n
 	case *syntax.BasicLit:
-		n := ir.NewBasicLit(p.pos(expr), p.basicLit(expr))
+		n := ir.NewBasicLit(p.pos(expr), p.basicLit(expr)) // *ir.BasicLit(op=OLITERAL)
 		if expr.Kind == syntax.RuneLit {
 			n.SetType(types.UntypedRune)
 		}
 		n.SetDiag(expr.Bad || n.Val().Kind() == constant.Unknown) // avoid follow-on errors if there was a syntax error
 		return n
 	case *syntax.CompositeLit:
-		n := ir.NewCompLitExpr(p.pos(expr), ir.OCOMPLIT, p.typeExpr(expr.Type), nil)
+		n := ir.NewCompLitExpr(p.pos(expr), ir.OCOMPLIT, p.typeExpr(expr.Type), nil) // *ir.CompositeLit(op=OCOMPLIT)
 		l := p.exprs(expr.ElemList)
 		for i, e := range l {
 			l[i] = p.wrapname(expr.ElemList[i], e)
@@ -707,14 +774,15 @@ func (p *noder) expr(expr syntax.Expr) ir.Node {
 		return p.funcLit(expr)
 	case *syntax.ParenExpr:
 		return ir.NewParenExpr(p.pos(expr), p.expr(expr.X))
-	case *syntax.SelectorExpr:
+	case *syntax.SelectorExpr: // X.Sel
 		// parser.new_dotname
 		obj := p.expr(expr.X)
-		if obj.Op() == ir.OPACK {
+		if obj.Op() == ir.OPACK { // fmt.Printf: fmt=>syntax.Name=>Sym.Def=>ir.PkgName(op=OPACK)
 			pack := obj.(*ir.PkgName)
 			pack.Used = true
 			return importName(pack.Pkg.Lookup(expr.Sel.Value))
 		}
+		// OXDOT: 还不确定是字段、函数调用等
 		n := ir.NewSelectorExpr(base.Pos, ir.OXDOT, obj, p.name(expr.Sel))
 		n.SetPos(p.pos(expr)) // lineno may have been changed by p.expr(expr.X)
 		return n
@@ -737,6 +805,7 @@ func (p *noder) expr(expr syntax.Expr) ir.Node {
 		return ir.NewTypeAssertExpr(p.pos(expr), p.expr(expr.X), p.typeExpr(expr.Type))
 	case *syntax.Operation:
 		if expr.Op == syntax.Add && expr.Y != nil {
+			// 特殊处理: 比如n个字符串相加, 因为数量可能很对(比如自动生成的代码), 直接递归有效率问题
 			return p.sum(expr)
 		}
 		x := p.expr(expr.X)
@@ -803,6 +872,8 @@ func (p *noder) expr(expr syntax.Expr) ir.Node {
 // sum efficiently handles very large summation expressions (such as
 // in issue #16394). In particular, it avoids left recursion and
 // collapses string literals.
+//
+// 把多个字符串常量相加合并为单个字符串常量: x+"a"+"b"+"c"+y => x+"abc"+y
 func (p *noder) sum(x syntax.Expr) ir.Node {
 	// While we need to handle long sums with asymptotic
 	// efficiency, the vast majority of sums are very small: ~95%
@@ -816,6 +887,8 @@ func (p *noder) sum(x syntax.Expr) ir.Node {
 			break
 		}
 		adds = append(adds, add)
+
+		// a+b+c: X=a+b, Y=c
 		x = add.X
 	}
 
@@ -910,7 +983,7 @@ func (p *noder) structType(expr *syntax.StructType) ir.Node {
 		p.setlineno(field)
 		var n *ir.Field
 		if field.Name == nil {
-			n = p.embedded(field.Type)
+			n = p.embedded(field.Type) // *ir.Field
 		} else {
 			n = ir.NewField(p.pos(field), p.name(field.Name), p.typeExpr(field.Type), nil)
 		}
@@ -930,8 +1003,10 @@ func (p *noder) interfaceType(expr *syntax.InterfaceType) ir.Node {
 		p.setlineno(method)
 		var n *ir.Field
 		if method.Name == nil {
+			// type I1 interface { I2 }
 			n = ir.NewField(p.pos(method), nil, importName(p.packname(method.Type)).(ir.Ntype), nil)
 		} else {
+			// type I1 interface { nop() }
 			mname := p.name(method.Name)
 			if mname.IsBlank() {
 				base.Errorf("methods must have a unique non-blank name")
@@ -971,6 +1046,7 @@ func (p *noder) packname(expr syntax.Expr) *types.Sym {
 			def.Used = true
 			pkg = def.Pkg
 		}
+		// 同样注意所有Sym都在Pkg.Syms中，但是根据scope, sym.Def不同
 		return pkg.Lookup(expr.Sel.Value)
 	}
 	panic(fmt.Sprintf("unexpected packname: %#v", expr))
@@ -999,6 +1075,9 @@ func (p *noder) stmts(stmts []syntax.Stmt) []ir.Node {
 	return p.stmtsFall(stmts, false)
 }
 
+// fallOK: 是否可以是fallthrough语句
+//   - 最后一个case不能有fallthrough
+//   - fallthrough必须是case的stmt列表中最后一条语句
 func (p *noder) stmtsFall(stmts []syntax.Stmt, fallOK bool) []ir.Node {
 	var nodes []ir.Node
 	for i, stmt := range stmts {
@@ -1007,6 +1086,8 @@ func (p *noder) stmtsFall(stmts []syntax.Stmt, fallOK bool) []ir.Node {
 		} else if s.Op() == ir.OBLOCK && len(s.(*ir.BlockStmt).List) > 0 {
 			// Inline non-empty block.
 			// Empty blocks must be preserved for CheckReturn.
+			//
+			// 为什么要这么做???
 			nodes = append(nodes, s.(*ir.BlockStmt).List...)
 		} else {
 			nodes = append(nodes, s)
@@ -1041,6 +1122,7 @@ func (p *noder) stmtFall(stmt syntax.Stmt, fallOK bool) ir.Node {
 		return ir.NewBlockStmt(src.NoXPos, p.decls(stmt.DeclList))
 	case *syntax.AssignStmt:
 		if stmt.Rhs == nil {
+			// x++
 			pos := p.pos(stmt)
 			n := ir.NewAssignOpStmt(pos, p.binOp(stmt.Op), p.expr(stmt.Lhs), ir.NewBasicLit(pos, one))
 			n.IncDec = true
@@ -1048,12 +1130,14 @@ func (p *noder) stmtFall(stmt syntax.Stmt, fallOK bool) ir.Node {
 		}
 
 		if stmt.Op != 0 && stmt.Op != syntax.Def {
+			// x += 10, 关键在于lhs, rhs都是一个expr，不会是列表
 			n := ir.NewAssignOpStmt(p.pos(stmt), p.binOp(stmt.Op), p.expr(stmt.Lhs), p.expr(stmt.Rhs))
 			return n
 		}
 
 		rhs := p.exprList(stmt.Rhs)
 		if list, ok := stmt.Lhs.(*syntax.ListExpr); ok && len(list.ElemList) != 1 || len(rhs) != 1 {
+			// x, y := 1, 2
 			n := ir.NewAssignListStmt(p.pos(stmt), ir.OAS2, nil, nil)
 			n.Def = stmt.Op == syntax.Def
 			n.Lhs = p.assignList(stmt.Lhs, n, n.Def)
@@ -1089,7 +1173,7 @@ func (p *noder) stmtFall(stmt syntax.Stmt, fallOK bool) ir.Node {
 			sym = p.name(stmt.Label)
 		}
 		return ir.NewBranchStmt(p.pos(stmt), op, sym)
-	case *syntax.CallStmt:
+	case *syntax.CallStmt: // stmt和expr不同，普通函数调用是*CallExpr
 		var op ir.Op
 		switch stmt.Tok {
 		case syntax.Defer:
@@ -1326,6 +1410,8 @@ func (p *noder) commClauses(clauses []*syntax.CommClause, rbrace syntax.Pos) []*
 	return nodes
 }
 
+// Label: for { }
+// 注意只处理了"Label: for"，后面的{}没处理
 func (p *noder) labeledStmt(label *syntax.LabeledStmt, fallOK bool) ir.Node {
 	sym := p.name(label.Label)
 	lhs := ir.NewLabelStmt(p.pos(label), sym)
@@ -1488,8 +1574,24 @@ var tokenForLitKind = [...]token.Token{
 	syntax.StringLit: token.STRING,
 }
 
+// 在types.LocalPkg中查找或者创建Sym
+/*
+var x int
+func main() {
+	var x int
+}
+*/
+// 返回的是同一个Sym实例, 在types/scope.go中会维护栈，同名虽然指向
+// 同一个*Sym，但是Sym.Def/Sym.Block/Sym.Lastlineno字段不同.
+//
+// 在一个block/scope中声明同名Sym时，把原来的sym.Def压栈，替换为当前Def，
+// block/scope结束后把sym.Def还原为原来值
+//
+// 不是用每个Scope用不同*Sym的方式，但是最终结果是一样的
 func (p *noder) name(name *syntax.Name) *types.Sym {
-	return typecheck.Lookup(name.Value)
+	sym := typecheck.Lookup(name.Value)
+	// fmt.Printf("lookup/create sym: %p; name=%v; pkg=%v; pkgpath=%v\n", sym, sym.Name, sym.Pkg.Name, sym.Pkg.Path)
+	return sym
 }
 
 func (p *noder) mkname(name *syntax.Name) ir.Node {
@@ -1545,7 +1647,7 @@ type pragmas struct {
 	Embeds []pragmaEmbed
 }
 
-type pragmaPos struct {
+type pragmaPos struct { // 怎么读取对应的指令内容??
 	Flag ir.PragmaFlag
 	Pos  syntax.Pos
 }
@@ -1557,6 +1659,7 @@ type pragmaEmbed struct {
 
 func (p *noder) checkUnused(pragma *pragmas) {
 	for _, pos := range pragma.Pos {
+		///go:badname  因为没有设置pos.Flag，反而不报错！
 		if pos.Flag&pragma.Flag != 0 {
 			p.errorAt(pos.Pos, "misplaced compiler directive")
 		}
@@ -1582,6 +1685,8 @@ func (p *noder) checkUnusedDuringParse(pragma *pragmas) {
 }
 
 // pragma is called concurrently if files are parsed concurrently.
+//
+// syntax.Parse()遇到//go:xxxx 回调这个函数
 func (p *noder) pragma(pos syntax.Pos, blankLine bool, text string, old syntax.Pragma) syntax.Pragma {
 	pragma, _ := old.(*pragmas)
 	if pragma == nil {
@@ -1677,6 +1782,7 @@ func (p *noder) pragma(pos syntax.Pos, blankLine bool, text string, old syntax.P
 		if flag == 0 && !allowedStdPragmas[verb] && base.Flag.Std {
 			p.error(syntax.Error{Pos: pos, Msg: fmt.Sprintf("//%s is not allowed in the standard library", verb)})
 		}
+
 		pragma.Flag |= flag
 		pragma.Pos = append(pragma.Pos, pragmaPos{flag, pos})
 	}
@@ -1707,7 +1813,8 @@ func safeArg(name string) bool {
 }
 
 func mkname(sym *types.Sym) ir.Node {
-	n := oldname(sym)
+	n := oldname(sym) // Sym.Def -> ir.Node
+
 	if n.Name() != nil && n.Name().PkgName != nil {
 		n.Name().PkgName.Used = true
 	}
@@ -1816,9 +1923,11 @@ func renameinit() *types.Sym {
 // If no such Node currently exists, an ONONAME Node is returned instead.
 // Automatically creates a new closure variable if the referenced symbol was
 // declared in a different (containing) function.
+//
+// 返回s.Def对应的ir.Node
 func oldname(s *types.Sym) ir.Node {
 	if s.Pkg != types.LocalPkg {
-		return ir.NewIdent(base.Pos, s)
+		return ir.NewIdent(base.Pos, s) // *ir.Ident(op=ONONAME)
 	}
 
 	n := ir.AsNode(s.Def)
@@ -1877,4 +1986,35 @@ func varEmbed(makeXPos func(syntax.Pos) src.XPos, name *ir.Name, decl *syntax.Va
 	}
 	typecheck.Target.Embeds = append(typecheck.Target.Embeds, name)
 	name.Embed = &embeds
+}
+
+func dumpIRNode(prefix string, n ir.Node) {
+	if n := len(prefix); n > 0 && prefix[n-1] != ':' {
+		prefix += ": "
+	}
+	fmt.Printf("%s%T; op=O%v", prefix, n, n.Op())
+
+	if sym := n.Sym(); sym != nil {
+		fmt.Printf("; sym=%v", sym.Name)
+	}
+	if typ := n.Type(); typ != nil {
+		fmt.Printf("; type=%v", typ)
+	}
+
+	if name := n.Name(); name != nil && name.Ntype != nil{
+		fmt.Printf("; Ntype=%v", name.Ntype)
+	}
+
+	fmt.Printf("\n")
+}
+
+func mark(v ...interface{}) {
+	fmt.Print("---------------------")
+	for i, x := range v {
+		if i > 1 {
+			fmt.Print(" ")
+		}
+		fmt.Printf("%v", x)
+	}
+	fmt.Println()
 }

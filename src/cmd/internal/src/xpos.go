@@ -8,7 +8,9 @@
 package src
 
 // XPos is a more compact representation of Pos.
-type XPos struct {
+//
+// 和Pos的就是把Pos.base统一存储，XPos指用一个index来指代对应的base
+type XPos struct { // XPos 8字节，Pos要12字节且是8字节对齐，实际可能16字节
 	index int32
 	lico
 }

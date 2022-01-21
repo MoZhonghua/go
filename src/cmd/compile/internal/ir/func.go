@@ -69,6 +69,8 @@ type Func struct {
 	// However, as anonymous or blank PPARAMs are not actually declared,
 	// they are omitted from Dcl.
 	// Anonymous and blank PPARAMOUTs are declared as ~rNN and ~bNN Names, respectively.
+	//
+	// 注意是函数中所有scope中的，func x() { for { var z int } }: z也会记录在这里
 	Dcl []*Name
 
 	// ClosureVars lists the free variables that are used within a

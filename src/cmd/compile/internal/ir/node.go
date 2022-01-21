@@ -47,7 +47,7 @@ type Node interface {
 	Esc() uint16
 	SetEsc(x uint16)
 	Diag() bool
-	SetDiag(x bool)
+	SetDiag(x bool) // x=true说明这个Node有问题
 
 	// Typecheck values:
 	//  0 means the node is not typechecked

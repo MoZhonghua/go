@@ -45,7 +45,7 @@ func (m *posMap) makeSrcPosBase(b0 *syntax.PosBase) *src.PosBase {
 	b1, ok := m.bases[b0]
 	if !ok {
 		fn := b0.Filename()
-		if b0.IsFileBase() {
+		if b0.IsFileBase() { // 指每个.go文件开始时创建的PosBase，特殊之处在于PosBase.pos.base指向自己
 			b1 = src.NewFileBase(fn, absFilename(fn))
 		} else {
 			// line directive base
