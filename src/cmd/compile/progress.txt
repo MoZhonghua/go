@@ -111,6 +111,7 @@ internal/noder/lex.go
 2022-01-21
 internal/noder/noder.go
 internal/noder/import.go *
+internal/noder/sizes.go
 
 internal/noder/stmt.go
 internal/noder/scopes.go
@@ -123,7 +124,6 @@ internal/noder/irgen.go
 internal/noder/func.go
 internal/noder/object.go
 internal/noder/types.go
-internal/noder/sizes.go
 internal/noder/transform.go
 
 
