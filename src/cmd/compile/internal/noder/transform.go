@@ -27,10 +27,18 @@ import (
 	"go/constant"
 )
 
+// Typecheck values:
+//  0 means the node is not typechecked
+//  1 means the node is completely typechecked
+//  2 means typechecking of the node is in progress
+//  3 means the node has its type from types2, but may need transformation
+
 // Transformation functions for expressions
 
 // transformAdd transforms an addition operation (currently just addition of
 // strings). Corresponds to the "binary operators" case in typecheck.typecheck1.
+//
+// BinaryExpr(Expr1 + Expr2) => AddStringExpr([Expr1, Expr2])
 func transformAdd(n *ir.BinaryExpr) ir.Node {
 	assert(n.Type() != nil && n.Typecheck() == 1)
 	l := n.X
@@ -104,6 +112,7 @@ func transformConv(n *ir.ConvExpr) ir.Node {
 		// ok
 
 	case ir.OSTR2RUNES:
+		// []rune("abc") => []rune{'a', 'b', 'c'}
 		if n.X.Op() == ir.OLITERAL {
 			return stringtoruneslit(n)
 		}

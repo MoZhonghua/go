@@ -176,6 +176,8 @@ func resolveImportPath(path string) (string, error) {
 }
 
 // TODO(mdempsky): Return an error instead.
+//
+// typecheck1导入走这个流程，types2走gcimports流程
 func importfile(decl *syntax.ImportDecl) *types.Pkg {
 	if decl.Path.Kind != syntax.StringLit {
 		base.Errorf("import path must be a string")
@@ -211,6 +213,8 @@ func importfile(decl *syntax.ImportDecl) *types.Pkg {
 	}
 
 	f, err := openPackage(path)
+
+	fmt.Printf("import package: %v => %v\n", path, f.Name())
 	if err != nil {
 		base.Errorf("could not import %q: %v", path, err)
 		base.ErrorExit()

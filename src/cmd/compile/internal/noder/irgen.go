@@ -126,6 +126,7 @@ Outer:
 		for j, decl := range p.file.DeclList {
 			switch decl := decl.(type) {
 			case *syntax.ImportDecl:
+				// types2中gcimports已经导入了一次；重新用typecheck1流程重新导入一次
 				g.importDecl(p, decl)
 			default:
 				declLists[i] = p.file.DeclList[j:]
@@ -154,6 +155,8 @@ Outer:
 			}
 		}
 	}
+	// 类型都看到了，可以计算所有类型的完整信息: 顺序不重要，因为会递归处理
+	// 如果全部都可见那么一定能获得完整
 	types.ResumeCheckSize()
 
 	// 3. Process all remaining declarations.

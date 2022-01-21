@@ -142,7 +142,7 @@ func (g *irgen) stencil() {
 // instantiateMethods instantiates all the methods of all fully-instantiated
 // generic types that have been added to g.instTypeList.
 func (g *irgen) instantiateMethods() {
-	for i := 0; i < len(g.instTypeList); i++ {
+	for i := 0; i < len(g.instTypeList); i++ { // 不能用range，因此可能增长?
 		typ := g.instTypeList[i]
 		// Get the base generic type by looking up the symbol of the
 		// generic (uninstantiated) name.
