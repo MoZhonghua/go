@@ -220,6 +220,12 @@ import (
 	"cmd/internal/src"
 )
 
+/*
+导出的信息一定是和Exported Symbol绑定的，因此type T struct { ...}
+
+导出的入口为Sym(T) => ir.Node(*ir.Named) => *ir.Named(op=OTYPE)
+*/
+
 // Current indexed export format version. Increase with each format change.
 // 1: added column details to Pos
 // 0: Go1.11 encoding
@@ -415,10 +421,12 @@ func (p *iexporter) pushDecl(n *ir.Name) {
 	}
 
 	p.declIndex[n.Sym()] = ^uint64(0) // mark n present in work queue
-	p.declTodo.PushRight(n)
+	p.declTodo.PushRight(n) // queue，PushRight + PopLeft
 }
 
 // exportWriter handles writing out individual data section chunks.
+//
+// writeXxxx是写入自己的缓存data, flush()时再写入到iexporter.data0
 type exportWriter struct {
 	p *iexporter
 
@@ -437,6 +445,8 @@ type exportWriter struct {
 	maxClosureVarIndex int
 }
 
+// 注意这里不需要写入n.Sym().Name，只需要写入n数据并记录off，name->off
+// 是写入到MainIndex中的
 func (p *iexporter) doDecl(n *ir.Name) {
 	w := p.newWriter()
 	w.setPkg(n.Sym().Pkg, false)
@@ -501,6 +511,11 @@ func (p *iexporter) doDecl(n *ir.Name) {
 			// for predeclared objects).
 			underlying = types.ErrorType
 		}
+		// 注意这里的分块逻辑:
+		//  - w.typ()是在w的内部缓存写入underlying.off
+		//  - underlying本身是在一个独立缓存写入然后一次性写入data0，并返回在data0的off
+		//  - 写入underlying时本身可能会有递归，也是这样的逻辑
+		// 关键在于每个对象都是在自己独立缓存写入，完整之后一次性写入data0并返回off
 		w.typ(underlying)
 
 		t := n.Type()
@@ -1209,6 +1224,7 @@ func (w *exportWriter) linkname(s *types.Sym) {
 }
 
 func (w *exportWriter) symIdx(s *types.Sym) {
+	// 在typecheck之后的编译阶段会创建LSym并设置PkgIdx, SymIdx
 	lsym := s.Linksym()
 	if lsym.PkgIdx > goobj.PkgIdxSelf || (lsym.PkgIdx == goobj.PkgIdxInvalid && !lsym.Indexed()) || s.Linkname != "" {
 		// Don't export index for non-package symbols, linkname'd symbols,
@@ -1915,7 +1931,7 @@ func (w *exportWriter) localIdent(s *types.Sym) {
 }
 
 type intWriter struct {
-	bytes.Buffer
+	bytes.Buffer // 注意是嵌入bytes.Buffer，因此实现了io.Reader + io.Writer
 }
 
 func (w *intWriter) int64(x int64) {

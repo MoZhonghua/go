@@ -84,7 +84,7 @@ const (
 	TSTRUCT
 	TCHAN
 	TMAP
-	TINTER // interface
+	TINTER // interface{}
 	TFORW  // forward: type T []int: []int=>SliceType, T->TFORW
 	TANY
 	TSTRING
@@ -94,7 +94,7 @@ const (
 	// pseudo-types for literals
 	TIDEAL // untyped numeric constants
 	TNIL
-	TBLANK // "_" ?
+	TBLANK // "_"
 
 	// pseudo-types for frame layout
 	TFUNCARGS // 特殊处理完之后会按照TFUNC来处理

@@ -47,6 +47,7 @@ func importobj(ipkg *types.Pkg, pos src.XPos, s *types.Sym, op ir.Op, ctxt ir.Cl
 	return n
 }
 
+// 注意仅仅是创建*ir.Name，并设置sym.Def=ir.Name，不是从__PKGDEF读取数据。
 func importsym(ipkg *types.Pkg, pos src.XPos, s *types.Sym, op ir.Op, ctxt ir.Class) *ir.Name {
 	if n := s.PkgDef(); n != nil {
 		base.Fatalf("importsym of symbol that already exists: %v", n)
@@ -54,7 +55,7 @@ func importsym(ipkg *types.Pkg, pos src.XPos, s *types.Sym, op ir.Op, ctxt ir.Cl
 
 	n := ir.NewDeclNameAt(pos, op, s)
 	n.Class = ctxt // TODO(mdempsky): Move this into NewDeclNameAt too?
-	s.SetPkgDef(n)
+	s.SetPkgDef(n) // 同一个Sym在不同scope中对应不同的Def，需要设置这个Sym在package scope中对应Def
 	return n
 }
 

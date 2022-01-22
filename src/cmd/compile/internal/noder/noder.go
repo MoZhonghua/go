@@ -49,6 +49,15 @@ func F() {}
  - ir.Func (op=ODCLFUNC)
 */
 
+/*
+先把syntax.Node -> ir.Node，在这个过程中会调用typecheck.Declare()，检查重复定义
+
+不同scope查找的问题只需要在生成ir.Node时处理
+
+typecheck完全基于已经处理好的ir.Node, 不需要查找Sym
+typecheck遇到OTXxxx的ir.Node会创建*types.Type, 同时会ir.Node.SetType()设置各个var/const/typename/expr的类型
+*/
+
 func LoadPackage(filenames []string) {
 	base.Timer.Start("fe", "parse")
 
@@ -118,8 +127,11 @@ func LoadPackage(filenames []string) {
 		p.processPragmas()
 	}
 
+	fmt.Printf("===========typecheck==================\n")
+
 	// Typecheck.
-	types.LocalPkg.Height = myheight // max(height of imported packages) + 1
+	types.LocalPkg.Height = myheight
+	// typecheck.InitUniverse()在gc/main.go中已经调用
 	typecheck.DeclareUniverse()
 	typecheck.TypecheckAllowed = true
 
@@ -780,7 +792,10 @@ func (p *noder) expr(expr syntax.Expr) ir.Node {
 		if obj.Op() == ir.OPACK { // fmt.Printf: fmt=>syntax.Name=>Sym.Def=>ir.PkgName(op=OPACK)
 			pack := obj.(*ir.PkgName)
 			pack.Used = true
-			return importName(pack.Pkg.Lookup(expr.Sel.Value))
+
+			// fmt.Printf: Sym.Name="Printf", Sym.Pkg="fmt"
+			n := importName(pack.Pkg.Lookup(expr.Sel.Value))
+			return n
 		}
 		// OXDOT: 还不确定是字段、函数调用等
 		n := ir.NewSelectorExpr(base.Pos, ir.OXDOT, obj, p.name(expr.Sel))
@@ -1115,7 +1130,8 @@ func (p *noder) stmtFall(stmt syntax.Stmt, fallOK bool) ir.Node {
 		}
 		return ir.NewBlockStmt(src.NoXPos, l)
 	case *syntax.ExprStmt:
-		return p.wrapname(stmt, p.expr(stmt.X))
+		expr := p.expr(stmt.X)
+		return p.wrapname(stmt, expr)
 	case *syntax.SendStmt:
 		return ir.NewSendStmt(p.pos(stmt), p.expr(stmt.Chan), p.expr(stmt.Value))
 	case *syntax.DeclStmt:
@@ -1992,10 +2008,10 @@ func dumpIRNode(prefix string, n ir.Node) {
 	if n := len(prefix); n > 0 && prefix[n-1] != ':' {
 		prefix += ": "
 	}
-	fmt.Printf("%s%T; op=O%v", prefix, n, n.Op())
+	fmt.Printf("%s%T; op=%v(%d)", prefix, n, n.Op(), int(n.Op()))
 
 	if sym := n.Sym(); sym != nil {
-		fmt.Printf("; sym=%v", sym.Name)
+		fmt.Printf("; sym=%v(pkg=%v)", sym.Name, sym.Pkg.Path)
 	}
 	if typ := n.Type(); typ != nil {
 		fmt.Printf("; type=%v", typ)

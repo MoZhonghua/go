@@ -131,7 +131,7 @@ func openPackage(path string) (*os.File, error) {
 
 // myheight tracks the local package's height based on packages
 // imported so far.
-var myheight int
+var myheight int  // max(height of imported packages) + 1
 
 // resolveImportPath resolves an import path as it appears in a Go
 // source file to the package's full path.
@@ -214,7 +214,6 @@ func importfile(decl *syntax.ImportDecl) *types.Pkg {
 
 	f, err := openPackage(path)
 
-	fmt.Printf("import package: %v => %v\n", path, f.Name())
 	if err != nil {
 		base.Errorf("could not import %q: %v", path, err)
 		base.ErrorExit()
@@ -248,6 +247,7 @@ func importfile(decl *syntax.ImportDecl) *types.Pkg {
 		base.Errorf("import %s: not a go object file: %s", file, p)
 		base.ErrorExit()
 	}
+	// go object linux amd64 go1.17.2 X:regabiwrappers,regabig,regabireflect,regabidefer,regabiargs
 	q := objabi.HeaderString()
 	if p != q {
 		base.Errorf("import %s: object is [%s] expected [%s]", file, p, q)
@@ -294,7 +294,7 @@ func importfile(decl *syntax.ImportDecl) *types.Pkg {
 		base.Errorf("cannot import %s: old export format no longer supported (recompile library)", path)
 		return nil
 
-	case 'B':
+	case 'B': // $$B\n
 		if base.Debug.Export != 0 {
 			fmt.Printf("importing %s (%s)\n", path, file)
 		}

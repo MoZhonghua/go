@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"go/constant"
 	"go/token"
+	godebug "runtime/debug"
 	"strings"
 
 	"cmd/compile/internal/base"
@@ -2270,4 +2271,8 @@ func ConvNop(n ir.Node, t *types.Type) ir.Node {
 	n.SetType(t)
 	n = Expr(n)
 	return n
+}
+
+func callstack() {
+	godebug.PrintStack()
 }

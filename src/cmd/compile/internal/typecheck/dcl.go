@@ -330,6 +330,7 @@ type funcStackEnt struct {
 
 func funcarg(n *ir.Field, ctxt ir.Class) {
 	if n.Sym == nil {
+		// func x(int) {}: unamed arg
 		return
 	}
 
@@ -481,4 +482,15 @@ func NewMethodType(sig *types.Type, recv *types.Type) *types.Type {
 	}
 
 	return types.NewSignature(types.LocalPkg, nil, nil, params, results)
+}
+
+func mark(v ...interface{}) {
+	fmt.Print("---------------------")
+	for i, x := range v {
+		if i > 1 {
+			fmt.Print(" ")
+		}
+		fmt.Printf("%v", x)
+	}
+	fmt.Println()
 }

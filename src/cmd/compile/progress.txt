@@ -125,27 +125,27 @@ internal/noder/func.go
 internal/noder/helpers.go
 internal/noder/transform.go
 
-
-internal/typecheck/stmt.go
-internal/typecheck/typecheck.go *
-internal/typecheck/expr.go
-internal/typecheck/type.go
-internal/typecheck/subr.go
 internal/typecheck/target.go
-internal/typecheck/func.go
-internal/typecheck/builtin/runtime.go
-internal/typecheck/iimport.go
-internal/typecheck/mapfile_read.go
-internal/typecheck/const.go
-internal/typecheck/iexport.go
-internal/typecheck/syms.go
-internal/typecheck/export.go
-internal/typecheck/dcl.go
 internal/typecheck/mapfile_mmap.go
+internal/typecheck/mapfile_read.go
+internal/typecheck/bexport.go
+internal/typecheck/iimport.go
 internal/typecheck/universe.go
 internal/typecheck/mkbuiltin.go
-internal/typecheck/bexport.go
 internal/typecheck/builtin.go
+internal/typecheck/syms.go
+internal/typecheck/export.go
+internal/typecheck/type.go
+internal/typecheck/dcl.go
+
+2022-01-22
+internal/typecheck/typecheck.go *
+internal/typecheck/stmt.go
+internal/typecheck/expr.go
+internal/typecheck/subr.go
+internal/typecheck/func.go
+internal/typecheck/const.go
+internal/typecheck/iexport.go
 
 TODO
 internal/amd64/ssa.go

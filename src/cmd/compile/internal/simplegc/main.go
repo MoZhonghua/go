@@ -189,6 +189,16 @@ func Main(archInit func(*ssagen.ArchInfo)) {
 
 	// Parse and typecheck input.
 	noder.LoadPackage(flag.Args())
+
+	f, err := os.Create("/tmp/export.bin")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer f.Close()
+
+	buf := bufio.NewWriter(f)
+	typecheck.WriteExports(buf)
+	buf.Flush()
 }
 
 func makePos(b *src.PosBase, line, col uint) src.XPos {

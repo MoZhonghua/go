@@ -15,7 +15,7 @@ import (
 
 var (
 	okfor [ir.OEND][]bool
-	iscmp [ir.OEND]bool
+	iscmp [ir.OEND]bool // 哪些OXxxx是比较操作符
 )
 
 var (
@@ -107,6 +107,7 @@ func InitUniverse() {
 	types.StringSize = types.Rnd(types.SliceLenOffset+int64(types.PtrSize), int64(types.PtrSize))
 
 	for et := types.Kind(0); et < types.NTYPE; et++ {
+		// 下面会对不正确的项单独处理，比如TCHAN -> TPTR
 		types.SimType[et] = et
 	}
 
@@ -153,6 +154,7 @@ func InitUniverse() {
 	s := types.BuiltinPkg.Lookup("error")
 	n := ir.NewDeclNameAt(src.NoXPos, ir.OTYPE, s)
 	types.ErrorType = types.NewNamed(n)
+
 	types.ErrorType.SetUnderlying(makeErrorInterface())
 	n.SetType(types.ErrorType)
 	s.Def = n

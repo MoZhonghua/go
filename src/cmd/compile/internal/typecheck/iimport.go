@@ -55,6 +55,7 @@ func expandDecl(n ir.Node) ir.Node {
 		return n.(*ir.Name)
 	}
 
+	// 注意sym是全名，比如"fmt.Printf"
 	r := importReaderFor(id.Sym(), DeclImporter)
 	if r == nil {
 		// Can happen if user tries to reference an undeclared name.
@@ -117,7 +118,6 @@ func (r *intReader) uint64() uint64 {
 }
 
 func ReadImports(pkg *types.Pkg, in *bio.Reader) (fingerprint goobj.FingerprintType) {
-	fmt.Printf("typecheck.ReadImports: %v\n", pkg.Path)
 	ird := &intReader{in, pkg}
 
 	version := ird.uint64()
@@ -154,11 +154,23 @@ func ReadImports(pkg *types.Pkg, in *bio.Reader) (fingerprint goobj.FingerprintT
 	}
 
 	for i, pt := range predeclared() {
+		// 这些ID是预留的，__PKGDEF中会引用这些ID，因此提前写入，后面引用直接返回types.Type
 		p.typCache[uint64(i)] = pt
 	}
 
 	// Declaration index.
+	// package列表不但包含fmt本身，还有fmt引入的package
 	for nPkgs := ird.uint64(); nPkgs > 0; nPkgs-- {
+		//     MainIndex []struct{
+		//         PkgPath   stringOff
+		//         PkgName   stringOff
+		//         PkgHeight uvarint
+		//
+		//         Decls []struct{
+		//             Name   stringOff
+		//             Offset declOff
+		//         }
+		//     }
 		pkg := p.pkgAt(ird.uint64())
 		pkgName := p.stringAt(ird.uint64())
 		pkgHeight := int(ird.uint64())
@@ -178,6 +190,8 @@ func ReadImports(pkg *types.Pkg, in *bio.Reader) (fingerprint goobj.FingerprintT
 			}
 		}
 
+		// 注意这里是每个Package中的Sym。对于fmt自己是列出所有exported sym，其他package
+		// 只给出fmt真正使用过的Sym
 		for nSyms := ird.uint64(); nSyms > 0; nSyms-- {
 			s := pkg.Lookup(p.stringAt(ird.uint64()))
 			off := ird.uint64()
@@ -309,6 +323,7 @@ func (r *importReader) doDecl(sym *types.Sym) *ir.Name {
 		typ := r.typ()
 		val := r.value(typ)
 
+		// 注意这里就是在内存创建*ir.Name，不是从__PKGDEF读取数据
 		n := importconst(r.p.ipkg, pos, sym, typ, val)
 		r.constExt(n)
 		return n

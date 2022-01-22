@@ -32,6 +32,9 @@ type Sym struct {
 	Linkname string // link name
 
 	Pkg  *Pkg
+
+	// 永远不包括pkg名，比如fmt.Printf => Name="Printf"
+	// 不同pkg中的同名sym是通过Pkg字段来区分，且处于不同Pkg.Syms中
 	Name string // object name
 
 	// Def, Block, and Lastlineno are saved and restored by Pushdcl/Popdcl.

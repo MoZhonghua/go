@@ -7,6 +7,7 @@ import (
 	"cmd/internal/src"
 )
 
+// typeof (runtimeDecls[i].name) == runtimeTypes() [runtimeDecls[i].typ]
 var runtimeDecls = [...]struct {
 	name string
 	tag  int

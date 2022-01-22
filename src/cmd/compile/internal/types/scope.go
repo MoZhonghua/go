@@ -7,12 +7,17 @@ package types
 import (
 	"cmd/compile/internal/base"
 	"cmd/internal/src"
+	"fmt"
+	"strings"
 )
 
 // Declaration stack & operations
 
 var blockgen int32 = 1 // max block number
 var Block int32 = 1    // current block number
+var blockIdent = 0
+
+const debugScope = false
 
 // A dsym stores a symbol's shadowed declaration so that it can be
 // restored once the block scope ends.
@@ -30,6 +35,9 @@ var dclstack []dsym
 // Pushdcl pushes the current declaration for symbol s (if any) so that
 // it can be shadowed by a new declaration within a nested block scope.
 func Pushdcl(s *Sym) {
+	if debugScope {
+		fmt.Printf("%sPushdcl: %v(pkg=%v)\n", strings.Repeat("  ", blockIdent), s.Name, s.Pkg.Path)
+	}
 	dclstack = append(dclstack, dsym{
 		sym:        s,
 		def:        s.Def,
@@ -41,6 +49,9 @@ func Pushdcl(s *Sym) {
 // Popdcl pops the innermost block scope and restores all symbol declarations
 // to their previous state.
 func Popdcl() {
+	if debugScope {
+		fmt.Printf("%sPopdcl\n", strings.Repeat("  ", blockIdent))
+	}
 	for i := len(dclstack); i > 0; i-- {
 		d := &dclstack[i-1]
 		s := d.sym
@@ -48,6 +59,7 @@ func Popdcl() {
 			// pop stack mark
 			Block = d.block
 			dclstack = dclstack[:i-1]
+			blockIdent--
 			return
 		}
 
@@ -65,12 +77,16 @@ func Popdcl() {
 
 // Markdcl records the start of a new block scope for declarations.
 func Markdcl() {
+	if debugScope {
+		fmt.Printf("%sMarkdcl\n", strings.Repeat("  ", blockIdent))
+	}
 	dclstack = append(dclstack, dsym{
 		sym:   nil, // stack mark
 		block: Block,
 	})
 	blockgen++
 	Block = blockgen
+	blockIdent++
 }
 
 // 全部处理完成后不应该有stack mark

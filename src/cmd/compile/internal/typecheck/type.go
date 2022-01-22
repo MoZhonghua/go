@@ -13,6 +13,8 @@ import (
 )
 
 // tcArrayType typechecks an OTARRAY node.
+//
+// op=OTARRAY => op=OTYPE
 func tcArrayType(n *ir.ArrayType) ir.Node {
 	n.Elem = typecheckNtype(n.Elem)
 	if n.Elem.Type() == nil {
