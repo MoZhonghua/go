@@ -141,6 +141,7 @@ var typecheckdefstack []*ir.Name
 // Resolve ONONAME to definition, if any.
 //
 // 最常见的情况是*ir.Ident(op=ONONAME) => *ir.Name(op=ONAME/OTYPE)
+// 特别注意如果是undefined sym会返回n (n.Sym().Def == nil)
 func Resolve(n ir.Node) (res ir.Node) {
 	// ONONAME:
 	// Unnamed arg or return value: f(int, string) (int, error) { etc }
@@ -167,10 +168,6 @@ func Resolve(n ir.Node) (res ir.Node) {
 
 	// case: sym.Pkg == types.LocalPkg
 	r := ir.AsNode(n.Sym().Def)
-	if r == nil {
-		return n
-	}
-
 	if r.Op() == ir.OIOTA {
 		if x := getIotaValue(); x >= 0 {
 			return ir.NewInt(x)
@@ -532,6 +529,8 @@ func typecheck1(n ir.Node, top int) ir.Node {
 
 	// names
 	case ir.ONONAME:
+		// 正确代码不会再出现*ir.Ident(op=ONONAME), 之前调用过n=Resolve(n)
+		// var _ = y; // error: undefined y
 		if !n.Diag() {
 			// Note: adderrorname looks for this string and
 			// adds context about the outer expression
@@ -1076,6 +1075,9 @@ func checksliceconst(lo ir.Node, hi ir.Node) bool {
 
 // The result of implicitstar MUST be assigned back to n, e.g.
 // 	n.Left = implicitstar(n.Left)
+//
+// var x *[3]int; len(x) => len(*x)
+// *ArrayType特别处理
 func implicitstar(n ir.Node) ir.Node {
 	// insert implicit * if needed for fixed array
 	t := n.Type()
@@ -1157,6 +1159,18 @@ func Lookdot1(errnode ir.Node, s *types.Sym, t *types.Type, fs *types.Fields, do
 
 // typecheckMethodExpr checks selector expressions (ODOT) where the
 // base expression is a type expression (OTYPE).
+//
+// Type.Method 注意这里不是函数调用
+/*
+type T int;
+func (t T) nop() {}
+func (t *T) nop2() {}
+var x T; var y *T;  x.nop(); x.nop2(); y.nop(); y.nop2() // all ok
+_ = T.nop     // ok
+_ = (*T).nop  // ok
+_ = T.nop2    // error
+_ = (*T).nop2 // ok
+*/
 func typecheckMethodExpr(n *ir.SelectorExpr) (res ir.Node) {
 	if base.EnableTrace && base.Flag.LowerT {
 		defer tracePrint("typecheckMethodExpr", n)(&res)
@@ -1204,6 +1218,8 @@ func typecheckMethodExpr(n *ir.SelectorExpr) (res ir.Node) {
 		return n
 	}
 
+	// type T struct{}; func (t *T) nop();
+	// var x1 T; x1.nop() // error
 	if !types.IsMethodApplicable(t, m) {
 		base.Errorf("invalid method expression %v (needs pointer receiver: (*%v).%S)", n, t, s)
 		n.SetType(nil)
@@ -1640,6 +1656,8 @@ func typecheckarraylit(elemType *types.Type, bound int64, elts []ir.Node, ctx st
 			r = elt.Value
 		}
 
+		// var x = []T { {v: 100 }}
+		// 注意{v: 100}这个CompLit没有类型信息
 		r = pushtype(r, elemType)
 		r = Expr(r)
 		r = AssignConv(r, elemType, ctx)
@@ -1787,7 +1805,7 @@ func typecheckdeftype(n *ir.Name) {
 	}
 
 	t := types.NewNamed(n)
-	if n.Curfn != nil {
+	if n.Curfn != nil { // 函数中定义的类型，需要处理同名的问题
 		TypeGen++
 		t.Vargen = TypeGen
 	}
@@ -1802,6 +1820,8 @@ func typecheckdeftype(n *ir.Name) {
 
 	types.DeferCheckSize()
 	errorsBefore := base.Errors()
+
+	// type T struct{...}: n=T, n.Ntype=struct{...}
 	n.Ntype = typecheckNtype(n.Ntype)
 	if underlying := n.Ntype.Type(); underlying != nil {
 		// 注意underlying.Underlying()=underlying
@@ -1858,6 +1878,8 @@ func typecheckdef(n *ir.Name) {
 		base.Fatalf("typecheckdef %v", n.Op())
 
 	case ir.OLITERAL:
+		// const x = 100;
+		// var y = x;  node=x
 		if n.Ntype != nil {
 			n.Ntype = typecheckNtype(n.Ntype)
 			n.SetType(n.Ntype.Type())
@@ -1941,7 +1963,6 @@ func typecheckdef(n *ir.Name) {
 				// bother adding to the noise.
 				break
 			}
-
 			base.Fatalf("var without type, init: %v", n.Sym())
 		}
 
@@ -2306,7 +2327,7 @@ func callstack() {
 	godebug.PrintStack()
 }
 
-const tcdebug = true
+const tcdebug = false
 
 func log(format string, args ...interface{}) {
 	if tcdebug {

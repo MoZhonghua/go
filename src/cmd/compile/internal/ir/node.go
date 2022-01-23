@@ -607,7 +607,7 @@ func DumpIRNode(prefix string, n Node) {
 	fmt.Printf("%s%T; op=%v(%d)", prefix, n, n.Op(), int(n.Op()))
 
 	if sym := n.Sym(); sym != nil {
-		fmt.Printf("; sym=%v(pkg=%v)", sym.Name, sym.Pkg.Path)
+		fmt.Printf("; sym=%v(pkg=%v)", sym.Name, sym.Pkg.Name)
 	}
 	if typ := n.Type(); typ != nil {
 		fmt.Printf("; type=%v; kind=%v", typ, typ.Kind())
