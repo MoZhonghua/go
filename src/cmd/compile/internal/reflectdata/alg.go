@@ -328,7 +328,6 @@ func sysClosure(name string) *obj.LSym {
 // geneq returns a symbol which is the closure used to compute
 // equality for two objects of type t.
 func geneq(t *types.Type) *obj.LSym {
-	fmt.Printf("geneq: %v\n", t)
 	switch AlgType(t) { // 如果支持直接比较内存
 	case types.ANOEQ:
 		// The runtime will panic if it tries to compare

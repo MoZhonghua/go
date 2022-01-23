@@ -39,6 +39,8 @@ type Sym struct {
 
 	// Def, Block, and Lastlineno are saved and restored by Pushdcl/Popdcl.
 
+	// 这些字段只在syntax.Node -> ir.Node 和 typecheck 阶段有效，只有没用了
+	//
 	// The unique ONAME, OTYPE, OPACK, or OLITERAL node that this symbol is
 	// bound to within the current scope. (Most parts of the compiler should
 	// prefer passing the Node directly, rather than relying on this field.)

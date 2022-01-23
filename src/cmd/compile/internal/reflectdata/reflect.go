@@ -28,6 +28,15 @@ import (
 	"cmd/internal/src"
 )
 
+/*
+type runtime.itab struct {
+	inter *interfacetype
+	_type *_type
+	hash  uint32 // copy of _type.hash. Used for type switches.
+	_     [4]byte
+	fun   [1]uintptr // variable sized. fun[0]==0 means _type does not implement inter.
+}
+*/
 type itabEntry struct {
 	t, itype *types.Type
 	lsym     *obj.LSym // symbol of the itab itself
@@ -38,7 +47,7 @@ type itabEntry struct {
 	entries []*obj.LSym
 }
 
-type ptabEntry struct {
+type ptabEntry struct { //  没用了，删掉后也能编译cmd/compile
 	s *types.Sym
 	t *types.Type
 }
@@ -49,6 +58,7 @@ func CountTabs() (numPTabs, numITabs int) {
 
 // runtime interface and reflection data structures
 var (
+	// signat => signature ??
 	signatmu    sync.Mutex // protects signatset and signatslice
 	signatset   = make(map[*types.Type]struct{})
 	signatslice []*types.Type
@@ -57,10 +67,10 @@ var (
 	gcsymset = make(map[*types.Type]struct{})
 
 	itabs []itabEntry
-	ptabs []*ir.Name
+	ptabs []*ir.Name // symbols exported by plugin
 )
 
-type typeSig struct {
+type typeSig struct { // ?
 	name  *types.Sym
 	isym  *obj.LSym
 	tsym  *obj.LSym
@@ -96,6 +106,8 @@ func makefield(name string, t *types.Type) *types.Field {
 }
 
 // MapBucketType makes the map bucket type given the type of the map.
+//
+// t is type of map (kind=TMAP, Extra=*types.Map)
 func MapBucketType(t *types.Type) *types.Type {
 	if t.MapType().Bucket != nil {
 		return t.MapType().Bucket
@@ -105,10 +117,10 @@ func MapBucketType(t *types.Type) *types.Type {
 	elemtype := t.Elem()
 	types.CalcSize(keytype)
 	types.CalcSize(elemtype)
-	if keytype.Width > MAXKEYSIZE {
+	if keytype.Width > MAXKEYSIZE { // key太大，bucket中存放指针
 		keytype = types.NewPtr(keytype)
 	}
-	if elemtype.Width > MAXELEMSIZE {
+	if elemtype.Width > MAXELEMSIZE { // value太大，bucket中存放指针
 		elemtype = types.NewPtr(elemtype)
 	}
 
@@ -198,7 +210,7 @@ func MapBucketType(t *types.Type) *types.Type {
 
 	t.MapType().Bucket = bucket
 
-	bucket.StructType().Map = t
+	bucket.StructType().Map = t // 自动生成的类型指向所属的map类型
 	return bucket
 }
 
@@ -354,9 +366,11 @@ func methods(t *types.Type) []*typeSig {
 		}
 
 		sig := &typeSig{
-			name:  f.Sym,
-			isym:  methodWrapper(it, f),
-			tsym:  methodWrapper(t, f),
+			name: f.Sym,
+			isym: methodWrapper(it, f), // nop(*T, args): LSym("main.*T.nop")
+			tsym: methodWrapper(t, f),  // nop(T, args): LSym("main.T.nop")
+			// interface{ m1() } 中的m1需要维护两个type，一个是带recv，一个是不带recv
+			// 不带recv是计算implements时需要忽略recv来比较方法是否相同
 			type_: typecheck.NewMethodType(f.Type, t),
 			mtype: typecheck.NewMethodType(f.Type, nil),
 		}
@@ -464,6 +478,8 @@ func dgopkgpathOff(s *obj.LSym, ot int, pkg *types.Pkg) int {
 }
 
 // dnameField dumps a reflect.name for a struct field.
+//
+// type runtime.name struct { bytes *byte }
 func dnameField(lsym *obj.LSym, ot int, spkg *types.Pkg, ft *types.Field) int {
 	if !types.IsExported(ft.Sym.Name) && ft.Sym.Pkg != spkg {
 		base.Fatalf("package mismatch for %v", ft.Sym)
@@ -843,15 +859,27 @@ func TypeLinksym(t *types.Type) *obj.LSym {
 	return TypeSym(t).Linksym()
 }
 
+// &LSym("t: rtype"): 生成一个表达式用来取t对应的runtime.rtype LSym的地址
 func TypePtr(t *types.Type) *ir.AddrExpr {
+	// A LinksymOffsetExpr refers to an offset within a global variable.
+	// It is like a SelectorExpr but without the field name.
 	n := ir.NewLinksymExpr(base.Pos, TypeLinksym(t), types.Types[types.TUINT8])
 	return typecheck.Expr(typecheck.NodAddr(n)).(*ir.AddrExpr)
 }
 
+// (t , itype)对应的runtime.itab LSym地址
 func ITabAddr(t, itype *types.Type) *ir.AddrExpr {
 	if t == nil || (t.IsPtr() && t.Elem() == nil) || t.IsUntyped() || !itype.IsInterface() || itype.IsEmptyInterface() {
 		base.Fatalf("ITabAddr(%v, %v)", t, itype)
 	}
+
+	/*
+		type I interface{}
+		type T int
+		var x I = (*T)(nil)
+	*/
+	// t: T, itype: I, s: `"".T,"".I`
+	// 注意I和T都属于LocalPkg，因此pkg name用""代替，类似asm中TXT "".nop ....
 	s, existed := ir.Pkgs.Itab.LookupOK(t.ShortString() + "," + itype.ShortString())
 	if !existed {
 		itabs = append(itabs, itabEntry{t: t, itype: itype, lsym: s.Linksym()})
@@ -864,6 +892,8 @@ func ITabAddr(t, itype *types.Type) *ir.AddrExpr {
 
 // needkeyupdate reports whether map updates with t as a key
 // need the key to be updated.
+//
+// 就是说key相等，但是有可能是不同bits，需要赋值
 func needkeyupdate(t *types.Type) bool {
 	switch t.Kind() {
 	case types.TBOOL, types.TINT, types.TUINT, types.TINT8, types.TUINT8, types.TINT16, types.TUINT16, types.TINT32, types.TUINT32,
@@ -946,7 +976,7 @@ func writeType(t *types.Type) *obj.LSym {
 		tbase = t.Elem()
 	}
 	dupok := 0
-	if tbase.Sym() == nil {
+	if tbase.Sym() == nil { // unamed type
 		dupok = obj.DUPOK
 	}
 
@@ -1278,6 +1308,9 @@ func genfun(t, it *types.Type) []*obj.LSym {
 // CompileITabs to de-virtualize interface methods.
 // Since this is called by the SSA backend, it shouldn't
 // generate additional Nodes, Syms, etc.
+//
+// what is de-virtualize??
+// 返回itab[offset]对应的method，注意offset是从itab起始位置开始计算的字节数
 func ITabSym(it *obj.LSym, offset int64) *obj.LSym {
 	var syms []*obj.LSym
 	if it == nil {
@@ -1365,6 +1398,7 @@ func WriteTabs() {
 		o = objw.Uint32(i.lsym, o, types.TypeHash(i.t)) // copy of type hash
 		o += 4                                          // skip unused field
 		for _, fn := range genfun(i.t, i.itype) {
+			// unexported接口的方法可能重来没有被调用，然后被优化到
 			o = objw.SymPtrWeak(i.lsym, o, fn, 0) // method pointer for each method
 		}
 		// Nothing writes static itabs, so they are read only.
@@ -1705,6 +1739,9 @@ func (p *gcProg) emit(t *types.Type, offset int64) {
 
 // ZeroAddr returns the address of a symbol with at least
 // size bytes of zeros.
+//
+// 初始化的时候用的上，还有就是那些ptr to readonly zero values
+// 比如map中key本质上只读的
 func ZeroAddr(size int64) ir.Node {
 	if size >= 1<<31 {
 		base.Fatalf("map elem too big %d", size)
@@ -1882,7 +1919,7 @@ func MarkTypeUsedInInterface(t *types.Type, from *obj.LSym) {
 	// to an interface if "from" is reachable.
 	r := obj.Addrel(from)
 	r.Sym = tsym
-	r.Type = objabi.R_USEIFACE
+	r.Type = objabi.R_USEIFACE // 只是一个特殊标记，不会做重定向，deadcode elimination时用到
 }
 
 // MarkUsedIfaceMethod marks that an interface method is used in the current

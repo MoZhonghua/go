@@ -63,6 +63,7 @@ func walkRecv(n *ir.UnaryExpr) ir.Node {
 	}
 	init := ir.TakeInit(n)
 
+	// <-c 重写为函数调用runtime.chanrecv1(c, &elem)
 	n.X = walkExpr(n.X, &init)
 	call := walkExpr(mkcall1(chanfn("chanrecv1", 2, n.X.Type()), nil, &init, n.X, typecheck.NodNil()), &init)
 	return ir.InitExpr(init, call)

@@ -151,12 +151,19 @@ internal/typecheck/typecheck.go
 internal/objw/objw.go
 internal/objw/prog.go
 internal/reflectdata/alg.go
-internal/reflectdata/reflect.go *
+internal/reflectdata/reflect.go
+internal/typebits/typebits.go
 
-TODO
-internal/amd64/ssa.go
+2022-01-24
+internal/inline/inl.go
 internal/devirtualize/devirtualize.go
+internal/escape/escape.go
+
 internal/deadcode/deadcode.go
 internal/dwarfgen/dwarf.go
-internal/escape/escape.go
+internal/liveness/plive.go
+
+TODO
+internal/walk/walk.go *
+internal/amd64/ssa.go
 internal/gc/main.go
