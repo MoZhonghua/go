@@ -119,7 +119,7 @@ func (s *LSym) writeAddr(ctxt *Link, off int64, siz int, rsym *LSym, roff int64,
 	if siz != ctxt.Arch.PtrSize && siz != 4 {
 		ctxt.Diag("WriteAddr: bad address size %d in %s", siz, s.Name)
 	}
-	s.prepwrite(ctxt, off, siz)
+	s.prepwrite(ctxt, off, siz) // 此时不需要写入，只需要分配内存
 	r := Addrel(s)
 	r.Off = int32(off)
 	if int64(r.Off) != off {

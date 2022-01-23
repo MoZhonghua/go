@@ -31,14 +31,19 @@ func Uintptr(s *obj.LSym, off int, v uint64) int {
 
 // UintN writes an unsigned integer v of size wid bytes into s at offset off,
 // and returns the next unused offset.
+//
+// s.P[off:off+wid] = v
 func UintN(s *obj.LSym, off int, v uint64, wid int) int {
 	if off&(wid-1) != 0 {
 		base.Fatalf("duintxxLSym: misaligned: v=%d wid=%d off=%d", v, wid, off)
 	}
+
 	s.WriteInt(base.Ctxt, int64(off), wid, int64(v))
 	return off + wid
 }
 
+// s.P写入一个对x的指针，需要重定向(在s.R列表中添加一项)
+// 在确定好每个LSym的位置(addr)后根据s.R重写地址
 func SymPtr(s *obj.LSym, off int, x *obj.LSym, xoff int) int {
 	off = int(types.Rnd(int64(off), int64(types.PtrSize)))
 	s.WriteAddr(base.Ctxt, int64(off), types.PtrSize, x, int64(xoff))
@@ -46,6 +51,9 @@ func SymPtr(s *obj.LSym, off int, x *obj.LSym, xoff int) int {
 	return off
 }
 
+// weak两个含义:
+//  - s -> x 的引用不会标记x为live，deadcode elimination可以删除x
+//  - 如果x被删除，不需要重定向这个指针
 func SymPtrWeak(s *obj.LSym, off int, x *obj.LSym, xoff int) int {
 	off = int(types.Rnd(int64(off), int64(types.PtrSize)))
 	s.WriteWeakAddr(base.Ctxt, int64(off), types.PtrSize, x, int64(xoff))
@@ -53,6 +61,7 @@ func SymPtrWeak(s *obj.LSym, off int, x *obj.LSym, xoff int) int {
 	return off
 }
 
+// 最终重定向结果为x.Addr + off
 func SymPtrOff(s *obj.LSym, off int, x *obj.LSym) int {
 	s.WriteOff(base.Ctxt, int64(off), x, 0)
 	off += 4
@@ -65,6 +74,7 @@ func SymPtrWeakOff(s *obj.LSym, off int, x *obj.LSym) int {
 	return off
 }
 
+// s放到base.Ctxt.Data []*LSym列表中, 最终出现在.data/.rodata section?
 func Global(s *obj.LSym, width int32, flags int16) {
 	if flags&obj.LOCAL != 0 {
 		s.Set(obj.AttrLocal, true)

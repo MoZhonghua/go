@@ -307,7 +307,15 @@ func hashfor(t *types.Type) ir.Node {
 
 // sysClosure returns a closure which will call the
 // given runtime function (with no closed-over variables).
+//
+// 在.rodata中写入一个LSym，名字为runtime.name.f，内容为函数LSym(runtime.name).Addr
 func sysClosure(name string) *obj.LSym {
+	// name.f是一个函数name对应的funcval值，只有当取name的指针时才用生成，也就是有人Lookup
+	/*
+		func nop() {}
+		var x = name
+		=> x = &funcval { f: text of nop }; funcval本身为一个nop.f LSym，存放在.rodata中
+	*/
 	s := typecheck.LookupRuntimeVar(name + "·f")
 	if len(s.P) == 0 {
 		f := typecheck.LookupRuntimeFunc(name)
@@ -320,7 +328,8 @@ func sysClosure(name string) *obj.LSym {
 // geneq returns a symbol which is the closure used to compute
 // equality for two objects of type t.
 func geneq(t *types.Type) *obj.LSym {
-	switch AlgType(t) {
+	fmt.Printf("geneq: %v\n", t)
+	switch AlgType(t) { // 如果支持直接比较内存
 	case types.ANOEQ:
 		// The runtime will panic if it tries to compare
 		// a type with a nil equality function.
@@ -370,6 +379,7 @@ func geneq(t *types.Type) *obj.LSym {
 		break
 	}
 
+	// 需要按字段一一比较
 	closure := TypeLinksymPrefix(".eqfunc", t)
 	if len(closure.P) > 0 { // already generated
 		return closure

@@ -288,6 +288,8 @@ func (a *Addr) SetConst(v int64) {
 //
 // The other fields not yet mentioned are for use by the back ends and should
 // be left zeroed by creators of Prog lists.
+//
+// Prog表示一条汇编指令, 包括pseduo instruction，比如TEXT/PCDATA等
 type Prog struct {
 	Ctxt     *Link     // linker context
 	Link     *Prog     // next Prog in linked list

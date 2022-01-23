@@ -152,7 +152,7 @@ func LoadPackage(filenames []string) {
 		// op = ir.ODECL: 用来声明非全局变量?
 		// op = ir.OAS/ir.OAS2:  var x = 1; ir.OAS2用于多个变量同时赋值(包括:=定义)
 		if op := n.Op(); op != ir.ODCL && op != ir.OAS && op != ir.OAS2 && (op != ir.ODCLTYPE || !n.(*ir.Decl).X.Alias()) {
-			fmt.Printf("typecheck: pass1: decl: (%v) %v\n", n.Op().String(), n)
+			// fmt.Printf("typecheck: pass1: decl: (%v) %v\n", n.Op().String(), n)
 			typecheck.Target.Decls[i] = typecheck.Stmt(n)
 		}
 	}
@@ -165,7 +165,7 @@ func LoadPackage(filenames []string) {
 	for i := 0; i < len(typecheck.Target.Decls); i++ {
 		n := typecheck.Target.Decls[i]
 		if op := n.Op(); op == ir.ODCL || op == ir.OAS || op == ir.OAS2 || op == ir.ODCLTYPE && n.(*ir.Decl).X.Alias() {
-			fmt.Printf("typecheck: pass2: decl: (%v) %v\n", n.Op().String(), n)
+			// fmt.Printf("typecheck: pass2: decl: (%v) %v\n", n.Op().String(), n)
 			typecheck.Target.Decls[i] = typecheck.Stmt(n)
 		}
 	}
@@ -177,7 +177,7 @@ func LoadPackage(filenames []string) {
 	for i := 0; i < len(typecheck.Target.Decls); i++ {
 		n := typecheck.Target.Decls[i]
 		if n.Op() == ir.ODCLFUNC {
-			fmt.Printf("typecheck: pass3: func body: (%v) %v\n", n.Op(), n)
+			// fmt.Printf("typecheck: pass3: func body: (%v) %v\n", n.Op(), n)
 			if base.Flag.W > 1 {
 				s := fmt.Sprintf("\nbefore typecheck %v", n)
 				ir.Dump(s, n)
@@ -197,7 +197,7 @@ func LoadPackage(filenames []string) {
 	base.Timer.Start("fe", "typecheck", "externdcls")
 	for i, n := range typecheck.Target.Externs {
 		if n.Op() == ir.ONAME {
-			fmt.Printf("typecheck: pass4: extn: (%v) %v\n", n.Op(), n)
+			// fmt.Printf("typecheck: pass4: extn: (%v) %v\n", n.Op(), n)
 			typecheck.Target.Externs[i] = typecheck.Expr(typecheck.Target.Externs[i])
 		}
 	}

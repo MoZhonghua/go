@@ -86,6 +86,8 @@ func InitRuntime() {
 
 // LookupRuntimeFunc looks up Go function name in package runtime. This function
 // must follow the internal calling convention.
+//
+// 创建一个名称为runtime.name的LSym, ABI=ABIInternal
 func LookupRuntimeFunc(name string) *obj.LSym {
 	return LookupRuntimeABI(name, obj.ABIInternal)
 }
@@ -93,6 +95,8 @@ func LookupRuntimeFunc(name string) *obj.LSym {
 // LookupRuntimeVar looks up a variable (or assembly function) name in package
 // runtime. If this is a function, it may have a special calling
 // convention.
+//
+// 创建一个名称为runtime.name的LSym, ABI=ABI0; ABIInternal仅最函数有意义
 func LookupRuntimeVar(name string) *obj.LSym {
 	return LookupRuntimeABI(name, obj.ABI0)
 }

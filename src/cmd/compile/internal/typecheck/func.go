@@ -250,7 +250,6 @@ func MethodValueWrapper(dot *ir.SelectorExpr) *ir.Func {
 	rcvrtype := dot.X.Type()
 
 	sym := ir.MethodSymSuffix(rcvrtype, meth, "-fm") // 生成*T.nop-fm函数
-	ir.DumpIRNode("MethodValueWrapper", dot)
 
 	if sym.Uniq() {
 		return sym.Def.(*ir.Func)

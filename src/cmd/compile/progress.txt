@@ -147,9 +147,11 @@ internal/typecheck/expr.go
 internal/typecheck/func.go
 
 2022-01-23
-internal/typecheck/typecheck.go *
+internal/typecheck/typecheck.go
+internal/objw/objw.go
+internal/objw/prog.go
 internal/reflectdata/alg.go
-internal/reflectdata/reflect.go
+internal/reflectdata/reflect.go *
 
 TODO
 internal/amd64/ssa.go

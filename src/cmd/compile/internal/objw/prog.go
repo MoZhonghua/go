@@ -45,6 +45,8 @@ var sharedProgArray = new([10000]obj.Prog) // *T instead of T to work around iss
 func NewProgs(fn *ir.Func, worker int) *Progs {
 	pp := new(Progs)
 	if base.Ctxt.CanReuseProgs() {
+		// var x *[100]int
+		// len(x) => len(*x): typecheck会检查这种情况，自动转换ir.Node
 		sz := len(sharedProgArray) / base.Flag.LowerC
 		pp.Cache = sharedProgArray[sz*worker : sz*(worker+1)]
 	}
@@ -64,7 +66,7 @@ func NewProgs(fn *ir.Func, worker int) *Progs {
 
 // Progs accumulates Progs for a function and converts them into machine code.
 type Progs struct {
-	Text       *obj.Prog  // ATEXT Prog for this function
+	Text       *obj.Prog  // ATEXT Prog for this function: TEXT "".dummy(SB),$0-0
 	Next       *obj.Prog  // next Prog
 	PC         int64      // virtual PC; count of Progs
 	Pos        src.XPos   // position to use for new Progs
@@ -143,7 +145,7 @@ func (pp *Progs) Prog(as obj.As) *obj.Prog {
 		// Emit stack map index change.
 		idx := pp.NextLive.StackMapIndex
 		pp.PrevLive.StackMapIndex = idx
-		p := pp.Prog(obj.APCDATA)
+		p := pp.Prog(obj.APCDATA) // 生成PCDATA指令
 		p.From.SetConst(objabi.PCDATA_StackMapIndex)
 		p.To.SetConst(int64(idx))
 	}
@@ -207,7 +209,7 @@ func (pp *Progs) SetText(fn *ir.Func) {
 	if pp.Text != nil {
 		base.Fatalf("Progs.SetText called twice")
 	}
-	ptxt := pp.Prog(obj.ATEXT)
+	ptxt := pp.Prog(obj.ATEXT) // 汇编中每个函数都是TEXT开始的
 	pp.Text = ptxt
 
 	fn.LSym.Func().Text = ptxt
