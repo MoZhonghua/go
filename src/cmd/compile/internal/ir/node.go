@@ -131,7 +131,7 @@ const (
 	OADDR         // &X
 	OANDAND       // X && Y
 	OAPPEND       // append(Args); after walk, X may contain elem type descriptor
-	OBYTES2STR    // Type(X) (Type is string, X is a []byte)
+	OBYTES2STR    // Type(X) (Type is string, X is a []byte): 在typecheck阶段把OCONV改写成具体的CONV
 	OBYTES2STRTMP // Type(X) (Type is string, X is a []byte, ephemeral)
 	ORUNES2STR    // Type(X) (Type is string, X is a []rune)
 	OSTR2BYTES    // Type(X) (Type is []byte, X is a string)
@@ -171,7 +171,8 @@ const (
 	OPTRLIT    // &X (X is composite literal)
 	OCONV      // Type(X) (type conversion)
 	OCONVIFACE // Type(X) (type conversion, to interface)
-	OCONVNOP   // Type(X) (type conversion, no effect), 用在修改MayBeShared node
+	//  用在修改MayBeShared node, 在原来node基础上创建一个nop node, 修改这个nop node
+	OCONVNOP   // Type(X) (type conversion, no effect)
 	OCOPY      // copy(X, Y)
 	ODCL       // var X (declares X of type X.Type)
 
@@ -235,6 +236,7 @@ const (
 	OSLICESTR    // X[Low : High] (X is string)
 	OSLICE3      // X[Low : High : Max] (X is untypedchecked or slice)
 	OSLICE3ARR   // X[Low : High : Max] (X is pointer to array)
+	// var x []int;  x = sliceheader(ptr, len, cap)
 	OSLICEHEADER // sliceheader{Ptr, Len, Cap} (Ptr is unsafe.Pointer, Len is length, Cap is capacity)
 	ORECOVER     // recover()
 	ORECV        // <-X
@@ -597,3 +599,23 @@ const (
 	EscHeap    // Reachable from the heap
 	EscNever   // By construction will not escape. ??
 )
+
+func DumpIRNode(prefix string, n Node) {
+	if n := len(prefix); n > 0 && prefix[n-1] != ':' {
+		prefix += ": "
+	}
+	fmt.Printf("%s%T; op=%v(%d)", prefix, n, n.Op(), int(n.Op()))
+
+	if sym := n.Sym(); sym != nil {
+		fmt.Printf("; sym=%v(pkg=%v)", sym.Name, sym.Pkg.Path)
+	}
+	if typ := n.Type(); typ != nil {
+		fmt.Printf("; type=%v; kind=%v", typ, typ.Kind())
+	}
+
+	if name := n.Name(); name != nil && name.Ntype != nil{
+		fmt.Printf("; Ntype=%v", name.Ntype)
+	}
+
+	fmt.Printf("\n")
+}

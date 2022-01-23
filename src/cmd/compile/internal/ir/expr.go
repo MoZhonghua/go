@@ -148,9 +148,9 @@ type CallUse byte
 const (
 	_ CallUse = iota
 
-	CallUseExpr // single expression result is used
-	CallUseList // list of results are used
-	CallUseStmt // results not used - call is a statement
+	CallUseExpr // single expression result is used: x = f()
+	CallUseList // list of results are used: x, y = f()
+	CallUseStmt // results not used - call is a statement: f()
 )
 
 // A CallExpr is a function call X(Args).
@@ -240,9 +240,12 @@ type ConstExpr struct {
 	val constant.Value
 }
 
-// const X = 1000;
-// val: 1000
-// orig: X?
+// var X = int(1000);
+// value: 1000;
+// orig: ConstExpr(100), untyped
+//
+// orig记录换前的expr, 比如做了类型转换或者计算除了constexpr值
+// ConstExpr(1+2) -> ConstExpr(3, Oring=ConstExpr(1+2))
 func NewConstExpr(val constant.Value, orig Node) Node {
 	n := &ConstExpr{val: val}
 	n.op = OLITERAL
@@ -273,7 +276,7 @@ func NewConvExpr(pos src.XPos, op Op, typ *types.Type, x Node) *ConvExpr {
 }
 
 func (n *ConvExpr) Implicit() bool     { return n.flags&miniExprImplicit != 0 }
-func (n *ConvExpr) SetImplicit(b bool) { n.flags.set(miniExprImplicit, b) }
+func (n *ConvExpr) SetImplicit(b bool) { n.flags.set(miniExprImplicit, b) } // 指这个类型转换语句是自动生成的
 func (n *ConvExpr) CheckPtr() bool     { return n.flags&miniExprCheckPtr != 0 }
 func (n *ConvExpr) SetCheckPtr(b bool) { n.flags.set(miniExprCheckPtr, b) }
 
@@ -746,6 +749,8 @@ func IsAddressable(n Node) bool {
 	case OINDEX:
 		n := n.(*IndexExpr)
 		if n.X.Type() != nil && n.X.Type().IsArray() {
+			// func f1() [3]int;  &f1()[1] // error: cannot take address of f1()[1]
+			// func f2() []int;   &f2()[1] // ok, addressable
 			return IsAddressable(n.X)
 		}
 		if n.X.Type() != nil && n.X.Type().IsString() {
@@ -1000,7 +1005,7 @@ func IsReflectHeaderDataField(l Node) bool {
 }
 
 func ParamNames(ft *types.Type) []Node {
-	args := make([]Node, ft.NumParams())  // ft.kind=TFUNC
+	args := make([]Node, ft.NumParams()) // ft.kind=TFUNC
 	for i, f := range ft.Params().FieldSlice() {
 		args[i] = AsNode(f.Nname)
 	}
@@ -1029,7 +1034,7 @@ func MethodSymSuffix(recv *types.Type, msym *types.Sym, suffix string) *types.Sy
 		base.Fatalf("blank method name")
 	}
 
-	rsym := recv.Sym()  // Type.Sym()是Type的名字
+	rsym := recv.Sym() // Type.Sym()是Type的名字
 	if recv.IsPtr() {
 		// func (*T) method(): 注意recv=*T, 名字应该为空
 		if rsym != nil {
@@ -1050,7 +1055,7 @@ func MethodSymSuffix(recv *types.Type, msym *types.Sym, suffix string) *types.Sy
 	if recv.IsPtr() {
 		// The parentheses aren't really necessary, but
 		// they're pretty traditional at this point.
-		fmt.Fprintf(&b, "(%-S)", recv)  // 注意输出的类型的完整信息，不仅仅是类型名称
+		fmt.Fprintf(&b, "(%-S)", recv) // 注意输出的类型的完整信息，不仅仅是类型名称
 	} else {
 		fmt.Fprintf(&b, "%-S", recv)
 	}

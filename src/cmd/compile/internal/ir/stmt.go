@@ -84,6 +84,13 @@ func (n *AssignListStmt) SetOp(op Op) {
 
 // An AssignStmt is a simple assignment statement: X = Y.
 // If Def is true, the assignment is a :=.
+/*
+var x int
+x = 100
+y := 100
+var x, y int // 可能拆分成两个 AssignStmt
+*/
+// 上面都是对应一个 AssignStmt
 type AssignStmt struct {
 	miniStmt
 	X   Node

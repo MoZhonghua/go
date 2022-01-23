@@ -139,13 +139,17 @@ internal/typecheck/type.go
 internal/typecheck/dcl.go
 
 2022-01-22
-internal/typecheck/typecheck.go *
+internal/typecheck/iexport.go
+internal/typecheck/const.go
+internal/typecheck/subr.go
 internal/typecheck/stmt.go
 internal/typecheck/expr.go
-internal/typecheck/subr.go
 internal/typecheck/func.go
-internal/typecheck/const.go
-internal/typecheck/iexport.go
+
+2022-01-23
+internal/typecheck/typecheck.go *
+internal/reflectdata/alg.go
+internal/reflectdata/reflect.go
 
 TODO
 internal/amd64/ssa.go
@@ -154,5 +158,3 @@ internal/deadcode/deadcode.go
 internal/dwarfgen/dwarf.go
 internal/escape/escape.go
 internal/gc/main.go
-
-

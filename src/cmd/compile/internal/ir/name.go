@@ -54,14 +54,14 @@ type Name struct {
 	// For a closure var, the ONAME node of the outer captured variable.
 	// For the case-local variables of a type switch, the type switch guard (OTYPESW).
 	// For the name of a function, points to corresponding Func node.
-	Defn Node  // 定义这个named node的语句Node, *Decl(op=ODCLXxxx)
+	Defn Node // 定义这个named node的语句Node, *Decl(op=ODCLXxxx)
 
 	// The function, method, or closure in which local variable or param is declared.
-	Curfn *Func  // nil说明是package全局变量?
+	Curfn *Func // nil说明是package全局变量?
 
 	// type T struct{...}: Name是T，NType是*ir.StructType(OTYPE)
-	// var x T: Name是x, NType是*ir.Name(OFORW)
-	Ntype    Ntype // 类型信息对应的Node, 不是type spec本身(在.typ字段)
+	// 类型信息对应的Node, 如果不是nil, 在typecheck会根据这个来计算类型并SetType(*type.Type)
+	Ntype Ntype
 
 	Heapaddr *Name // temp holding heap address of param
 
@@ -227,7 +227,7 @@ func (n *Name) SetOffset(x int64) {
 }
 func (n *Name) FrameOffset() int64     { return n.Offset_ }
 func (n *Name) SetFrameOffset(x int64) { n.Offset_ = x }
-func (n *Name) Iota() int64            { return n.Offset_ }  // 注意Offset_用在两个地方
+func (n *Name) Iota() int64            { return n.Offset_ } // 注意Offset_用在两个地方
 func (n *Name) SetIota(x int64)        { n.Offset_ = x }
 func (n *Name) Walkdef() uint8         { return n.bits.get2(miniWalkdefShift) }
 func (n *Name) SetWalkdef(x uint8) {
@@ -303,7 +303,7 @@ func (n *Name) SetLibfuzzerExtraCounter(b bool)    { n.flags.set(nameLibfuzzerEx
 func (n *Name) OnStack() bool {
 	if n.Op() == ONAME {
 		switch n.Class {
-		case PPARAM, PPARAMOUT, PAUTO:  // 入参，出参，局部变量
+		case PPARAM, PPARAMOUT, PAUTO: // 入参，出参，局部变量
 			return n.Esc() != EscHeap
 		case PEXTERN, PAUTOHEAP: // 全局变量，..?
 			return false

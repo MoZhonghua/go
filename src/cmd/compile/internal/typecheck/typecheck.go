@@ -125,8 +125,8 @@ const (
 	ctxStmt    = 1 << iota // evaluated at statement level
 	ctxExpr                // evaluated in value context
 	ctxType                // evaluated in type context
-	ctxCallee              // call-only expressions are ok
-	ctxMultiOK             // multivalue function returns are ok
+	ctxCallee              // call-only expressions are ok: 指遇到func f() {}; f ...计算表达式f时可能是在一个f()语句中
+	ctxMultiOK             // multivalue function returns are ok: 一般是rhs只有一个函数调用时; x,y=f(), g()，此时f,g必须返回一个值
 	ctxAssign              // assigning to expression
 )
 
@@ -139,6 +139,8 @@ const (
 var typecheckdefstack []*ir.Name
 
 // Resolve ONONAME to definition, if any.
+//
+// 最常见的情况是*ir.Ident(op=ONONAME) => *ir.Name(op=ONAME/OTYPE)
 func Resolve(n ir.Node) (res ir.Node) {
 	// ONONAME:
 	// Unnamed arg or return value: f(int, string) (int, error) { etc }
@@ -270,8 +272,16 @@ func Func(fn *ir.Func) {
 	}
 }
 
+/*
+type T struct { } // struct{}=ir.StructType
+var x T // T=ir.Ident
+*/
+// 要求n代表一个类型，可以是
+//  - *ir.StructType(op=OTSTRUCT), type=nil => *ir.StructType(op=OTYPE), type=*types.Type(kind=TSTRUCT)
+//  - *ir.Ident(op=ONONAME), type=nil => *ir.Name(op=OTYPE), type=*types.Type(kind=TSTRUCT)
 func typecheckNtype(n ir.Ntype) ir.Ntype {
-	return typecheck(n, ctxType).(ir.Ntype)
+	n = typecheck(n, ctxType).(ir.Ntype)
+	return n
 }
 
 // typecheck type checks node n.
@@ -279,6 +289,8 @@ func typecheckNtype(n ir.Ntype) ir.Ntype {
 // 	n.Left = typecheck(n.Left, top)
 func typecheck(n ir.Node, top int) (res ir.Node) {
 	// cannot type check until all the source has been parsed
+	//
+	// 在 ../noder/noder.go:136 把所有的syntax.Node转换为ir.Node之后设置为true
 	if !TypecheckAllowed {
 		base.Fatalf("early typecheck")
 	}
@@ -300,10 +312,21 @@ func typecheck(n ir.Node, top int) (res ir.Node) {
 	}
 
 	// Resolve definition of name and value of iota lazily.
+	old := n
 	n = Resolve(n)
+	if old != n {
+		log("    Resolve: %v(%T)%v -> %v(%T)%v\n", old, old, old.Op().String(), n, n, n.Op().String())
+	}
 
 	// Skip typecheck if already done.
 	// But re-typecheck ONAME/OTYPE/OLITERAL/OPACK node in case context has changed.
+	// TODO(mzh): 问题是哪里记录context???
+	//
+	// Typecheck values:
+	//  0 means the node is not typechecked
+	//  1 means the node is completely typechecked
+	//  2 means typechecking of the node is in progress
+	//  3 means the node has its type from types2, but may need transformation
 	if n.Typecheck() == 1 || n.Typecheck() == 3 {
 		switch n.Op() {
 		case ir.ONAME, ir.OTYPE, ir.OLITERAL, ir.OPACK:
@@ -374,19 +397,22 @@ func typecheck(n ir.Node, top int) (res ir.Node) {
 
 	typecheck_tcstack = append(typecheck_tcstack, n)
 
+	olds := fmt.Sprintf("%T; %v; %v", n, n, n.Op().String())
 	n.SetTypecheck(2)
 	n = typecheck1(n, top)
 	n.SetTypecheck(1)
+	log("  typecheck: %s => %T; %v; %v\n", olds, n, n, n.Op().String())
 
 	last := len(typecheck_tcstack) - 1
 	typecheck_tcstack[last] = nil
 	typecheck_tcstack = typecheck_tcstack[:last]
 
-	_, isExpr := n.(ir.Expr)
-	_, isStmt := n.(ir.Stmt)
+	_, isExpr := n.(ir.Expr) // isExpr表示n有输出
+	_, isStmt := n.(ir.Stmt) // isStmt表示n的输出可以丢弃
 	isMulti := false
 	switch n.Op() {
 	case ir.OCALLFUNC, ir.OCALLINTER, ir.OCALLMETH:
+		// f(), i.f(), t.f(): i is var of interface, t is var of concrete type
 		n := n.(*ir.CallExpr)
 		if t := n.X.Type(); t != nil && t.Kind() == types.TFUNC {
 			nr := t.NumResults()
@@ -415,12 +441,14 @@ func typecheck(n ir.Node, top int) (res ir.Node) {
 			break
 
 		default:
+			// 要求计算t的Size信息，也就是要求获得t的完整信息
+			// 注意这个计算过程可能被推后
 			types.CheckSize(t)
 		}
 	}
 	if t != nil {
-		n = EvalConst(n)
-		t = n.Type()
+		n = EvalConst(n) // 如果n指定了类型且n是const值，那么计算const值
+		t = n.Type()     // 可能导致n.Type()=nil,  比如1<<100000000 // error: invalid shift count
 	}
 
 	// TODO(rsc): Lots of the complexity here is because typecheck can
@@ -1335,6 +1363,7 @@ func hasddd(t *types.Type) bool {
 }
 
 // typecheck assignment: type list = expression list
+// aste: as=assign t=type list, e=expr list
 func typecheckaste(op ir.Op, call ir.Node, isddd bool, tstruct *types.Type, nl ir.Nodes, desc func() string) {
 	var t *types.Type
 	var i int
@@ -1884,11 +1913,11 @@ func typecheckdef(n *ir.Name) {
 
 	case ir.ONAME:
 		/* var n T
-		 n: *ir.Name(ONAME)
-		 T: *ir.Name(OTYPE)
-		 n.NType = T
-		 T.typ = *types.Type(TSTRUCT) // 原来应该是TFORW, SetUnderlying()设置为TSTRUCT
-		 */
+		n: *ir.Name(ONAME)
+		T: *ir.Name(OTYPE)
+		n.NType = T
+		T.typ = *types.Type(TSTRUCT) // 原来应该是TFORW, SetUnderlying()设置为TSTRUCT
+		*/
 		if n.Ntype != nil {
 			n.Ntype = typecheckNtype(n.Ntype)
 			n.SetType(n.Ntype.Type())
@@ -2275,4 +2304,12 @@ func ConvNop(n ir.Node, t *types.Type) ir.Node {
 
 func callstack() {
 	godebug.PrintStack()
+}
+
+const tcdebug = true
+
+func log(format string, args ...interface{}) {
+	if tcdebug {
+		fmt.Printf(format, args...)
+	}
 }

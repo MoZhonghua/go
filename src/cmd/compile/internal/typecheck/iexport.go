@@ -1224,7 +1224,6 @@ func (w *exportWriter) linkname(s *types.Sym) {
 }
 
 func (w *exportWriter) symIdx(s *types.Sym) {
-	// 在typecheck之后的编译阶段会创建LSym并设置PkgIdx, SymIdx
 	lsym := s.Linksym()
 	if lsym.PkgIdx > goobj.PkgIdxSelf || (lsym.PkgIdx == goobj.PkgIdxInvalid && !lsym.Indexed()) || s.Linkname != "" {
 		// Don't export index for non-package symbols, linkname'd symbols,

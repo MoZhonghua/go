@@ -19,6 +19,9 @@ import (
 	"cmd/internal/src"
 )
 
+// float(
+
+
 func roundFloat(v constant.Value, sz int64) constant.Value {
 	switch sz {
 	case 4:
@@ -215,13 +218,19 @@ func convlit1(n ir.Node, t *types.Type, explicit bool, context func() string) ir
 	return n
 }
 
+// var r t := x op y
+//
+// 正常情况下x,y的类型应该是t，检查t是否满足执行op，必能返回nil
+// complex/real/imag 三个操作不同，x,y和t的类型不同，需要特别处理
 func operandType(op ir.Op, t *types.Type) *types.Type {
 	switch op {
 	case ir.OCOMPLEX:
+		// var z t = complex(x, y): t应该是complext， 而x,y应该是对应的float
 		if t.IsComplex() {
 			return types.FloatForComplex(t)
 		}
 	case ir.OREAL, ir.OIMAG:
+		// real(x): x应该是complex
 		if t.IsFloat() {
 			return types.ComplexForFloat(t)
 		}
@@ -348,6 +357,7 @@ func overflow(v constant.Value, t *types.Type) bool {
 	return false
 }
 
+// 支持string(97)这样的语句, 返回"a"
 func tostr(v constant.Value) constant.Value {
 	if v.Kind() == constant.Int {
 		r := unicode.ReplacementChar
@@ -392,6 +402,8 @@ var tokenForOp = [...]token.Token{
 // If n is not a constant, EvalConst returns n.
 // Otherwise, EvalConst returns a new OLITERAL with the same value as n,
 // and with .Orig pointing back to n.
+//
+// 注意要求n.Type() != nil
 func EvalConst(n ir.Node) ir.Node {
 	// Pick off just the opcodes that can be constant evaluated.
 	switch n.Op() {
@@ -529,7 +541,7 @@ func EvalConst(n ir.Node) ir.Node {
 			if ir.IsConst(nl, constant.String) {
 				return OrigInt(n, int64(len(ir.StringVal(nl))))
 			}
-		case types.TARRAY:
+		case types.TARRAY: // len(func()) 不能按照常量处理，因为必须保证func()被调用
 			if !anyCallOrChan(nl) {
 				return OrigInt(n, nl.Type().NumElem())
 			}
@@ -792,8 +804,12 @@ type constSetKey struct {
 // where are used in the error message.
 //
 // n must not be an untyped constant.
+//
+// 用来检查switch语句中是否有重复constant lit case出现
 func (s *constSet) add(pos src.XPos, n ir.Node, what, where string) {
 	if conv := n; conv.Op() == ir.OCONVIFACE {
+		// const x = 100
+		// io.Reader(x): x的类型应该是int，而不是io.Reader
 		conv := conv.(*ir.ConvExpr)
 		if conv.Implicit() {
 			n = conv.X
@@ -806,6 +822,8 @@ func (s *constSet) add(pos src.XPos, n ir.Node, what, where string) {
 	if n.Type().IsUntyped() {
 		base.Fatalf("%v is untyped", n)
 	}
+
+	// n is typed constant
 
 	// Consts are only duplicates if they have the same value and
 	// identical types.
@@ -867,7 +885,7 @@ func evalunsafe(n ir.Node) int64 {
 	case ir.OALIGNOF, ir.OSIZEOF:
 		n := n.(*ir.UnaryExpr)
 		n.X = Expr(n.X)
-		n.X = DefaultLit(n.X, nil)
+		n.X = DefaultLit(n.X, nil) // 如果n.X是untyped expr，则返回defualt typed expr
 		tr := n.X.Type()
 		if tr == nil {
 			return 0

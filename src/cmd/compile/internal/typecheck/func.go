@@ -34,6 +34,10 @@ func MakeDotArgs(typ *types.Type, args []ir.Node) ir.Node {
 	return n
 }
 
+/*
+func x(v string, args ...int) => func x(v string, args []int)
+x("n", 1, 2, 3) => x("n", []int{1, 2, 3})
+*/
 // FixVariadicCall rewrites calls to variadic functions to use an
 // explicit ... argument if one is not already present.
 func FixVariadicCall(call *ir.CallExpr) {
@@ -59,6 +63,13 @@ func FixVariadicCall(call *ir.CallExpr) {
 // ClosureType returns the struct type used to hold all the information
 // needed in the closure for clo (clo must be a OCLOSURE node).
 // The address of a variable of the returned type can be cast to a func.
+/*
+注意函数指针都是 *funcval struct { f uintptr, data...} （8字节）
+
+调用: f.f(args) //  context reg(RDX) = *funcval
+
+这里就是生成funcval这个struct的具体类型, data...是所有captured vars列表
+*/
 func ClosureType(clo *ir.ClosureExpr) *types.Type {
 	// Create closure in the form of a composite literal.
 	// supposing the closure captures an int i and a string s
@@ -84,6 +95,7 @@ func ClosureType(clo *ir.ClosureExpr) *types.Type {
 		fields = append(fields, types.NewField(base.Pos, v.Sym(), typ))
 	}
 	typ := types.NewStruct(types.NoPkg, fields)
+	// var x = func() {}; var y = func() {}; _ = x==y // error: not comparable
 	typ.SetNoalg(true)
 	return typ
 }
@@ -91,6 +103,8 @@ func ClosureType(clo *ir.ClosureExpr) *types.Type {
 // PartialCallType returns the struct type used to hold all the information
 // needed in the closure for n (n must be a OCALLPART node).
 // The address of a variable of the returned type can be cast to a func.
+//
+// var x T; f = x.nop; f的类型是funcval，需要把recv保存下来，可以看作一个closure变种
 func PartialCallType(n *ir.SelectorExpr) *types.Type {
 	t := types.NewStruct(types.NoPkg, []*types.Field{
 		types.NewField(base.Pos, Lookup("F"), types.Types[types.TUINTPTR]),
@@ -216,15 +230,27 @@ var globClosgen int32
 // added to Target.Decls.
 //
 // TODO(mdempsky): Move into walk. This isn't part of type checking.
+//
+/*
+type T int
+func (t *T) nop(arg int) {}  // 注意这个函数的本质是nop(t *T, arg int) {}
+
+var x = T
+var y = x.nop
+
+y = func nop-fm(arg int) { return .this.nop(arg) }
+*/
 func MethodValueWrapper(dot *ir.SelectorExpr) *ir.Func {
 	if dot.Op() != ir.OCALLPART {
 		base.Fatalf("MethodValueWrapper: unexpected %v (%v)", dot, dot.Op())
 	}
 
-	t0 := dot.Type()
+	t0 := dot.Type() // TFUNC, Extra=*types.Func, Extra.Reciever != nil
 	meth := dot.Sel
 	rcvrtype := dot.X.Type()
-	sym := ir.MethodSymSuffix(rcvrtype, meth, "-fm")
+
+	sym := ir.MethodSymSuffix(rcvrtype, meth, "-fm") // 生成*T.nop-fm函数
+	ir.DumpIRNode("MethodValueWrapper", dot)
 
 	if sym.Uniq() {
 		return sym.Def.(*ir.Func)
@@ -245,6 +271,7 @@ func MethodValueWrapper(dot *ir.SelectorExpr) *ir.Func {
 	// number at the use of the method expression in this
 	// case. See issue 29389.
 
+	// TFUNC, Extra=*types.Func, Extra.Reciever == nil
 	tfn := ir.NewFuncType(base.Pos, nil,
 		NewFuncParams(t0.Params(), true),
 		NewFuncParams(t0.Results(), false))
@@ -302,6 +329,7 @@ func tcClosure(clo *ir.ClosureExpr, top int) {
 		fn.Iota = x
 	}
 
+	// func() {}()
 	fn.SetClosureCalled(top&ctxCallee != 0)
 
 	// Do not typecheck fn twice, otherwise, we will end up pushing
@@ -389,11 +417,16 @@ func tcFunc(n *ir.Func) {
 }
 
 // tcCall typechecks an OCALL node.
+//
+// X(Args) op=OCALL: 根据Expr(X)的结果，有多种含义，比如可能是类型转换
+// 根据n.X的结果修改op为OCALLXxxxx，然后再调用对应的typecheck函数
 func tcCall(n *ir.CallExpr, top int) ir.Node {
 	n.Use = ir.CallUseExpr
 	if top == ctxStmt {
 		n.Use = ir.CallUseStmt
 	}
+
+	// ../typecheck/iimport.go:1335
 	Stmts(n.Init()) // imported rewritten f(g()) calls (#30907)
 	n.X = typecheck(n.X, ctxExpr|ctxType|ctxCallee)
 	if n.X.Diag() {
@@ -416,7 +449,7 @@ func tcCall(n *ir.CallExpr, top int) ir.Node {
 		case ir.OAPPEND, ir.ODELETE, ir.OMAKE, ir.OPRINT, ir.OPRINTN, ir.ORECOVER:
 			n.SetOp(l.BuiltinOp)
 			n.X = nil
-			n.SetTypecheck(0) // re-typechecking new op is OK, not a loop
+			n.SetTypecheck(0) // re-typechecking new op is OK, not a loop, Op()改变了不会再回到这里
 			return typecheck(n, top)
 
 		case ir.OCAP, ir.OCLOSE, ir.OIMAG, ir.OLEN, ir.OPANIC, ir.OREAL:
@@ -466,7 +499,7 @@ func tcCall(n *ir.CallExpr, top int) ir.Node {
 		return tcConv(n)
 	}
 
-	typecheckargs(n)
+	typecheckargs(n) // 检查所有arg是合法的expr，但是还没有检查arg类型和函数sig匹配
 	t := l.Type()
 	if t == nil {
 		n.SetType(nil)
@@ -476,9 +509,11 @@ func tcCall(n *ir.CallExpr, top int) ir.Node {
 
 	switch l.Op() {
 	case ir.ODOTINTER:
+		// var x I; x.nop
 		n.SetOp(ir.OCALLINTER)
 
 	case ir.ODOTMETH:
+		// var x T; x.nop
 		l := l.(*ir.SelectorExpr)
 		n.SetOp(ir.OCALLMETH)
 
@@ -493,6 +528,7 @@ func tcCall(n *ir.CallExpr, top int) ir.Node {
 		}
 
 	default:
+		// func f() {}; f
 		n.SetOp(ir.OCALLFUNC)
 		if t.Kind() != types.TFUNC {
 			if o := ir.Orig(l); o.Name() != nil && types.BuiltinPkg.Lookup(o.Sym().Name).Def != nil {
@@ -531,6 +567,9 @@ func tcCall(n *ir.CallExpr, top int) ir.Node {
 
 	// multiple return
 	if top&(ctxMultiOK|ctxStmt) == 0 {
+		// var x, y = f();      // ctxMultiOK
+		// var x, y = f(), g(); // !ctxMultiOK
+
 		base.Errorf("multiple-value %v() in single-value context", l)
 		return n
 	}
@@ -754,8 +793,8 @@ func tcMake(n *ir.CallExpr) ir.Node {
 
 	n.Args = nil
 	l := args[0]
-	l = typecheck(l, ctxType)
-	t := l.Type()
+	l = typecheck(l, ctxType) // l 结果必须是一个OTYPE，比如*ir.Name, *ir.SliceType
+	t := l.Type() // 具体的type spec, *types.Type
 	if t == nil {
 		n.SetType(nil)
 		return n
@@ -853,6 +892,8 @@ func tcMake(n *ir.CallExpr) ir.Node {
 }
 
 // tcMakeSliceCopy typechecks an OMAKESLICECOPY node.
+//
+// runtime: func makeslicecopy(et *_type, tolen int, fromlen int, from unsafe.Pointer) unsafe.Pointer
 func tcMakeSliceCopy(n *ir.MakeExpr) ir.Node {
 	// Errors here are Fatalf instead of Errorf because only the compiler
 	// can construct an OMAKESLICECOPY node.
@@ -917,6 +958,7 @@ func tcNew(n *ir.UnaryExpr) ir.Node {
 
 // tcPanic typechecks an OPANIC node.
 func tcPanic(n *ir.UnaryExpr) ir.Node {
+	// 比如 func f() (int, int); panic(f()); 检查参数个数已经报错，不会到这里
 	n.X = Expr(n.X)
 	n.X = AssignConv(n.X, types.Types[types.TINTER], "argument to panic")
 	if n.X.Type() == nil {

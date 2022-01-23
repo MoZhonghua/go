@@ -16,7 +16,7 @@ import (
 )
 
 // tcAddr typechecks an OADDR node.
-func tcAddr(n *ir.AddrExpr) ir.Node {
+func tcAddr(n *ir.AddrExpr) ir.Node { // &x
 	n.X = Expr(n.X)
 	if n.X.Type() == nil {
 		n.SetType(nil)
@@ -47,12 +47,13 @@ func tcAddr(n *ir.AddrExpr) ir.Node {
 	return n
 }
 
+// l << r; n指整个shift语句, 仅用来输出错误信息
 func tcShift(n, l, r ir.Node) (ir.Node, ir.Node, *types.Type) {
 	if l.Type() == nil || r.Type() == nil {
 		return l, r, nil
 	}
 
-	r = DefaultLit(r, types.Types[types.TUINT])
+	r = DefaultLit(r, types.Types[types.TUINT]) // 如果r是untyped，尝试转换为uint，否则不变
 	t := r.Type()
 	if !t.IsInteger() {
 		base.Errorf("invalid operation: %v (shift count type %v, must be integer)", n, r.Type())
@@ -64,6 +65,7 @@ func tcShift(n, l, r ir.Node) (ir.Node, ir.Node, *types.Type) {
 	}
 	t = l.Type()
 	if t != nil && t.Kind() != types.TIDEAL && !t.IsInteger() {
+		// t == nil 说明计算表达式l时已经出错且报告，这里继续处理
 		base.Errorf("invalid operation: %v (shift of type %v)", n, t)
 		return l, r, nil
 	}
@@ -87,7 +89,7 @@ func IsCmp(op ir.Op) bool {
 //     n.X, n.Y, t = tcArith(n, op, n.X, n.Y)
 //     n.SetType(t)
 func tcArith(n ir.Node, op ir.Op, l, r ir.Node) (ir.Node, ir.Node, *types.Type) {
-	l, r = defaultlit2(l, r, false)
+	l, r = defaultlit2(l, r, false) // 尝试把l，r转换为同一类型
 	if l.Type() == nil || r.Type() == nil {
 		return l, r, nil
 	}
@@ -239,7 +241,8 @@ func tcCompLit(n *ir.CompLitExpr) (res ir.Node) {
 		return n
 	}
 
-	n.Ntype = typecheckNtype(n.Ntype)
+	// 注意CompLit一定是有明确的类型信息的，也就是Ntype一定不是nil
+	n.Ntype = typecheckNtype(n.Ntype) // => Op() = OTYPE
 	t := n.Ntype.Type()
 	if t == nil {
 		n.SetType(nil)
@@ -316,7 +319,7 @@ func tcCompLit(n *ir.CompLitExpr) (res ir.Node) {
 				}
 				// No pushtype allowed here. Must name fields for that.
 				n1 = AssignConv(n1, f.Type, "field value")
-				sk := ir.NewStructKeyExpr(base.Pos, f.Sym, n1)
+				sk := ir.NewStructKeyExpr(base.Pos, f.Sym, n1) // 转换为显示fieldName: value格式
 				sk.Offset = f.Offset
 				ls[i] = sk
 			}
@@ -413,7 +416,7 @@ func tcCompLit(n *ir.CompLitExpr) (res ir.Node) {
 func tcConv(n *ir.ConvExpr) ir.Node {
 	types.CheckSize(n.Type()) // ensure width is calculated for backend
 	n.X = Expr(n.X)
-	n.X = convlit1(n.X, n.Type(), true, nil)
+	n.X = convlit1(n.X, n.Type(), true, nil) // true: 因为是代码中显示类型转换
 	t := n.X.Type()
 	if t == nil || n.Type() == nil {
 		n.SetType(nil)
@@ -449,6 +452,11 @@ func tcConv(n *ir.ConvExpr) ir.Node {
 
 	case ir.OSTR2RUNES:
 		if n.X.Op() == ir.OLITERAL {
+			/*
+				var x []rune = "abc"         // errro
+				var x []rune = []rune("abc") // ok
+				string -> []rune: not assignable, but convertable
+			*/
 			return stringtoruneslit(n)
 		}
 	}
@@ -458,6 +466,7 @@ func tcConv(n *ir.ConvExpr) ir.Node {
 // tcDot typechecks an OXDOT or ODOT node.
 func tcDot(n *ir.SelectorExpr, top int) ir.Node {
 	if n.Op() == ir.OXDOT {
+		// X.Sel => X.Embed.Sel: n.X=X.Embed, n.Sel=Sel
 		n = AddImplicitDots(n)
 		n.SetOp(ir.ODOT)
 		if n.X == nil {
@@ -522,13 +531,19 @@ func tcDot(n *ir.SelectorExpr, top int) ir.Node {
 	}
 
 	if (n.Op() == ir.ODOTINTER || n.Op() == ir.ODOTMETH) && top&ctxCallee == 0 {
+		/*
+			var x io.Reader
+			x.Read()    // top&ctxCallee!=0
+			_ = x.Read  // top&ctxCallee==0, 执行下面的语句
+		*/
 		n.SetOp(ir.OCALLPART)
-		n.SetType(MethodValueWrapper(n).Type())
+		n.SetType(MethodValueWrapper(n).Type()) // 这里只是做typecheck，因此只需要知道类型
 	}
 	return n
 }
 
 // tcDotType typechecks an ODOTTYPE node.
+// var x interface{};  x.(Type)
 func tcDotType(n *ir.TypeAssertExpr) ir.Node {
 	n.X = Expr(n.X)
 	n.X = DefaultLit(n.X, nil)
@@ -538,13 +553,15 @@ func tcDotType(n *ir.TypeAssertExpr) ir.Node {
 		n.SetType(nil)
 		return n
 	}
-	if !t.IsInterface() {
+	if !t.IsInterface() { // x.(Type): x本身类型必须是接口(可以不是interface{}，比如io.Reader)
 		base.Errorf("invalid type assertion: %v (non-interface type %v on left)", n, t)
 		n.SetType(nil)
 		return n
 	}
 
 	if n.Ntype != nil {
+		// var x I
+		// I: n.Ntype = *ir.Ident, op=ONONAME ==> n.Ntype = *ir.Name, op=OTYPE
 		n.Ntype = typecheckNtype(n.Ntype)
 		n.SetType(n.Ntype.Type())
 		n.Ntype = nil
@@ -554,6 +571,7 @@ func tcDotType(n *ir.TypeAssertExpr) ir.Node {
 	}
 
 	if n.Type() != nil && !n.Type().IsInterface() {
+		// 只检查E -> I, 不检查I->I; 实际I->I也可以检查一下同名方法必须signature相同
 		var missing, have *types.Field
 		var ptr int
 		if !implements(n.Type(), t, &missing, &have, &ptr) {
@@ -576,6 +594,7 @@ func tcDotType(n *ir.TypeAssertExpr) ir.Node {
 }
 
 // tcITab typechecks an OITAB node.
+// var x I; itab(x) -> 返回iface中的itab字段，是一个*uintptr; 只能内部生成这个操作
 func tcITab(n *ir.UnaryExpr) ir.Node {
 	n.X = Expr(n.X)
 	t := n.X.Type()
@@ -586,6 +605,7 @@ func tcITab(n *ir.UnaryExpr) ir.Node {
 	if !t.IsInterface() {
 		base.Fatalf("OITAB of %v", t)
 	}
+	// type = *uintptr
 	n.SetType(types.NewPtr(types.Types[types.TUINTPTR]))
 	return n
 }
@@ -628,6 +648,7 @@ func tcIndex(n *ir.IndexExpr) ir.Node {
 			return n
 		}
 
+		// 如果index是常量且知道数组的长度，检查一下
 		if !n.Bounded() && ir.IsConst(n.Index, constant.Int) {
 			x := n.Index.Val()
 			if constant.Sign(x) < 0 {
@@ -654,7 +675,7 @@ func tcIndex(n *ir.IndexExpr) ir.Node {
 func tcLenCap(n *ir.UnaryExpr) ir.Node {
 	n.X = Expr(n.X)
 	n.X = DefaultLit(n.X, nil)
-	n.X = implicitstar(n.X)
+	n.X = implicitstar(n.X)  // var x = &[3]int{}; len(x) => len(*x)
 	l := n.X
 	t := l.Type()
 	if t == nil {
@@ -706,6 +727,7 @@ func tcRecv(n *ir.UnaryExpr) ir.Node {
 
 // tcSPtr typechecks an OSPTR node.
 func tcSPtr(n *ir.UnaryExpr) ir.Node {
+	// var s string; sptr(s) => 返回string/slice中的base指针(reflect.SliceHeader.Data字段)
 	n.X = Expr(n.X)
 	t := n.X.Type()
 	if t == nil {
@@ -736,6 +758,7 @@ func tcSlice(n *ir.SliceExpr) ir.Node {
 		return n
 	}
 	if l.Type().IsArray() {
+		// func f1() [3]int {}; f1()[:] // error: slice of unaddressable value
 		if !ir.IsAddressable(n.X) {
 			base.Errorf("invalid operation %v (slice of unaddressable value)", n)
 			n.SetType(nil)
@@ -786,6 +809,7 @@ func tcSlice(n *ir.SliceExpr) ir.Node {
 		n.SetType(nil)
 		return n
 	}
+	// check: low <= high <= max if const lit
 	if !checksliceconst(n.Low, n.High) || !checksliceconst(n.Low, n.Max) || !checksliceconst(n.High, n.Max) {
 		n.SetType(nil)
 		return n
@@ -832,6 +856,8 @@ func tcSliceHeader(n *ir.SliceHeaderExpr) ir.Node {
 }
 
 // tcStar typechecks an ODEREF node, which may be an expression or a type.
+//
+// var x *int; _ = *x
 func tcStar(n *ir.StarExpr, top int) ir.Node {
 	n.X = typecheck(n.X, ctxExpr|ctxType)
 	l := n.X
@@ -840,7 +866,7 @@ func tcStar(n *ir.StarExpr, top int) ir.Node {
 		n.SetType(nil)
 		return n
 	}
-	if l.Op() == ir.OTYPE {
+	if l.Op() == ir.OTYPE { // *int
 		n.SetOTYPE(types.NewPtr(l.Type()))
 		// Ensure l.Type gets CalcSize'd for the backend. Issue 20174.
 		types.CheckSize(l.Type())

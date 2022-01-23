@@ -239,7 +239,7 @@ func (t *Type) SetHasTParam(b bool)  { t.flags.set(typeHasTParam, b) }
 func (t *Type) Kind() Kind { return t.kind }
 
 // Sym returns the name of type t.
-func (t *Type) Sym() *Sym       { return t.sym }
+func (t *Type) Sym() *Sym       { return t.sym } // nil=> unamed type; var x = [3]int{}; [3]int is unamed type
 func (t *Type) SetSym(sym *Sym) { t.sym = sym }
 
 // Underlying returns the underlying type of type t.
@@ -2002,6 +2002,8 @@ func ReceiverBaseType(t *Type) *Type {
 	// Strip away pointer if it's there.
 	if t.IsPtr() {
 		if t.Sym() != nil {
+			// type X *int
+			// func (x X) nop() // error
 			return nil
 		}
 		t = t.Elem()

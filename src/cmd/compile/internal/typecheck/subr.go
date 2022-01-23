@@ -16,6 +16,8 @@ import (
 	"cmd/internal/src"
 )
 
+// 检查是否可以把ir.Node表示的值(类型+const值)转换为指定类型t
+//
 func AssignConv(n ir.Node, t *types.Type, context string) ir.Node {
 	return assignconvfn(n, t, func() string { return context })
 }
@@ -37,7 +39,7 @@ func LookupNum(prefix string, n int) *types.Sym {
 func NewFuncParams(tl *types.Type, mustname bool) []*ir.Field {
 	var args []*ir.Field
 	gen := 0
-	for _, t := range tl.Fields().Slice() {
+	for _, t := range tl.Fields().Slice() { // kind=TSTRUCT
 		s := t.Sym
 		if mustname && (s == nil || s.Name == "_") {
 			// invent a name so that we can refer to it in the trampoline
@@ -135,7 +137,7 @@ func NodNil() ir.Node {
 // AddImplicitDots finds missing fields in obj.field that
 // will give the shortest unique addressing and
 // modifies the tree with missing field names.
-func AddImplicitDots(n *ir.SelectorExpr) *ir.SelectorExpr {
+func AddImplicitDots(n *ir.SelectorExpr) *ir.SelectorExpr { // X.Sel
 	n.X = typecheck(n.X, ctxType|ctxExpr)
 	if n.X.Diag() {
 		n.SetDiag(true)
@@ -153,6 +155,14 @@ func AddImplicitDots(n *ir.SelectorExpr) *ir.SelectorExpr {
 	if s == nil {
 		return n
 	}
+	/*
+		type T struct { v int }
+		type T1 struct { T }
+		type T2 struct { T1 }
+
+		var x T2
+		x.v => x.T2.T1.v
+	*/
 
 	switch path, ambig := dotpath(s, t, nil, false); {
 	case path != nil:
@@ -184,6 +194,7 @@ func CalcMethods(t *types.Type) {
 
 	// generate all reachable methods
 	slist = slist[:0]
+
 	expand1(t, true)
 
 	// check each method to be uniquely reachable
@@ -205,6 +216,13 @@ func CalcMethods(t *types.Type) {
 
 		// add it to the base type method list
 		f = f.Copy()
+		/*
+			type T1 struct { v int }
+			type T2 struct { v2 int; T1 }
+			func (*T1) nop() {}
+			=>
+			func (*T2) nop() { T2.T1.nop() } // 需要添加一个trampoline，不能直接把T2指针传给nop()
+		*/
 		f.Embedded = 1 // needs a trampoline
 		for _, d := range path {
 			if d.field.Type.IsPtr() {
@@ -230,8 +248,11 @@ func CalcMethods(t *types.Type) {
 // in reverse order. If none exist, more will indicate whether t contains any
 // embedded fields at depth d, so callers can decide whether to retry at
 // a greater depth.
+//
+// c: number of fields or methods named s at depth d
+// more: whether t contains any embedded fields at depth d: 也就是有可能更深层有指定名称方法/字段
 func adddot1(s *types.Sym, t *types.Type, d int, save **types.Field, ignorecase bool) (c int, more bool) {
-	if t.Recur() {
+	if t.Recur() { // visited
 		return
 	}
 	t.SetRecur(true)
@@ -273,6 +294,7 @@ func adddot1(s *types.Sym, t *types.Type, d int, save **types.Field, ignorecase 
 		}
 		a, more1 := adddot1(s, f.Type, d, save, ignorecase)
 		if a != 0 && c == 0 {
+			// 浅层对应d更大，因此dotlist中的路径是逆序的
 			dotlist[d].field = f
 		}
 		c += a
@@ -290,15 +312,26 @@ func adddot1(s *types.Sym, t *types.Type, d int, save **types.Field, ignorecase 
 var dotlist = make([]dlist, 10)
 
 // Convert node n for assignment to type t.
+/*
+var x t
+x = n  // 检查能否把n转换为t类型赋值给x
+*/
 func assignconvfn(n ir.Node, t *types.Type, context func() string) ir.Node {
 	if n == nil || n.Type() == nil || n.Type().Broke() {
 		return n
 	}
 
 	if t.Kind() == types.TBLANK && n.Type().Kind() == types.TNIL {
+		// var x = nil: 没法确定x的类型，因为nil可以是多种类型，比如map, slice, ptr...
 		base.Errorf("use of untyped nil")
 	}
 
+	/*
+		var x = 100
+		n: untyped int
+		t: int
+		convlit1(n, t) => n: int
+	*/
 	n = convlit1(n, t, false, context)
 	if n.Type() == nil {
 		return n
@@ -310,6 +343,7 @@ func assignconvfn(n ir.Node, t *types.Type, context func() string) ir.Node {
 	// Convert ideal bool from comparison to plain bool
 	// if the next step is non-bool (like interface{}).
 	if n.Type() == types.UntypedBool && !t.IsBoolean() {
+		// 什么情况下会出现这种?
 		if n.Op() == ir.ONAME || n.Op() == ir.OLITERAL {
 			r := ir.NewConvExpr(base.Pos, ir.OCONVNOP, nil, n)
 			r.SetType(types.Types[types.TBOOL])
@@ -323,12 +357,19 @@ func assignconvfn(n ir.Node, t *types.Type, context func() string) ir.Node {
 		return n
 	}
 
+	// 注意上面convlit1()可能已经修改了n.Type(); 检查assignability
 	op, why := Assignop(n.Type(), t)
 	if op == ir.OXXX {
 		base.Errorf("cannot use %L as type %v in %s%s", n, t, context(), why)
 		op = ir.OCONV
 	}
 
+	/*
+		var x = struct{ v int }{v: 100}
+		var y T = x
+		var z interface{} = x
+	*/
+	// 类型不同，但是可以赋值，增加一个强制转换语句
 	r := ir.NewConvExpr(base.Pos, op, t, n)
 	r.SetTypecheck(1)
 	r.SetImplicit(true)
@@ -339,6 +380,8 @@ func assignconvfn(n ir.Node, t *types.Type, context func() string) ir.Node {
 // If so, return op code to use in conversion.
 // If not, return OXXX. In this case, the string return parameter may
 // hold a reason why. In all other cases, it'll be the empty string.
+//
+// 隐式转换(assignable)，比强制转换限制更多: var x int; var y int32; x = y // error; int(y); //ok
 func Assignop(src, dst *types.Type) (ir.Op, string) {
 	if src == dst {
 		return ir.OCONVNOP, ""
@@ -466,6 +509,8 @@ func Assignop(src, dst *types.Type) (ir.Op, string) {
 // If not, return OXXX. In this case, the string return parameter may
 // hold a reason why. In all other cases, it'll be the empty string.
 // srcConstant indicates whether the value of type src is a constant.
+//
+// 显示转换(convertable): var x int32;  _ = int(x)
 func Convertop(srcConstant bool, src, dst *types.Type) (ir.Op, string) {
 	if src == dst {
 		return ir.OCONVNOP, ""
@@ -489,7 +534,7 @@ func Convertop(srcConstant bool, src, dst *types.Type) (ir.Op, string) {
 	}
 
 	// 1. src can be assigned to dst.
-	op, why := Assignop(src, dst)
+	op, why := Assignop(src, dst) // assignable 一定是 convertable
 	if op != ir.OXXX {
 		return op, why
 	}
@@ -618,11 +663,13 @@ func dotpath(s *types.Sym, t *types.Type, save **types.Field, ignorecase bool) (
 		if d > len(dotlist) {
 			dotlist = append(dotlist, dlist{})
 		}
+		// 每次加深一层查找
 		if c, more := adddot1(s, t, d, save, ignorecase); c == 1 {
 			return dotlist[:d], false
 		} else if c > 1 {
 			return nil, true
 		} else if !more {
+			// d层没有embed field，不可能在更深层
 			return nil, false
 		}
 	}
@@ -665,6 +712,8 @@ func expand1(t *types.Type, top bool) {
 	t.SetRecur(true)
 
 	if !top {
+		// 比如计算T的全部方法，t自己的方法列表已经在t.methods
+		// 这里没有必要添加，结束后直接append即可
 		expand0(t)
 	}
 
@@ -708,6 +757,7 @@ func ifacelookdot(s *types.Sym, t *types.Type, ignorecase bool) (m *types.Field,
 	}
 
 	for _, d := range path {
+		// 路径中任意一个是ptr即可
 		if d.field.Type.IsPtr() {
 			followptr = true
 			break
@@ -732,17 +782,18 @@ func implements(t, iface *types.Type, m, samename **types.Field, ptr *int) bool 
 		i := 0
 		tms := t.AllMethods().Slice()
 		for _, im := range iface.AllMethods().Slice() {
+			// 注意methods是排好序的
 			for i < len(tms) && tms[i].Sym != im.Sym {
 				i++
 			}
-			if i == len(tms) {
+			if i == len(tms) { // 缺少方法im
 				*m = im
 				*samename = nil
 				*ptr = 0
 				return false
 			}
 			tm := tms[i]
-			if !types.Identical(tm.Type, im.Type) {
+			if !types.Identical(tm.Type, im.Type) { // 同名方法类型不同
 				*m = im
 				*samename = tm
 				*ptr = 0
@@ -775,6 +826,9 @@ func implements(t, iface *types.Type, m, samename **types.Field, ptr *int) bool 
 		}
 		tm := tms[i]
 		if tm.Nointerface() || !types.Identical(tm.Type, im.Type) {
+			// //go:nointerface
+			// func (x T) nop() {}
+			// 注意必须开启fieldtrack experiment才有效
 			*m = im
 			*samename = tm
 			*ptr = 0

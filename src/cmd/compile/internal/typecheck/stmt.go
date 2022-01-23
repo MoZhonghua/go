@@ -11,8 +11,16 @@ import (
 	"cmd/internal/src"
 )
 
+/*
+var x = &[2]int{1, 2}
+for _, e := range x {} // ok
+
+var x = &[]int{1, 2}
+for _, e := range x {} // error: cannot range over y (variable of type *[]int)
+*/
 func RangeExprType(t *types.Type) *types.Type {
 	if t.IsPtr() && t.Elem().IsArray() {
+		// t = *[3]int, 返回[3]int
 		return t.Elem()
 	}
 	return t
@@ -25,8 +33,16 @@ func typecheckrangeExpr(n *ir.RangeStmt) {
 	}
 
 	t := RangeExprType(n.X.Type())
+
 	// delicate little dance.  see tcAssignList
+	/*
+	var k, v int
+	var x []int
+	for k, v = range x {}
+	*/
+	// 注意此时ir.DeclaredBy(n.Key, n)=false，因为k不是在for语句定义的!
 	if n.Key != nil && !ir.DeclaredBy(n.Key, n) {
+		// 保证n.Key.Sym().Def = n.Key ??
 		n.Key = AssignExpr(n.Key)
 	}
 	if n.Value != nil && !ir.DeclaredBy(n.Value, n) {
@@ -81,6 +97,7 @@ func typecheckrangeExpr(n *ir.RangeStmt) {
 			checkassign(n, nn)
 		}
 	}
+	// 如果k，v类型不对则报错
 	do(n.Key, tk)
 	do(n.Value, tv)
 }
@@ -93,11 +110,14 @@ func tcAssign(n *ir.AssignStmt) {
 		defer tracePrint("tcAssign", n)(nil)
 	}
 
+	// var X int
 	if n.Y == nil {
 		n.X = AssignExpr(n.X)
 		return
 	}
 
+	// var X int = 100
+	// X := 100
 	lhs, rhs := []ir.Node{n.X}, []ir.Node{n.Y}
 	assign(n, lhs, rhs)
 	n.X, n.Y = lhs[0], rhs[0]
@@ -113,11 +133,13 @@ func tcAssignList(n *ir.AssignListStmt) {
 		defer tracePrint("tcAssignList", n)(nil)
 	}
 
+	// assign直接更新n.Lhs和n.Rhs，因此不用在更新n
 	assign(n, n.Lhs, n.Rhs)
 }
 
 func assign(stmt ir.Node, lhs, rhs []ir.Node) {
 	// delicate little dance.
+	//
 	// the definition of lhs may refer to this assignment
 	// as its definition, in which case it will call tcAssign.
 	// in that case, do not call typecheck back, or it will cycle.
@@ -126,6 +148,9 @@ func assign(stmt ir.Node, lhs, rhs []ir.Node) {
 	// so that the conversion below happens).
 
 	checkLHS := func(i int, typ *types.Type) {
+		// 返回lhs[i].Sym().Def, 此时有两种情况：
+		//  - var x int; x = 100; Def=var语句
+		//  - x := 100; Def是这条语句本身
 		lhs[i] = Resolve(lhs[i])
 		if n := lhs[i]; typ != nil && ir.DeclaredBy(n, stmt) && n.Name().Ntype == nil {
 			if typ.Kind() != types.TNIL {
@@ -151,7 +176,7 @@ func assign(stmt ir.Node, lhs, rhs []ir.Node) {
 	if len(rhs) == 1 {
 		rhs[0] = typecheck(rhs[0], ctxExpr|ctxMultiOK)
 		if rtyp := rhs[0].Type(); rtyp != nil && rtyp.IsFuncArgStruct() {
-			cr = rtyp.NumFields()
+			cr = rtyp.NumFields() // kind=TSTRUCT
 		}
 	} else {
 		Exprs(rhs)
@@ -182,6 +207,7 @@ assignOK:
 	}
 
 	if len(lhs) != cr {
+		// 上面检查过函数的返回值个数并更新cr；也就是此时可能cr != len(rhs)
 		if r, ok := rhs[0].(*ir.CallExpr); ok && len(rhs) == 1 {
 			if r.Type() != nil {
 				base.ErrorfAt(stmt.Pos(), "assignment mismatch: %d variable%s but %v returns %d value%s", len(lhs), plural(len(lhs)), r.X, cr, plural(cr))
@@ -202,7 +228,7 @@ assignOK:
 		stmt.SetOp(ir.OAS2FUNC)
 		r := rhs[0].(*ir.CallExpr)
 		r.Use = ir.CallUseList
-		rtyp := r.Type()
+		rtyp := r.Type() // *types.Type (kind=TSTRUCT)
 
 		mismatched := false
 		failed := false
@@ -216,7 +242,7 @@ assignOK:
 				mismatched = true
 			}
 		}
-		if mismatched && !failed {
+		if mismatched && !failed { // 注意正常情况下不用rewrite
 			rewriteMultiValueCall(stmt, r)
 		}
 		return
@@ -478,7 +504,7 @@ func tcSwitch(n *ir.SwitchStmt) {
 }
 
 func tcSwitchExpr(n *ir.SwitchStmt) {
-	t := types.Types[types.TBOOL]
+	t := types.Types[types.TBOOL] // switch {} 等价于 switch true {}，因此Tag的类型为bool
 	if n.Tag != nil {
 		n.Tag = Expr(n.Tag)
 		n.Tag = DefaultLit(n.Tag, nil)
@@ -549,6 +575,7 @@ func tcSwitchExpr(n *ir.SwitchStmt) {
 			//       case GOARCH == "arm":
 			//     which would both evaluate to false for non-ARM compiles.
 			if !n1.Type().IsBoolean() {
+				// 检查是否有重复的constant lit case出现
 				cs.add(ncase.Pos(), n1, "case", "switch")
 			}
 		}
@@ -626,7 +653,8 @@ func tcSwitchType(n *ir.SwitchStmt) {
 		if ncase.Var != nil {
 			// Assign the clause variable's type.
 			vt := t
-			if len(ls) == 1 {
+			if len(ls) == 1 { // switch x := v.(type) { case int: // type(x)=int; case int32, string: // type(x)=type(v) }
+				// case int: 只有一个类型，设置x类型为int，否则x类型为v的类型
 				if ls[0].Op() == ir.OTYPE {
 					vt = ls[0].Type()
 				} else if !ir.IsNil(ls[0]) {

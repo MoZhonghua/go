@@ -149,7 +149,10 @@ func LoadPackage(filenames []string) {
 	base.Timer.Start("fe", "typecheck", "top1")
 	for i := 0; i < len(typecheck.Target.Decls); i++ {
 		n := typecheck.Target.Decls[i]
+		// op = ir.ODECL: 用来声明非全局变量?
+		// op = ir.OAS/ir.OAS2:  var x = 1; ir.OAS2用于多个变量同时赋值(包括:=定义)
 		if op := n.Op(); op != ir.ODCL && op != ir.OAS && op != ir.OAS2 && (op != ir.ODCLTYPE || !n.(*ir.Decl).X.Alias()) {
+			fmt.Printf("typecheck: pass1: decl: (%v) %v\n", n.Op().String(), n)
 			typecheck.Target.Decls[i] = typecheck.Stmt(n)
 		}
 	}
@@ -162,6 +165,7 @@ func LoadPackage(filenames []string) {
 	for i := 0; i < len(typecheck.Target.Decls); i++ {
 		n := typecheck.Target.Decls[i]
 		if op := n.Op(); op == ir.ODCL || op == ir.OAS || op == ir.OAS2 || op == ir.ODCLTYPE && n.(*ir.Decl).X.Alias() {
+			fmt.Printf("typecheck: pass2: decl: (%v) %v\n", n.Op().String(), n)
 			typecheck.Target.Decls[i] = typecheck.Stmt(n)
 		}
 	}
@@ -173,6 +177,7 @@ func LoadPackage(filenames []string) {
 	for i := 0; i < len(typecheck.Target.Decls); i++ {
 		n := typecheck.Target.Decls[i]
 		if n.Op() == ir.ODCLFUNC {
+			fmt.Printf("typecheck: pass3: func body: (%v) %v\n", n.Op(), n)
 			if base.Flag.W > 1 {
 				s := fmt.Sprintf("\nbefore typecheck %v", n)
 				ir.Dump(s, n)
@@ -192,6 +197,7 @@ func LoadPackage(filenames []string) {
 	base.Timer.Start("fe", "typecheck", "externdcls")
 	for i, n := range typecheck.Target.Externs {
 		if n.Op() == ir.ONAME {
+			fmt.Printf("typecheck: pass4: extn: (%v) %v\n", n.Op(), n)
 			typecheck.Target.Externs[i] = typecheck.Expr(typecheck.Target.Externs[i])
 		}
 	}
@@ -761,7 +767,7 @@ func (p *noder) expr(expr syntax.Expr) ir.Node {
 	case nil, *syntax.BadExpr:
 		return nil
 	case *syntax.Name:
-		n := p.mkname(expr)  // ir.Ident(op=ONONAME), ir.Name(op=ONAME/OTYPE/OLITERAL)
+		n := p.mkname(expr) // ir.Ident(op=ONONAME), ir.Name(op=ONAME/OTYPE/OLITERAL)
 		return n
 	case *syntax.BasicLit:
 		n := ir.NewBasicLit(p.pos(expr), p.basicLit(expr)) // *ir.BasicLit(op=OLITERAL)
@@ -2002,26 +2008,6 @@ func varEmbed(makeXPos func(syntax.Pos) src.XPos, name *ir.Name, decl *syntax.Va
 	}
 	typecheck.Target.Embeds = append(typecheck.Target.Embeds, name)
 	name.Embed = &embeds
-}
-
-func dumpIRNode(prefix string, n ir.Node) {
-	if n := len(prefix); n > 0 && prefix[n-1] != ':' {
-		prefix += ": "
-	}
-	fmt.Printf("%s%T; op=%v(%d)", prefix, n, n.Op(), int(n.Op()))
-
-	if sym := n.Sym(); sym != nil {
-		fmt.Printf("; sym=%v(pkg=%v)", sym.Name, sym.Pkg.Path)
-	}
-	if typ := n.Type(); typ != nil {
-		fmt.Printf("; type=%v", typ)
-	}
-
-	if name := n.Name(); name != nil && name.Ntype != nil{
-		fmt.Printf("; Ntype=%v", name.Ntype)
-	}
-
-	fmt.Printf("\n")
 }
 
 func mark(v ...interface{}) {
