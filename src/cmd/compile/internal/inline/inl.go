@@ -656,7 +656,6 @@ func inlnode(n ir.Node, maxCost int32, inlMap map[*ir.Func]bool, edit func(ir.No
 			break
 		}
 
-		fmt.Printf("  inlnode: %v; %v\n", n, inlCallee(call.X))
 		if fn := inlCallee(call.X); fn != nil && fn.Inl != nil {
 			n = mkinlcall(call, fn, maxCost, inlMap, edit)
 		}
@@ -772,7 +771,6 @@ var SSADumpInline = func(*ir.Func) {}
 //
 // 可能返回原来的n
 func mkinlcall(n *ir.CallExpr, fn *ir.Func, maxCost int32, inlMap map[*ir.Func]bool, edit func(ir.Node) ir.Node) ir.Node {
-	fmt.Printf("  mkinlcall: %v\n", n)
 	if fn.Inl == nil {
 		if logopt.Enabled() {
 			logopt.LogOpt(n.Pos(), "cannotInlineCall", "inline", ir.FuncName(ir.CurFunc),
@@ -1187,6 +1185,8 @@ func (subst *inlsubst) fields(oldt *types.Type) []*types.Field {
 
 // clovar creates a new ONAME node for a local variable or param of a closure
 // inside a function being inlined.
+//
+// clovar 指的是处理closure中的一个变量，包括参数、局部变量、captured vars !!
 func (subst *inlsubst) clovar(n *ir.Name) *ir.Name {
 	// TODO(danscales): want to get rid of this shallow copy, with code like the
 	// following, but it is hard to copy all the necessary flags in a maintainable way.
@@ -1200,8 +1200,6 @@ func (subst *inlsubst) clovar(n *ir.Name) *ir.Name {
 	m := &ir.Name{}
 	*m = *n
 	m.Curfn = subst.newclofn
-	fmt.Printf("     colvar: %v; def=%v\n", n, n.Defn)
-	ir.DumpIRNode("        ", n.Defn)
 
 	switch defn := n.Defn.(type) {
 	case nil:
@@ -1229,9 +1227,11 @@ func (subst *inlsubst) clovar(n *ir.Name) *ir.Name {
 			m.Defn = subst.node(n.Defn)
 		}
 	case *ir.AssignStmt, *ir.AssignListStmt:
-		// return closure时, 只要是closure里自己声明的变量就是这种
-		//
 		// Mark node for reassignment at the end of inlsubst.node.
+		//
+		// closure中的局部变量; 此时m.Defn指向的是原来lit.Body中语句
+		// 需要修改为复制后的ir.Node，但是此时我们还没有复制和替换，做一个
+		// 标记，等替换完了再设置为正确值
 		m.Defn = &subst.defnMarker
 	case *ir.TypeSwitchGuard:
 		// TODO(mdempsky): Set m.Defn properly. See discussion on #45743.
@@ -1239,7 +1239,7 @@ func (subst *inlsubst) clovar(n *ir.Name) *ir.Name {
 		base.FatalfAt(n.Pos(), "unexpected Defn: %+v", defn)
 	}
 
-	if n.Outer != nil {
+	if n.Outer != nil { // captured var
 		// Either the outer variable is defined in function being inlined,
 		// and we will replace it with the substituted variable, or it is
 		// defined outside the function being inlined, and we should just
@@ -1256,6 +1256,15 @@ func (subst *inlsubst) clovar(n *ir.Name) *ir.Name {
 
 // closure does the necessary substitions for a ClosureExpr n and returns the new
 // closure node.
+//
+/*
+func x() {
+	_ = func() { g := 1; _ = g }
+}
+func z() {
+	x()  // 内联x()，多个调用点相当于多个FuncLit(ClosureExpr)，必须复制
+}
+*/
 func (subst *inlsubst) closure(n *ir.ClosureExpr) ir.Node {
 	m := ir.Copy(n)
 
@@ -1324,6 +1333,8 @@ func (subst *inlsubst) closure(n *ir.ClosureExpr) ir.Node {
 		nil, subst.fields(oldt.Params()), subst.fields(oldt.Results()))
 
 	newfn.Nname.SetType(newt)
+
+	// 这里面会处理defnMarker
 	newfn.Body = subst.list(oldfn.Body)
 
 	// Remove the nodes for the current closure from subst.inlvars
