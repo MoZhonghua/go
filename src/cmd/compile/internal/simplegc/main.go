@@ -4,12 +4,14 @@ import (
 	"bufio"
 	"cmd/compile/internal/amd64"
 	"cmd/compile/internal/base"
+	"cmd/compile/internal/deadcode"
 	"cmd/compile/internal/dwarfgen"
 	"cmd/compile/internal/escape"
 	"cmd/compile/internal/inline"
 	"cmd/compile/internal/ir"
 	"cmd/compile/internal/logopt"
 	"cmd/compile/internal/noder"
+	"cmd/compile/internal/pkginit"
 	"cmd/compile/internal/reflectdata"
 	"cmd/compile/internal/ssagen"
 	"cmd/compile/internal/typecheck"
@@ -199,6 +201,44 @@ func Main(archInit func(*ssagen.ArchInfo)) {
 	buf := bufio.NewWriter(f)
 	typecheck.WriteExports(buf)
 	buf.Flush()
+
+	dwarfgen.RecordPackageName()
+
+	// Build init task.
+	if initTask := pkginit.Task(); initTask != nil {
+		typecheck.Export(initTask)
+	}
+
+	// Eliminate some obviously dead code.
+	// Must happen after typechecking.
+	for _, n := range typecheck.Target.Decls {
+		if n.Op() == ir.ODCLFUNC {
+			deadcode.Func(n.(*ir.Func))
+		}
+	}
+
+	// Compute Addrtaken for names.
+	// We need to wait until typechecking is done so that when we see &x[i]
+	// we know that x has its address taken if x is an array, but not if x is a slice.
+	// We compute Addrtaken in bulk here.
+	// After this phase, we maintain Addrtaken incrementally.
+	if typecheck.DirtyAddrtaken {
+		typecheck.ComputeAddrtaken(typecheck.Target.Decls)
+		typecheck.DirtyAddrtaken = false
+	}
+	typecheck.IncrementalAddrtaken = true
+
+	if base.Debug.TypecheckInl != 0 {
+		// Typecheck imported function bodies if Debug.l > 1,
+		// otherwise lazily when used or re-exported.
+		typecheck.AllImportedBodies()
+	}
+
+	// Inlining
+	base.Timer.Start("fe", "inlining")
+	if base.Flag.LowerL != 0 {
+		inline.InlinePackage()
+	}
 }
 
 func makePos(b *src.PosBase, line, col uint) src.XPos {

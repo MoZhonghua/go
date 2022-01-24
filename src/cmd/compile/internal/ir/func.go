@@ -47,15 +47,17 @@ import (
 // The OCALLPART uses n.Func to record the linkage to
 // the generated ODCLFUNC, but there is no
 // pointer from the Func back to the OCALLPART.
+//
+// 考虑closure，函数有两部分: 代码+数据
 type Func struct {
 	miniNode
 	Body Nodes
 	Iota int64
 
-	Nname    *Name        // ONAME node
+	Nname    *Name        // ONAME node, 完整的函数名"(*T).nop"
 	OClosure *ClosureExpr // OCLOSURE node
 
-	Shortname *types.Sym
+	Shortname *types.Sym // 简单的函数名, func (*T) nop(){} => "nop"
 
 	// Extra entry code for the function. For example, allocate and initialize
 	// memory for escaping parameters.

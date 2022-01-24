@@ -62,7 +62,7 @@ func InlinePackage() {
 				// We allow inlining if there is no
 				// recursion, or the recursion cycle is
 				// across more than one function.
-				CanInline(n)
+				CanInline(n) // 这里是设置n本身是否可以被inlined到其他函数
 			} else {
 				if base.Flag.LowerM > 1 {
 					fmt.Printf("%v: cannot inline %v: recursive\n", ir.Line(n), n.Nname)
@@ -213,6 +213,7 @@ func Inline_Flood(n *ir.Name, exportsym func(*ir.Name)) {
 	}
 	fn.SetExportInline(true)
 
+	// 可能从__PKGDEF读取func body
 	typecheck.ImportedBody(fn)
 
 	var doFlood func(n ir.Node)
@@ -296,11 +297,12 @@ func (v *hairyVisitor) doNode(n ir.Node) bool {
 			}
 		}
 
-		if ir.IsIntrinsicCall(n) {
+		if ir.IsIntrinsicCall(n) { // ssagen.IsIntrinsicCall()
 			// Treat like any other node.
 			break
 		}
 
+		// 注意n.X的类型不定，通常是ir.Name，也可能是其他值，比如x()()
 		if fn := inlCallee(n.X); fn != nil && fn.Inl != nil {
 			v.budget -= fn.Inl.Cost
 			break
@@ -316,6 +318,8 @@ func (v *hairyVisitor) doNode(n ir.Node) bool {
 		if t == nil {
 			base.Fatalf("no function type for [%p] %+v\n", n.X, n.X)
 		}
+
+		// n.X: *ir.SelectorExpr, 其中的SelectorExpr.Selection字段记录了是具体哪个方法
 		fn := ir.MethodExprName(n.X).Func
 		if types.IsRuntimePkg(fn.Sym().Pkg) && fn.Sym().Name == "heapBits.nextArena" {
 			// Special case: explicitly allow
@@ -527,6 +531,7 @@ func InlineCalls(fn *ir.Func) {
 	ir.CurFunc = fn
 	maxCost := int32(inlineMaxBudget)
 	if isBigFunc(fn) {
+		// 函数本身越复杂越不应该inline函数调用
 		maxCost = inlineBigFunctionMaxCost
 	}
 	// Map to keep track of functions that have been inlined at a particular
@@ -540,7 +545,7 @@ func InlineCalls(fn *ir.Func) {
 	edit = func(n ir.Node) ir.Node {
 		return inlnode(n, maxCost, inlMap, edit)
 	}
-	ir.EditChildren(fn, edit)
+	ir.EditChildren(fn, edit) // 修改fn.Body
 	ir.CurFunc = savefn
 }
 
@@ -619,9 +624,9 @@ func inlnode(n ir.Node, maxCost int32, inlMap map[*ir.Func]bool, edit func(ir.No
 
 	ir.EditChildren(n, edit)
 
-	if as := n; as.Op() == ir.OAS2FUNC {
+	if as := n; as.Op() == ir.OAS2FUNC { // x, y = f()
 		as := as.(*ir.AssignListStmt)
-		if as.Rhs[0].Op() == ir.OINLCALL {
+		if as.Rhs[0].Op() == ir.OINLCALL { // mkinlcall()生成
 			as.Rhs = inlconv2list(as.Rhs[0].(*ir.InlinedCallExpr))
 			as.SetOp(ir.OAS2)
 			as.SetTypecheck(0)
@@ -650,6 +655,8 @@ func inlnode(n ir.Node, maxCost int32, inlMap map[*ir.Func]bool, edit func(ir.No
 		if ir.IsIntrinsicCall(call) {
 			break
 		}
+
+		fmt.Printf("  inlnode: %v; %v\n", n, inlCallee(call.X))
 		if fn := inlCallee(call.X); fn != nil && fn.Inl != nil {
 			n = mkinlcall(call, fn, maxCost, inlMap, edit)
 		}
@@ -670,17 +677,18 @@ func inlnode(n ir.Node, maxCost int32, inlMap map[*ir.Func]bool, edit func(ir.No
 
 	base.Pos = lno
 
-	if n.Op() == ir.OINLCALL {
+	if n.Op() == ir.OINLCALL { // mkinlcall()可能返回原来的n
 		ic := n.(*ir.InlinedCallExpr)
 		switch call.Use {
 		default:
-			ir.Dump("call", call)
 			base.Fatalf("call missing use")
 		case ir.CallUseExpr:
 			n = inlconv2expr(ic)
 		case ir.CallUseStmt:
 			n = inlconv2stmt(ic)
 		case ir.CallUseList:
+			// 指上面的 OAS2FUNC 的情况, x, y = f()
+			// 标记f()为 OINLCALL，但是不展开，递归返回后再处理
 			// leave for caller to convert
 		}
 	}
@@ -690,10 +698,16 @@ func inlnode(n ir.Node, maxCost int32, inlMap map[*ir.Func]bool, edit func(ir.No
 
 // inlCallee takes a function-typed expression and returns the underlying function ONAME
 // that it refers to if statically known. Otherwise, it returns nil.
+//
+// X(): fn=X，X本身可能是多种形式:
+//   - f(): *ir.Name
+//   - z()(): *ir.CallExpr
+//   - T.f(t): *ir.SelectorExpr
+//   - func() {}(): *ir.ClosureExpr
 func inlCallee(fn ir.Node) *ir.Func {
 	fn = ir.StaticValue(fn)
 	switch fn.Op() {
-	case ir.OMETHEXPR:
+	case ir.OMETHEXPR: // T.f(t)
 		fn := fn.(*ir.SelectorExpr)
 		n := ir.MethodExprName(fn)
 		// Check that receiver type matches fn.X.
@@ -703,12 +717,13 @@ func inlCallee(fn ir.Node) *ir.Func {
 			return nil
 		}
 		return n.Func
-	case ir.ONAME:
+	case ir.ONAME: // f()
 		fn := fn.(*ir.Name)
 		if fn.Class == ir.PFUNC {
+			// var x func(); x(); x.Class=PAUTO，不满足这个条件
 			return fn.Func
 		}
-	case ir.OCLOSURE:
+	case ir.OCLOSURE: // func(){}()
 		fn := fn.(*ir.ClosureExpr)
 		c := fn.Func
 		CanInline(c)
@@ -717,18 +732,25 @@ func inlCallee(fn ir.Node) *ir.Func {
 	return nil
 }
 
+// 把函数参数列表转换为普通变量声明
+// func x(a int, b string) => var a int; var b string;
+//
+// as: assignment: x(1, "a") => a = 1
 func inlParam(t *types.Field, as ir.InitNode, inlvars map[*ir.Name]*ir.Name) ir.Node {
+	// func nop(_ int) {}: 参数没有名字，nop中不可能引用
 	if t.Nname == nil {
 		return ir.BlankNode
 	}
-	n := t.Nname.(*ir.Name)
+	n := t.Nname.(*ir.Name) // func nop(_ int) {}
 	if ir.IsBlank(n) {
 		return ir.BlankNode
 	}
+
 	inlvar := inlvars[n]
 	if inlvar == nil {
 		base.Fatalf("missing inlvar for %v", n)
 	}
+
 	as.PtrInit().Append(ir.NewDecl(base.Pos, ir.ODCL, inlvar))
 	inlvar.Name().Defn = as
 	return inlvar
@@ -747,7 +769,10 @@ var SSADumpInline = func(*ir.Func) {}
 // parameters.
 // The result of mkinlcall MUST be assigned back to n, e.g.
 // 	n.Left = mkinlcall(n.Left, fn, isddd)
+//
+// 可能返回原来的n
 func mkinlcall(n *ir.CallExpr, fn *ir.Func, maxCost int32, inlMap map[*ir.Func]bool, edit func(ir.Node) ir.Node) ir.Node {
+	fmt.Printf("  mkinlcall: %v\n", n)
 	if fn.Inl == nil {
 		if logopt.Enabled() {
 			logopt.LogOpt(n.Pos(), "cannotInlineCall", "inline", ir.FuncName(ir.CurFunc),
@@ -840,6 +865,11 @@ func mkinlcall(n *ir.CallExpr, fn *ir.Func, maxCost int32, inlMap map[*ir.Func]b
 		if ln.Class == ir.PPARAMOUT { // return values handled below.
 			continue
 		}
+
+		// 注意是同名变量: func nop(x int); nop(1) => "x"/PPARAM -> "x"/PAUTO
+		//
+		// 不能直接用ln，因为多次内联这个函数时会有问题，必须新建一个*ir.Name
+		// 然后再复制body并把对应原来*ir.Name的引用替换为新建的*ir.Name
 		inlf := typecheck.Expr(inlvar(ln)).(*ir.Name)
 		inlvars[ln] = inlf
 		if base.Flag.GenDwarfInl > 0 {
@@ -904,7 +934,7 @@ func mkinlcall(n *ir.CallExpr, fn *ir.Func, maxCost int32, inlMap map[*ir.Func]b
 
 	// Assign arguments to the parameters' temp names.
 	as := ir.NewAssignListStmt(base.Pos, ir.OAS2, nil, nil)
-	as.Def = true
+	as.Def = true // 为什么要设置这个? inlParam中添加了var x int声明
 	if n.Op() == ir.OCALLMETH {
 		sel := n.X.(*ir.SelectorExpr)
 		if sel.X == nil {
@@ -968,6 +998,7 @@ func mkinlcall(n *ir.CallExpr, fn *ir.Func, maxCost int32, inlMap map[*ir.Func]b
 		}
 	}
 
+	// 把所有的return语句转换为对~R.NN的赋值然后goto到这个label
 	retlabel := typecheck.AutoLabel(".i")
 
 	inlgen++
@@ -1039,7 +1070,7 @@ func mkinlcall(n *ir.CallExpr, fn *ir.Func, maxCost int32, inlMap map[*ir.Func]b
 	// instead we emit the things that the body needs
 	// and each use must redo the inlining.
 	// luckily these are small.
-	ir.EditChildren(call, edit)
+	ir.EditChildren(call, edit) // call.Body中再调用其他函数会被递归内联
 
 	if base.Flag.LowerM > 2 {
 		fmt.Printf("%v: After inlining %+v\n\n", ir.Line(call), call)
@@ -1169,6 +1200,8 @@ func (subst *inlsubst) clovar(n *ir.Name) *ir.Name {
 	m := &ir.Name{}
 	*m = *n
 	m.Curfn = subst.newclofn
+	fmt.Printf("     colvar: %v; def=%v\n", n, n.Defn)
+	ir.DumpIRNode("        ", n.Defn)
 
 	switch defn := n.Defn.(type) {
 	case nil:
@@ -1196,6 +1229,8 @@ func (subst *inlsubst) clovar(n *ir.Name) *ir.Name {
 			m.Defn = subst.node(n.Defn)
 		}
 	case *ir.AssignStmt, *ir.AssignListStmt:
+		// return closure时, 只要是closure里自己声明的变量就是这种
+		//
 		// Mark node for reassignment at the end of inlsubst.node.
 		m.Defn = &subst.defnMarker
 	case *ir.TypeSwitchGuard:
@@ -1404,7 +1439,7 @@ func (subst *inlsubst) node(n ir.Node) ir.Node {
 		typecheck.Stmts(init)
 		return ir.NewBlockStmt(base.Pos, init)
 
-	case ir.OGOTO:
+	case ir.OGOTO: // label需要改名，否则可能和调用者定义的label冲突
 		if subst.newclofn != nil {
 			// Don't do special substitutions if inside a closure
 			break
@@ -1470,6 +1505,7 @@ func (subst *inlsubst) updatedPos(xpos src.XPos) src.XPos {
 	return base.Ctxt.PosTable.XPos(pos)
 }
 
+// 注意只删掉没用的PAUTO（局部变量），出入参PPARAM/PPARAMOUT不会删除
 func pruneUnusedAutos(ll []*ir.Name, vis *hairyVisitor) []*ir.Name {
 	s := make([]*ir.Name, 0, len(ll))
 	for _, n := range ll {

@@ -155,7 +155,7 @@ internal/reflectdata/reflect.go
 internal/typebits/typebits.go
 
 2022-01-24
-internal/inline/inl.go
+internal/inline/inl.go *
 internal/devirtualize/devirtualize.go
 internal/escape/escape.go
 

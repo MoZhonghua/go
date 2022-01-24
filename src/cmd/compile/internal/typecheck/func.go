@@ -235,9 +235,15 @@ var globClosgen int32
 type T int
 func (t *T) nop(arg int) {}  // 注意这个函数的本质是nop(t *T, arg int) {}
 
-var x = T
+var x = &T{}
 var y = x.nop
 
+type funcval stuct {
+	fn: nop-fm
+	this: x
+}
+
+// .this 特殊语法，表示从context reg 读取funcval，然后取this字段
 y = func nop-fm(arg int) { return .this.nop(arg) }
 */
 func MethodValueWrapper(dot *ir.SelectorExpr) *ir.Func {
@@ -249,7 +255,7 @@ func MethodValueWrapper(dot *ir.SelectorExpr) *ir.Func {
 	meth := dot.Sel
 	rcvrtype := dot.X.Type()
 
-	sym := ir.MethodSymSuffix(rcvrtype, meth, "-fm") // 生成*T.nop-fm函数
+	sym := ir.MethodSymSuffix(rcvrtype, meth, "-fm") // 生成main.(*T).nop-fm函数
 
 	if sym.Uniq() {
 		return sym.Def.(*ir.Func)
@@ -282,7 +288,7 @@ func MethodValueWrapper(dot *ir.SelectorExpr) *ir.Func {
 
 	// Declare and initialize variable holding receiver.
 	ptr := ir.NewNameAt(base.Pos, Lookup(".this"))
-	ptr.Class = ir.PAUTOHEAP
+	ptr.Class = ir.PAUTOHEAP // 不用先声明，直接使用，后续阶段需要生成特殊代码来访问
 	ptr.SetType(rcvrtype)
 	ptr.Curfn = fn
 	ptr.SetIsClosureVar(true)
@@ -410,6 +416,7 @@ func tcFunc(n *ir.Func) {
 			return
 		}
 
+		// func (* T) nop() => "(*T).nop"，注意name都是不带pkg前缀的，通过Sym.Pkg字段区分
 		n.Nname.SetSym(ir.MethodSym(rcvr.Type, n.Shortname))
 		Declare(n.Nname, ir.PFUNC)
 	}

@@ -16,6 +16,45 @@ import (
 	"cmd/internal/src"
 )
 
+/*
+X.Sel 类型语句处理流程
+
+syntax阶段统一生成*syntax.SelectorExpr
+
+ir阶段统一生成*ir.SelectorExpr(op=OXDOT)
+
+typecheck阶段，根据不同X.Sel的具体含义设置具体的ODOTxxxx值(先是设置为ODOT)
+
+type T struct{}
+type I interface{ nop() }
+func (t *T) nop() {}
+
+var t *T = &T{}
+var t2 T = T{}
+var i I = t
+
+func main() {
+	// 之后会更新*ir.CallExpr op
+	t.nop()   // XDOT -> DOT -> DOTPTR -> DOTMETH (DOTPTR说明X是指针); call=OCALLMETH
+	t2.nop()  // XDOT -> DOT -> DOTMETH; call=OCALLMETH
+	i.nop()   // XDOT -> DOT -> DOTINTER; call=OCALLINTER
+
+	// 同时会生成一个closure: struct funcval { wrapper func(), this recvType }
+	// wrapper: 为自动生成一个wrapper函数，比如main.(*T).nop-fm()，注意fn不接受任何参数
+	// this:    为捕获的recv, 如果(*T).nop()是指针*T，否则就是T值
+	//     func wrapper() { .this.nop() }
+	// .this可以认为是特殊语法，从context register(dx) -> *funcval -> .this
+	//
+	_ = t.nop   // XDOT -> DOT -> DOTPTR -> DOTMETH -> OCALLPART
+	_ = t2.nop  // XDOT -> DOT -> DOTMETH -> OCALLPART
+	_ = i.nop   // XDOT -> DOT -> DOTINTER -> OCALLPART
+
+	_ = (*T).nop // XDOT -> DOT -> OMETHEXPR
+}
+
+
+*/
+
 // A Node is the abstract interface to an IR node.
 type Node interface {
 	// Formatting
@@ -542,6 +581,8 @@ func SetPos(n Node) src.XPos {
 
 // The result of InitExpr MUST be assigned back to n, e.g.
 // 	n.X = InitExpr(init, n.X)
+//
+// 在expr.init最前面追加初始化语句
 func InitExpr(init []Node, expr Node) Node {
 	if len(init) == 0 {
 		return expr
