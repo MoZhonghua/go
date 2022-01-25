@@ -1247,6 +1247,9 @@ func (subst *inlsubst) clovar(n *ir.Name) *ir.Name {
 		// being inlined).
 		s := subst.node(n.Outer).(*ir.Name)
 		if s == n.Outer {
+			// closure的n.Outer一定是指向inlined function中的变量
+			//  - 如果Outer是本身是在inlined function中定义，会被替换
+			//  - 如果Outer不是本身是在inlined function中定义，不会被替换
 			s = n.Outer.Outer
 		}
 		m.Outer = s

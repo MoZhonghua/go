@@ -638,7 +638,7 @@ func (n *StarExpr) SetOTYPE(t *types.Type) {
 type TypeAssertExpr struct {
 	miniExpr
 	X     Node
-	Ntype Ntype
+	Ntype Ntype // 两种选择: Ntype=nil但是通过SetType()显式设置；NType!=nil通过typecheck(n)来解析Ntype
 
 	// Runtime type information provided by walkDotType for
 	// assertions from non-empty interface to concrete type.
@@ -778,6 +778,11 @@ func IsAddressable(n Node) bool {
 	return false
 }
 
+// 反向追踪赋值语句，找到n的静态赋值
+//
+// 比如 var x I = T{}; y := x; z := y; StaticValue(z) => T{}
+// 注意要求所有赋值语句都是Define，比如 y :=x; y=z; 这里对y重新赋值
+// 就返回nil
 func StaticValue(n Node) Node {
 	for {
 		if n.Op() == OCONVNOP {

@@ -158,7 +158,7 @@ internal/typebits/typebits.go
 internal/inline/inl.go
 
 2022-01-25
-internal/devirtualize/devirtualize.go
+internal/devirtualize/devirtualize.go *
 internal/escape/escape.go
 internal/deadcode/deadcode.go
 internal/dwarfgen/dwarf.go

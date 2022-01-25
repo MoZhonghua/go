@@ -559,6 +559,7 @@ func tcDotType(n *ir.TypeAssertExpr) ir.Node {
 		return n
 	}
 
+	// 要转换到的类型有两种方式: Ntype为目标类型，或者n.SetType(t)直接设置
 	if n.Ntype != nil {
 		// var x I
 		// I: n.Ntype = *ir.Ident, op=ONONAME ==> n.Ntype = *ir.Name, op=OTYPE

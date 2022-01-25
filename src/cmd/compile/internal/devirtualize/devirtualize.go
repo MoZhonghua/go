@@ -24,25 +24,41 @@ func Func(fn *ir.Func) {
 	})
 }
 
+/*
+type I interface { nop() }
+type T struct { }
+func (t *T) nop() { }
+
+func main() {
+	var i I = &T{}
+
+	i.nop()
+}
+*/
+
 // Call devirtualizes the given call if possible.
 func Call(call *ir.CallExpr) {
 	if call.Op() != ir.OCALLINTER {
 		return
 	}
-	sel := call.X.(*ir.SelectorExpr)
-	r := ir.StaticValue(sel.X)
+	sel := call.X.(*ir.SelectorExpr) // sel = i.nop
+	r := ir.StaticValue(sel.X)       // r = I(&T{})
 	if r.Op() != ir.OCONVIFACE {
+		// &T{} => I(&T{}) => ir.OCONVIFACE
 		return
 	}
 	recv := r.(*ir.ConvExpr)
 
-	typ := recv.X.Type()
-	if typ.IsInterface() {
+	typ := recv.X.Type()   // typ = *T
+	if typ.IsInterface() { // 本是不是concrete type
 		return
 	}
 
-	dt := ir.NewTypeAssertExpr(sel.Pos(), sel.X, nil)
-	dt.SetType(typ)
+	// dt = i.(*T)
+	dt := ir.NewTypeAssertExpr(sel.Pos(), sel.X, nil) // sel.X = i
+	dt.SetType(typ)                                   // typ= *T
+
+	// x = i.(*T).nop
 	x := typecheck.Callee(ir.NewSelectorExpr(sel.Pos(), ir.OXDOT, dt, sel.Sel))
 	switch x.Op() {
 	case ir.ODOTMETH:
@@ -52,6 +68,7 @@ func Call(call *ir.CallExpr) {
 		}
 		call.SetOp(ir.OCALLMETH)
 		call.X = x
+		// call = i.(*T).nop(args...)，不需要修改args，因此recv参数是i.(*T)
 	case ir.ODOTINTER:
 		// Promoted method from embedded interface-typed field (#42279).
 		x := x.(*ir.SelectorExpr)
@@ -60,6 +77,7 @@ func Call(call *ir.CallExpr) {
 		}
 		call.SetOp(ir.OCALLINTER)
 		call.X = x
+		// call = i.(*T).nop(), nop是T中一个嵌入的interface提供的方法
 	default:
 		// TODO(mdempsky): Turn back into Fatalf after more testing.
 		if base.Flag.LowerM != 0 {

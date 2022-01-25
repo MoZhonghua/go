@@ -5,6 +5,7 @@ import (
 	"cmd/compile/internal/amd64"
 	"cmd/compile/internal/base"
 	"cmd/compile/internal/deadcode"
+	"cmd/compile/internal/devirtualize"
 	"cmd/compile/internal/dwarfgen"
 	"cmd/compile/internal/escape"
 	"cmd/compile/internal/inline"
@@ -239,6 +240,14 @@ func Main(archInit func(*ssagen.ArchInfo)) {
 	if base.Flag.LowerL != 0 {
 		inline.InlinePackage()
 	}
+
+	// Devirtualize.
+	for _, n := range typecheck.Target.Decls {
+		if n.Op() == ir.ODCLFUNC {
+			devirtualize.Func(n.(*ir.Func))
+		}
+	}
+	ir.CurFunc = nil
 }
 
 func makePos(b *src.PosBase, line, col uint) src.XPos {
