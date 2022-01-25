@@ -49,6 +49,14 @@ type bottomUpVisitor struct {
 // If recursive is false, the list consists of only a single function and its closures.
 // If recursive is true, the list may still contain only a single function,
 // if that function is itself recursive.
+//
+/*
+func main() { y() }
+func y() { x() }
+func x() {}
+
+main -> y -> x: 会调用三次analyze，参数为list=[x], list=[y], list=[main], recursive=false
+*/
 func VisitFuncsBottomUp(list []Node, analyze func(list []*Func, recursive bool)) {
 	var v bottomUpVisitor
 	v.analyze = analyze
@@ -87,6 +95,7 @@ func (v *bottomUpVisitor) visit(n *Func) uint32 {
 	Visit(n, func(n Node) {
 		switch n.Op() {
 		case ONAME:
+			// x(): n=x
 			if n := n.(*Name); n.Class == PFUNC {
 				do(n.Defn)
 			}

@@ -24,11 +24,13 @@ func Func(fn *ir.Func) {
 		}
 		switch n.Op() {
 		case ir.OIF:
+			// if const_bool { } else { }
 			n := n.(*ir.IfStmt)
 			if !ir.IsConst(n.Cond, constant.Bool) || len(n.Body) > 0 || len(n.Else) > 0 {
 				return
 			}
 		case ir.OFOR:
+			// for false { }
 			n := n.(*ir.ForStmt)
 			if !ir.IsConst(n.Cond, constant.Bool) || ir.BoolVal(n.Cond) {
 				return
@@ -38,6 +40,7 @@ func Func(fn *ir.Func) {
 		}
 	}
 
+	// 整个函数体都删掉?
 	fn.Body = []ir.Node{ir.NewBlockStmt(base.Pos, nil)}
 }
 
@@ -56,13 +59,20 @@ func stmts(nn *ir.Nodes) {
 		if n == nil {
 			continue
 		}
+		// 最大的用处应该就是根据配置的const value选择不同的逻辑分支
+		/*
+		const debug = false
+		if debug {
+			.....
+		}
+		*/
 		if n.Op() == ir.OIF {
 			n := n.(*ir.IfStmt)
 			n.Cond = expr(n.Cond)
 			if ir.IsConst(n.Cond, constant.Bool) {
 				var body ir.Nodes
-				if ir.BoolVal(n.Cond) {
-					n.Else = ir.Nodes{}
+				if ir.BoolVal(n.Cond) { // n.Cond=true
+					n.Else = ir.Nodes{} // 可以删除else语句，这里是设置为else { }
 					body = n.Body
 				} else {
 					n.Body = ir.Nodes{}
@@ -73,6 +83,12 @@ func stmts(nn *ir.Nodes) {
 				// isterminating is not used to avoid goto-related complications.
 				// We must be careful not to deadcode-remove labels, as they
 				// might be the target of a goto. See issue 28616.
+				/*
+				if true {
+					...
+					return  // 后面的语句不可能执行，可以删除
+				}
+				*/
 				if body := body; len(body) != 0 {
 					switch body[(len(body) - 1)].Op() {
 					case ir.ORETURN, ir.OTAILCALL, ir.OPANIC:

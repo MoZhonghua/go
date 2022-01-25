@@ -22,6 +22,7 @@ import (
 	"cmd/internal/objabi"
 	"cmd/internal/src"
 	"flag"
+	"fmt"
 	"internal/buildcfg"
 	"log"
 	"os"
@@ -235,6 +236,10 @@ func Main(archInit func(*ssagen.ArchInfo)) {
 		typecheck.AllImportedBodies()
 	}
 
+	ir.VisitFuncsBottomUp(typecheck.Target.Decls, func(list []*ir.Func, recursive bool) {
+		fmt.Printf("VisitFuncsBottomUp: %v; recursive=%v\n", list, recursive)
+	})
+
 	// Inlining
 	base.Timer.Start("fe", "inlining")
 	if base.Flag.LowerL != 0 {
@@ -248,6 +253,8 @@ func Main(archInit func(*ssagen.ArchInfo)) {
 		}
 	}
 	ir.CurFunc = nil
+
+	escape.Funcs(typecheck.Target.Decls)
 }
 
 func makePos(b *src.PosBase, line, col uint) src.XPos {

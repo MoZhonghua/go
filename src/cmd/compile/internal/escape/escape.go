@@ -1750,7 +1750,7 @@ func (l *leaks) AddResult(i, derefs int) { l.add(1+i, derefs) }
 
 func (l *leaks) setResult(i, derefs int) { l.set(1+i, derefs) }
 
-func (l leaks) get(i int) int { return int(l[i]) - 1 }
+func (l leaks) get(i int) int { return int(l[i]) - 1 } // l[i]=0时返回-1
 
 func (l *leaks) add(i, derefs int) {
 	if old := l.get(i); old < 0 || derefs < old {
@@ -1758,7 +1758,7 @@ func (l *leaks) add(i, derefs int) {
 	}
 }
 
-func (l *leaks) set(i, derefs int) {
+func (l *leaks) set(i, derefs int) { // l[i] = derefs+1
 	v := derefs + 1
 	if v < 0 {
 		base.Fatalf("invalid derefs count: %v", derefs)
@@ -1801,7 +1801,7 @@ func (l leaks) Encode() string {
 	for n > 0 && l[n-1] == 0 {
 		n--
 	}
-	s := "esc:" + string(l[:n])
+	s := "esc:" + string(l[:n]) // 把[]uint8转换为字符串
 	leakTagCache[l] = s
 	return s
 }
