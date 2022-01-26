@@ -167,7 +167,22 @@ internal/dwarfgen/dwinl.go
 internal/escape/escape.go
 
 2022-01-26
-internal/walk/walk.go *
+internal/walk/order.go
+internal/walk/stmt.go
+internal/walk/builtin.go
+internal/walk/assign.go
+internal/walk/complit.go
+internal/walk/expr.go
+internal/walk/temp.go
+internal/walk/race.go
+internal/walk/closure.go
+
+internal/walk/compare.go *
+internal/walk/convert.go
+internal/walk/range.go
+internal/walk/select.go
+internal/walk/switch.go
+internal/walk/walk.go
 
 TODO
 internal/amd64/ssa.go

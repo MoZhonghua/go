@@ -174,6 +174,8 @@ type location struct {
 	// transient reports whether the represented expression's
 	// address does not outlive the statement; that is, whether
 	// its storage can be immediately reused.
+	//
+	// 逃逸分析本身没用到，可以用来标记临时变量是否计算完之后可以复用，方便之后优化
 	transient bool
 
 	// paramEsc records the represented parameter's leak set.
@@ -275,15 +277,18 @@ func (b *batch) dumpGraph() {
 	fmt.Printf("------------graph dump-----------------\n")
 	for _, loc := range b.allLocs {
 		fmt.Printf(" loc: %v\n", loc)
+	}
+
+	for _, loc := range b.allLocs {
 		for _, edge := range loc.edges {
-			fmt.Printf("   %v -> this (defers=%d)\n", edge.src.n, edge.derefs)
+			fmt.Printf("   %v -> %v (w=%d)\n", edge.src.n, loc.n, edge.derefs)
 		}
 	}
 	fmt.Printf("------------graph dump end--------------\n")
 }
 
 func (loc *location) String() string {
-	s := fmt.Sprintf("%v", loc.n)
+	s := fmt.Sprintf("%v (derefs=%v)", loc.n, loc.derefs)
 	if loc.escapes {
 		s += " escapes"
 	}
@@ -1548,6 +1553,10 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 				l.escapes = true
 				enqueue(l)
 				continue
+				// 注意这里加入队列，但是没有再检查l.edges
+				// x -> l -> root
+				// 如果x逃逸，要么是路径上第一个，也就是x=l，要么不是第一个那么
+				// 以l为root时会标记，这里没必要再检查
 			}
 		}
 

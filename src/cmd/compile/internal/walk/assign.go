@@ -41,7 +41,7 @@ func walkAssign(init *ir.Nodes, n ir.Node) ir.Node {
 	}
 
 	left = walkExpr(left, init)
-	left = safeExpr(left, init)
+	left = safeExpr(left, init) // 注意必须是safeExpr，否则多次计算 x+=y 中的x会有问题，比如x是newInt()
 	if mapAppend != nil {
 		mapAppend.Args[0] = left
 	}
@@ -55,6 +55,8 @@ func walkAssign(init *ir.Nodes, n ir.Node) ir.Node {
 	as := n.(*ir.AssignStmt)
 
 	if oaslit(as, init) {
+		// var x = 100
+		// 把赋值写入到init中，不再需要这条语句
 		return ir.NewBlockStmt(as.Pos(), nil)
 	}
 
@@ -116,6 +118,7 @@ func walkAssign(init *ir.Nodes, n ir.Node) ir.Node {
 }
 
 // walkAssignDotType walks an OAS2DOTTYPE node.
+// x, ok = i.(int)
 func walkAssignDotType(n *ir.AssignListStmt, init *ir.Nodes) ir.Node {
 	walkExprListSafe(n.Lhs, init)
 	n.Rhs[0] = walkExpr(n.Rhs[0], init)
@@ -123,6 +126,7 @@ func walkAssignDotType(n *ir.AssignListStmt, init *ir.Nodes) ir.Node {
 }
 
 // walkAssignFunc walks an OAS2FUNC node.
+// x, y = f()
 func walkAssignFunc(init *ir.Nodes, n *ir.AssignListStmt) ir.Node {
 	init.Append(ir.TakeInit(n)...)
 
@@ -136,7 +140,7 @@ func walkAssignFunc(init *ir.Nodes, n *ir.AssignListStmt) ir.Node {
 	}
 	init.Append(r)
 
-	ll := ascompatet(n.Lhs, r.Type())
+	ll := ascompatet(n.Lhs, r.Type()) // r.Type(): TSTRUCT
 	return ir.NewBlockStmt(src.NoXPos, ll)
 }
 
@@ -147,6 +151,8 @@ func walkAssignList(init *ir.Nodes, n *ir.AssignListStmt) ir.Node {
 }
 
 // walkAssignMapRead walks an OAS2MAPR node.
+//
+// x, ok := map[1]
 func walkAssignMapRead(init *ir.Nodes, n *ir.AssignListStmt) ir.Node {
 	init.Append(ir.TakeInit(n)...)
 
@@ -247,13 +253,12 @@ func ascompatet(nl ir.Nodes, nr *types.Type) []ir.Node {
 	if len(nl) != nr.NumFields() {
 		base.Fatalf("ascompatet: assignment count mismatch: %d = %d", len(nl), nr.NumFields())
 	}
-
 	var nn ir.Nodes
 	for i, l := range nl {
 		if ir.IsBlank(l) {
 			continue
 		}
-		r := nr.Field(i)
+		r := nr.Field(i) // nr.Kind() = TSTRUCT
 
 		// Order should have created autotemps of the appropriate type for
 		// us to store results into.

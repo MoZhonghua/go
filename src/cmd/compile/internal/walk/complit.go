@@ -43,6 +43,8 @@ func walkCompLit(n ir.Node, init *ir.Nodes) ir.Node {
 // to execute concurrently without clobbering each others' data.
 type initContext uint8
 
+// init 函数是特殊的，只会且只会执行一次，不用考虑多线程同时
+// 执行函数时的初始化CompLit的问题
 const (
 	inInitFunction initContext = iota
 	inNonInitFunction
@@ -516,6 +518,7 @@ func maplit(n *ir.CompLitExpr, m ir.Node, init *ir.Nodes) {
 	appendWalkStmt(init, ir.NewUnaryExpr(base.Pos, ir.OVARKILL, tmpelem))
 }
 
+// var_ = n, n is complit
 func anylit(n ir.Node, var_ ir.Node, init *ir.Nodes) {
 	t := n.Type()
 	switch n.Op() {
@@ -616,12 +619,12 @@ func oaslit(n *ir.AssignStmt, init *ir.Nodes) bool {
 		// not a special composite literal assignment
 		return false
 	}
+
 	x := n.X.(*ir.Name)
 	if !types.Identical(n.X.Type(), n.Y.Type()) {
 		// not a special composite literal assignment
 		return false
 	}
-
 	switch n.Y.Op() {
 	default:
 		// not a special composite literal assignment

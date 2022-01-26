@@ -35,7 +35,7 @@ type miniExpr struct {
 const (
 	miniExprNonNil = 1 << iota
 	miniExprTransient
-	miniExprBounded
+	miniExprBounded  // 表示这个expr不用做bound check
 	miniExprImplicit // for use by implementations; not supported by every Expr
 	miniExprCheckPtr
 )

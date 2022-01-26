@@ -117,10 +117,12 @@ func walkClosure(clo *ir.ClosureExpr, init *ir.Nodes) ir.Node {
 	clofn.SetNeedctxt(true)
 	ir.CurFunc.Closures = append(ir.CurFunc.Closures, clofn)
 
-	typ := typecheck.ClosureType(clo)
+	typ := typecheck.ClosureType(clo) // 指对应的funcval类型，不是函数签名
 
 	clos := ir.NewCompLitExpr(base.Pos, ir.OCOMPLIT, ir.TypeNode(typ), nil)
 	clos.SetEsc(clo.Esc())
+
+	// 取得函数代码地址 + captured vars
 	clos.List = append([]ir.Node{ir.NewUnaryExpr(base.Pos, ir.OCFUNC, clofn.Nname)}, closureArgs(clo)...)
 
 	addr := typecheck.NodAddr(clos)
@@ -161,6 +163,11 @@ func closureArgs(clo *ir.ClosureExpr) []ir.Node {
 	return args
 }
 
+/*
+func (_ *X) f() {}
+var x X
+_ = x.f
+*/
 func walkCallPart(n *ir.SelectorExpr, init *ir.Nodes) ir.Node {
 	// Create closure in the form of a composite literal.
 	// For x.M with receiver (x) type T, the generated code looks like:
@@ -186,6 +193,8 @@ func walkCallPart(n *ir.SelectorExpr, init *ir.Nodes) ir.Node {
 
 	clos := ir.NewCompLitExpr(base.Pos, ir.OCOMPLIT, ir.TypeNode(typ), nil)
 	clos.SetEsc(n.Esc())
+
+	// 注意函数代码指针指向的是 "main.(*T).nop-fm" ，注意-fm后缀
 	clos.List = []ir.Node{ir.NewUnaryExpr(base.Pos, ir.OCFUNC, typecheck.MethodValueWrapper(n).Nname), n.X}
 
 	addr := typecheck.NodAddr(clos)

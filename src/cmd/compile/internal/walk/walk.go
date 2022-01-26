@@ -44,6 +44,9 @@ func Walk(fn *ir.Func) {
 	if base.Flag.W != 0 {
 		s := fmt.Sprintf("after walk %v", ir.CurFunc.Sym())
 		ir.DumpList(s, ir.CurFunc.Body)
+		for _, n := range ir.CurFunc.Body {
+			ir.DumpIRNode(">>>>", n)
+		}
 	}
 
 	if base.Flag.Cfg.Instrumenting {

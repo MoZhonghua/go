@@ -246,7 +246,7 @@ const (
 	OMAKESLICE     // make(Type[, Len[, Cap]]) (type is slice)
 	OMAKESLICECOPY // makeslicecopy(Type, Len, Cap) (type is slice; Len is length and Cap is the copied from slice)
 	// OMAKESLICECOPY is created by the order pass and corresponds to:
-	//  s = make(Type, Len); copy(s, Cap)
+	//  s = make(Type, Len); copy(s, Cap) // 注意Cap不是int，而是Slice!!
 	//
 	// Bounded can be set on the node when Len == len(Cap) is known at compile time.
 	//
@@ -638,14 +638,15 @@ const (
 	EscUnknown = iota
 	EscNone    // Does not escape to heap, result, or parameters.
 	EscHeap    // Reachable from the heap
-	EscNever   // By construction will not escape. ??
+	EscNever   // By construction will not escape. escape.go 中对顶层的defer 语句设置
 )
 
 func DumpIRNode(prefix string, n Node) {
+	oldPrefix := prefix
 	if n := len(prefix); n > 0 && prefix[n-1] != ':' {
 		prefix += ": "
 	}
-	fmt.Printf("%s%T; op=%v(%d)", prefix, n, n.Op(), int(n.Op()))
+	fmt.Printf("%s%v // type=%T, op=%v(%d)", prefix, n, n, n.Op().String(), int(n.Op()))
 
 	if sym := n.Sym(); sym != nil {
 		fmt.Printf("; sym=%v(pkg=%v)", sym.Name, sym.Pkg.Name)
@@ -659,4 +660,10 @@ func DumpIRNode(prefix string, n Node) {
 	}
 
 	fmt.Printf("\n")
+
+	if init, ok := n.(InitNode); ok && len(init.Init()) > 0 {
+		for _, x := range init.Init() {
+			DumpIRNode(oldPrefix + "    init", x)
+		}
+	}
 }

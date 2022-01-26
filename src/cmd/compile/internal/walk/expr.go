@@ -21,6 +21,9 @@ import (
 
 // The result of walkExpr MUST be assigned back to n, e.g.
 // 	n.Left = walkExpr(n.Left, init)
+//
+// init 参数用来存放自动生成的语句，因为返回值只有一个ir.Node，生成多条
+// 语句时一般是返回最后一条，其他的放到init中
 func walkExpr(n ir.Node, init *ir.Nodes) ir.Node {
 	if n == nil {
 		return n
@@ -93,6 +96,7 @@ func walkExpr1(n ir.Node, init *ir.Nodes) ir.Node {
 		return n
 
 	case ir.OMETHEXPR:
+		// T.method => "main.T.method" 函数名
 		// TODO(mdempsky): Do this right after type checking.
 		n := n.(*ir.SelectorExpr)
 		return n.FuncName()
@@ -344,6 +348,8 @@ func walkExprListSafe(s []ir.Node, init *ir.Nodes) {
 
 // return side-effect free and cheap n, appending side effects to init.
 // result may not be assignable.
+//
+// 类似safeExpr，只是总是把n的结果赋值给临时变量，然后返回临时变量
 func cheapExpr(n ir.Node, init *ir.Nodes) ir.Node {
 	switch n.Op() {
 	case ir.ONAME, ir.OLITERAL, ir.ONIL:
@@ -355,6 +361,26 @@ func cheapExpr(n ir.Node, init *ir.Nodes) ir.Node {
 
 // return side effect-free n, appending side effects to init.
 // result is assignable if n is.
+/*
+safeExpr("f()"):
+f() 显然有副作用，不能多次引用，否则会导致多次调用f()
+
+转换为 temp0 := f(); temp0
+n=temp0
+n.init=f()
+
+此时返回的n就是对*ir.Name("temp0")，这条语句没有副作用。
+
+常见的模式是 f() += 100 被改写为:
+
+n := safeExpr("f()")
+n = n + 100
+
+safe 意味着 cheap , 因为总是返回一个局部变量，符合cheap
+
+safeExpr(n) == cheapExpr(safeExpr(n))
+*/
+
 func safeExpr(n ir.Node, init *ir.Nodes) ir.Node {
 	if n == nil {
 		return nil
@@ -425,6 +451,7 @@ func safeExpr(n ir.Node, init *ir.Nodes) ir.Node {
 	return cheapExpr(n, init)
 }
 
+// expr => temp := expr, return temp
 func copyExpr(n ir.Node, t *types.Type, init *ir.Nodes) ir.Node {
 	l := typecheck.Temp(t)
 	appendWalkStmt(init, ir.NewAssignStmt(base.Pos, l, n))
@@ -498,6 +525,7 @@ func walkCall(n *ir.CallExpr, init *ir.Nodes) ir.Node {
 		reflectdata.MarkUsedIfaceMethod(n)
 	}
 
+	// func() {}()
 	if n.Op() == ir.OCALLFUNC && n.X.Op() == ir.OCLOSURE {
 		directClosureCall(n)
 	}
@@ -726,7 +754,7 @@ func mapKeyArg(fast int, n, key ir.Node) ir.Node {
 	case mapslow:
 		// standard version takes key by reference.
 		// order.expr made sure key is addressable.
-		return typecheck.NodAddr(key)
+		return typecheck.NodAddr(key) // &key
 	case mapfast32ptr:
 		// mapaccess and mapdelete don't distinguish pointer vs. integer key.
 		return ir.NewConvExpr(n.Pos(), ir.OCONVNOP, types.Types[types.TUINT32], key)

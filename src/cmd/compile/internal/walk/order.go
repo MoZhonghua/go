@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"go/constant"
 	"internal/buildcfg"
+	"runtime/debug"
 
 	"cmd/compile/internal/base"
 	"cmd/compile/internal/escape"
@@ -66,6 +67,14 @@ func order(fn *ir.Func) {
 	}
 
 	orderBlock(&fn.Body, map[string][]*ir.Name{})
+	if base.Flag.W > 1 {
+		s := fmt.Sprintf("\nafter order %v", fn.Sym())
+		ir.DumpList(s, fn.Body)
+
+		for _, n := range fn.Body {
+			ir.DumpIRNode(">>>>", n)
+		}
+	}
 }
 
 // append typechecks stmt and appends it to out.
@@ -83,6 +92,7 @@ func (o *orderState) newTemp(t *types.Type, clear bool) *ir.Name {
 	key := t.LongString()
 	a := o.free[key]
 	for i, n := range a {
+		// 找一个已有的同类型临时变量，避免创建新的临时变量
 		if types.Identical(t, n.Type()) {
 			v = a[i]
 			a[i] = a[len(a)-1]
@@ -95,6 +105,7 @@ func (o *orderState) newTemp(t *types.Type, clear bool) *ir.Name {
 		v = typecheck.Temp(t)
 	}
 	if clear {
+		// var v Type
 		o.append(ir.NewAssignStmt(base.Pos, v, nil))
 	}
 
@@ -118,6 +129,9 @@ func (o *orderState) copyExpr(n ir.Node) *ir.Name {
 // (The other candidate would be map access, but map access
 // returns a pointer to the result data instead of taking a pointer
 // to be filled in.)
+//
+// 比如n := <-c，最终是调用runtime.recv(c, &n)
+// 因此需要先初始化n
 func (o *orderState) copyExprClear(n ir.Node) *ir.Name {
 	return o.copyExpr1(n, true)
 }
@@ -198,6 +212,7 @@ func (o *orderState) safeExpr(n ir.Node) ir.Node {
 		return typecheck.Expr(a)
 
 	case ir.ODEREF:
+		debug.PrintStack()
 		n := n.(*ir.StarExpr)
 		l := o.cheapExpr(n.X)
 		if l == n.X {
@@ -434,7 +449,7 @@ func orderMakeSliceCopy(s []ir.Node) {
 		return
 	}
 	mk.SetOp(ir.OMAKESLICECOPY)
-	mk.Cap = cp.Y
+	mk.Cap = cp.Y // 注意这里Cap不是int，而是slice!
 	// Set bounded when m = OMAKESLICE([]T, len(s)); OCOPY(m, s)
 	mk.SetBounded(mk.Len.Op() == ir.OLEN && ir.SameSafeExpr(mk.Len.(*ir.UnaryExpr).X, cp.Y))
 	as.Y = typecheck.Expr(mk)
@@ -643,6 +658,17 @@ func (o *orderState) stmt(n ir.Node) {
 		o.out = append(o.out, n)
 
 	case ir.OAS:
+		/*
+			func c() *int {}
+			func z() int {}
+			*c() = z()
+
+			order保证先调用z()，然后调用c()，最后赋值 =>
+
+			temp0 = z()
+			temp1 = c()
+			*temp1 = temp0
+		*/
 		n := n.(*ir.AssignStmt)
 		t := o.markTemp()
 		n.X = o.expr(n.X, nil)
@@ -1106,6 +1132,12 @@ func (o *orderState) exprNoLHS(n ir.Node) ir.Node {
 // to avoid copying the result of the expression to a temporary.)
 // The result of expr MUST be assigned back to n, e.g.
 // 	n.Left = o.expr(n.Left, lhs)
+//
+// 输出分为两部分: 在o.out中 和 最终返回的 node
+/*
+func c() int {}
+c() => o.out: [temp0 = c()],  return=temp0
+*/
 func (o *orderState) expr(n, lhs ir.Node) ir.Node {
 	if n == nil {
 		return n

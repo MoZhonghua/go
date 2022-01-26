@@ -40,6 +40,7 @@ import (
 //   }
 //   s
 func walkAppend(n *ir.CallExpr, init *ir.Nodes, dst ir.Node) ir.Node {
+	// dst = append(src, x, y, z)
 	if !ir.SameSafeExpr(dst, n.Args[0]) {
 		n.Args[0] = safeExpr(n.Args[0], init)
 		n.Args[0] = walkExpr(n.Args[0], init)
@@ -65,13 +66,14 @@ func walkAppend(n *ir.CallExpr, init *ir.Nodes, dst ir.Node) ir.Node {
 	}
 
 	argc := len(n.Args) - 1
-	if argc < 1 {
+	if argc < 1 { // x = append(c) 支持一个参数!
 		return nsrc
 	}
 
 	// General case, with no function calls left as arguments.
 	// Leave for gen, except that instrumentation requires old form.
 	if !base.Flag.Cfg.Instrumenting || base.Flag.CompilingRuntime {
+		// 注意一般情况下直接返回了
 		return n
 	}
 
@@ -85,8 +87,11 @@ func walkAppend(n *ir.CallExpr, init *ir.Nodes, dst ir.Node) ir.Node {
 	nif.Cond = ir.NewBinaryExpr(base.Pos, ir.OLT, ir.NewBinaryExpr(base.Pos, ir.OSUB, ir.NewUnaryExpr(base.Pos, ir.OCAP, ns), ir.NewUnaryExpr(base.Pos, ir.OLEN, ns)), na)
 
 	fn := typecheck.LookupRuntime("growslice") //   growslice(<type>, old []T, mincap int) (ret []T)
+	// func runtime.growslice(et *_type, old slice, cap int) slice
+	// fn.Type() = func(*byte, []any, int) []any
+	// 替换后为
+	// fn.Type() = func(*byte, []int, int) []int
 	fn = typecheck.SubstArgTypes(fn, ns.Type().Elem(), ns.Type().Elem())
-
 	nif.Body = []ir.Node{ir.NewAssignStmt(base.Pos, ns, mkcall1(fn, ns.Type(), nif.PtrInit(), reflectdata.TypePtr(ns.Type().Elem()), ns,
 		ir.NewBinaryExpr(base.Pos, ir.OADD, ir.NewUnaryExpr(base.Pos, ir.OLEN, ns), na)))}
 
@@ -118,6 +123,9 @@ func walkAppend(n *ir.CallExpr, init *ir.Nodes, dst ir.Node) ir.Node {
 // walkClose walks an OCLOSE node.
 func walkClose(n *ir.UnaryExpr, init *ir.Nodes) ir.Node {
 	// cannot use chanfn - closechan takes any, not chan any
+	//
+	// closechan 函数签名都是在 ../typecheck/builtin.go:126
+	// 不是runtime.closechan的签名!
 	fn := typecheck.LookupRuntime("closechan")
 	fn = typecheck.SubstArgTypes(fn, n.X.Type())
 	return mkcall1(fn, nil, init, n.X)
@@ -263,6 +271,8 @@ func walkMakeChan(n *ir.MakeExpr, init *ir.Nodes) ir.Node {
 }
 
 // walkMakeMap walks an OMAKEMAP node.
+//
+// 注意根据n是否逃逸会有差别很大的输出结果
 func walkMakeMap(n *ir.MakeExpr, init *ir.Nodes) ir.Node {
 	t := n.Type()
 	hmapType := reflectdata.MapType(t)
@@ -308,7 +318,6 @@ func walkMakeMap(n *ir.MakeExpr, init *ir.Nodes) ir.Node {
 			appendWalkStmt(init, nif)
 		}
 	}
-
 	if ir.IsConst(hint, constant.Int) && constant.Compare(hint.Val(), token.LEQ, constant.MakeInt64(reflectdata.BUCKETSIZE)) {
 		// Handling make(map[any]any) and
 		// make(map[any]any, hint) where hint <= BUCKETSIZE
@@ -653,6 +662,7 @@ func walkRecover(nn *ir.CallExpr, init *ir.Nodes) ir.Node {
 	return mkcall("gorecover", nn.Type(), init, fp)
 }
 
+// unsafe.Slice()
 func walkUnsafeSlice(n *ir.BinaryExpr, init *ir.Nodes) ir.Node {
 	ptr := safeExpr(n.X, init)
 	len := safeExpr(n.Y, init)

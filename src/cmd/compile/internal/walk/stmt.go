@@ -77,6 +77,7 @@ func walkStmt(n ir.Node) ir.Node {
 
 	// special case for a receive where we throw away
 	// the value received.
+	// 注意我们是在处理stmt，不是expr！因此可以说是丢弃<-ch的输出
 	case ir.ORECV:
 		n := n.(*ir.UnaryExpr)
 		return walkRecv(n)
