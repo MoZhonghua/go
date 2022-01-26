@@ -26,6 +26,8 @@ func findScope(marks []ir.Mark, pos src.XPos) ir.ScopeID {
 	if i == 0 {
 		return 0
 	}
+
+	// marks[i-1].Pos < pos < marks[i].Pos
 	return marks[i-1].Scope
 }
 
@@ -79,6 +81,7 @@ func scopePCs(fnsym *obj.LSym, marks []ir.Mark, dwarfScopes []dwarf.Scope) {
 		}
 		dwarfScopes[scope].AppendRange(dwarf.Range{Start: p0.Pc, End: p.Pc})
 		p0 = p
+		// scope可能不变
 		scope = findScope(marks, p0.Pos)
 	}
 	if p0.Pc < fnsym.Size {
@@ -90,6 +93,9 @@ func compactScopes(dwarfScopes []dwarf.Scope) []dwarf.Scope {
 	// Reverse pass to propagate PC ranges to parent scopes.
 	for i := len(dwarfScopes) - 1; i > 0; i-- {
 		s := &dwarfScopes[i]
+
+		// parent scope 的pc ranges应该包含所有的child scope的pc ranges
+		// 注意可能不连续，不能直接扩展start/end
 		dwarfScopes[s.Parent].UnifyRanges(s)
 	}
 
@@ -118,7 +124,7 @@ func (v varsByScopeAndOffset) Swap(i, j int) {
 }
 
 type varsByScope struct {
-	vars   []*dwarf.Var
+	vars   []*dwarf.Var // len(vars)=len(scopes)
 	scopes []ir.ScopeID
 }
 

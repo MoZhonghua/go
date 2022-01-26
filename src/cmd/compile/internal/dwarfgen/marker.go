@@ -14,7 +14,10 @@ import (
 // during DWARF generation.
 type ScopeMarker struct {
 	parents []ir.ScopeID
-	marks   []ir.Mark
+
+	// 每个mark表示从mark.Pos开始进入一个新的Scope(mark.ScopeID)
+	// 两种情况: 新建一个子scope，从子scope退出到父scope
+	marks []ir.Mark
 }
 
 // checkPos validates the given position and returns the current scope.
@@ -28,7 +31,7 @@ func (m *ScopeMarker) checkPos(pos src.XPos) ir.ScopeID {
 	}
 
 	last := &m.marks[len(m.marks)-1]
-	if xposBefore(pos, last.Pos) {
+	if xposBefore(pos, last.Pos) { // 要求 pos >= last.Pos
 		base.FatalfAt(pos, "non-monotonic scope positions\n\t%v: previous scope position", base.FmtPos(last.Pos))
 	}
 	return last.Scope
@@ -54,10 +57,13 @@ func (m *ScopeMarker) Pop(pos src.XPos) {
 }
 
 // Unpush removes the current scope, which must be empty.
+// empty指没有子scope?
 func (m *ScopeMarker) Unpush() {
 	i := len(m.marks) - 1
 	current := m.marks[i].Scope
 
+	// current创建时current=len(m.parents), 如果在current内部创建了子scope，会导致
+	// m.parents增加，当退出子scope返回到current时这个等式不成立
 	if current != ir.ScopeID(len(m.parents)) {
 		base.FatalfAt(m.marks[i].Pos, "current scope is not empty")
 	}
@@ -83,6 +89,8 @@ func (m *ScopeMarker) WriteTo(fn *ir.Func) {
 func (m *ScopeMarker) compactMarks() {
 	n := 0
 	for _, next := range m.marks {
+		// 同一个Pos连续的切换ScopeID，只取最后的结果
+		// 所有Scope已经在m.parents记录，不会导致scope丢失
 		if n > 0 && next.Pos == m.marks[n-1].Pos {
 			m.marks[n-1].Scope = next.Scope
 			continue

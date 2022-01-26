@@ -161,6 +161,7 @@ func (s *Scope) AppendRange(r Range) {
 
 // 每个函数对应一个InlCalls, 指这个函数中所有inlined call，可以递归展开
 // 因此形成多棵树, Root有inlined1和inlined2，inlined2有一个子节点inlined3
+// top的index为-1
 /*
 func top() {
 	inlined1()

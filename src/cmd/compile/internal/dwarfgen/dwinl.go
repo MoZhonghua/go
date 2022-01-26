@@ -34,6 +34,8 @@ func assembleInlines(fnsym *obj.LSym, dwVars []*dwarf.Var) dwarf.InlCalls {
 	}
 
 	// This maps inline index (from Ctxt.InlTree) to index in inlcalls.Calls
+	//
+	// inline index是全局计数器，这里我们需要处理fnsym这个函数涉及的inline tree
 	imap := make(map[int]int)
 
 	// Walk progs to build up the InlCalls data structure
@@ -57,10 +59,14 @@ func assembleInlines(fnsym *obj.LSym, dwVars []*dwarf.Var) dwarf.InlCalls {
 	// were produced by the inliner (dwv.InlIndex > 0) or were original
 	// vars/params from the function (dwv.InlIndex == 0).
 	for _, dwv := range dwVars {
-
 		vmap[dwv.InlIndex] = append(vmap[dwv.InlIndex], dwv)
 
 		// Zero index => var was not produced by an inline
+		//
+		// 最外层没有被inline的函数在inltree中index为-1
+		//
+		// dwv.InlIndex-1对应dwv在inltree中所有函数的的index, 因此0说明是最外层函数的变量，
+		// 不用处理
 		if dwv.InlIndex == 0 {
 			continue
 		}
@@ -107,6 +113,7 @@ func assembleInlines(fnsym *obj.LSym, dwVars []*dwarf.Var) dwarf.InlCalls {
 				}
 				continue
 			}
+			//  ii=0 还是被inlined ??
 			m = makePreinlineDclMap(fnsym)
 		} else {
 			ifnlsym := base.Ctxt.InlTree.InlinedFunction(int(ii - 1))
@@ -289,6 +296,8 @@ func insertInlCall(dwcalls *dwarf.InlCalls, inlIdx int, imap map[int]int) int {
 
 	if parCallIdx != -1 {
 		// Add this inline to parent's child list
+		//
+		// 注意上面的逻辑已经保证了parent节点已经创建
 		dwcalls.Calls[parCallIdx].Children = append(dwcalls.Calls[parCallIdx].Children, callIdx)
 	}
 
@@ -302,6 +311,9 @@ func insertInlCall(dwcalls *dwarf.InlCalls, inlIdx int, imap map[int]int) int {
 // calls C calls D" and all three callees are inlined (B, C, and D),
 // the index for a node from the inlined body of D will refer to the
 // call to D from C. Whew.
+//
+// 每个被inlined的函数调用对应一个index值。最外层的函数index为-1，
+// 之后每次+1，通过parent来形成InlineTree
 func posInlIndex(xpos src.XPos) int {
 	pos := base.Ctxt.PosTable.Pos(xpos)
 	if b := pos.Base(); b != nil {
@@ -412,7 +424,6 @@ func rangesContainsAll(parent, child []dwarf.Range) (bool, string) {
 // the extent of the top level function). A panic is issued if a
 // malformed range is found.
 func checkInlCall(funcName string, inlCalls dwarf.InlCalls, funcSize int64, idx, parentIdx int) {
-
 	// Callee
 	ic := inlCalls.Calls[idx]
 	callee := base.Ctxt.InlTree.InlinedFunction(ic.InlIndex).Name

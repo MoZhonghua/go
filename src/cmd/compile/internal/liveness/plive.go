@@ -59,6 +59,8 @@ import (
 //
 // If instead the generated code looked like:
 //
+//  OpVarDef理解为重置x的值，也就是之前的x值可以认为可以丢弃，接下来必须是
+//  重新写入x的值，在此之前不能读取x的值
 //	OpVarDef x
 //	base, len, cap = pieces of x[1:]
 //	x = {base, len, cap}
@@ -1507,7 +1509,7 @@ func WriteFuncMap(fn *ir.Func, abiInfo *abi.ABIParamResultInfo) {
 		return
 	}
 	nptr := int(abiInfo.ArgWidth() / int64(types.PtrSize))
-	bv := bitvec.New(int32(nptr) * 2)
+	bv := bitvec.New(int32(nptr) * 2) // *2 for what ?
 
 	for _, p := range abiInfo.InParams() {
 		typebits.Set(p.Type, p.FrameOffset(abiInfo), bv)

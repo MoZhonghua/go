@@ -12,6 +12,8 @@ const (
 	hp = 16777619
 )
 
+// 为什么不直接用一个map[bitvec.BitVec]struct{}来记录?
+
 // bvecSet is a set of bvecs, in initial insertion order.
 type bvecSet struct {
 	index []int           // hash -> uniq index. -1 indicates empty slot.
@@ -58,7 +60,7 @@ func (m *bvecSet) add(bv bitvec.BitVec) int {
 	h := hashbitmap(h0, bv) % uint32(len(index))
 	for {
 		j := index[h]
-		if j < 0 {
+		if j < 0 { // 找到了一个空的slot
 			// New bvec.
 			index[h] = len(m.uniq)
 			m.uniq = append(m.uniq, bv)
@@ -70,7 +72,7 @@ func (m *bvecSet) add(bv bitvec.BitVec) int {
 			return j
 		}
 
-		h++
+		h++ // hash碰撞，检查下一个slot
 		if h == uint32(len(index)) {
 			h = 0
 		}

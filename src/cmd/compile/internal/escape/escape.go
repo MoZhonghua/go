@@ -17,6 +17,25 @@ import (
 	"cmd/internal/src"
 )
 
+/*
+如果一个变量的地址流入了heap，那么变量本身也必须在heap中
+
+流入heap:
+  - 做为返回值
+  - 写入到全局变量中
+
+优化: dst = src
+ - 如果确定src的计算结果不包含指针，那么可以直接替换为 discard = src
+ - a || b，这类逻辑计算和数学计算也可以直接丢弃结果
+
+形成graph之后，以每个node做为根节点(root)，然后计算所有节点到root
+的最短路径（注意是加权路径且有负值，需要通过 Bellman-Ford 算法计算
+最短路径:
+  - 如果root为heap或者返回值，且node->root最短路径为负值，则node标记为逃逸
+  - 当node状态改变(non-escape => escape, non-transient => transient) 需要再
+    次以node为根节点扫描全图
+*/
+
 // Escape analysis.
 //
 // Here we analyze functions to determine which Go variables
@@ -109,6 +128,7 @@ type escape struct {
 
 	curfn *ir.Func // function being analyzed
 
+	// curfn中的所有label，记录每个label是否有forward goto而形成的unstructured loop
 	labels map[*types.Sym]labelState // known labels
 
 	// loopDepth counts the current loop nesting depth within
@@ -133,7 +153,7 @@ type location struct {
 
 	// derefs and walkgen are used during walkOne to track the
 	// minimal dereferences from the walk root.
-	derefs  int // >= -1
+	derefs  int // >= -1， 以某个节点为root扫描全图时自己到root的最短路径
 	walkgen uint32
 
 	// dst and dstEdgeindex track the next immediate assignment
@@ -224,6 +244,7 @@ func Batch(fns []*ir.Func, recursive bool) {
 		}
 		b.initFunc(fn)
 	}
+
 	for _, fn := range fns {
 		if !fn.IsHiddenClosure() {
 			b.walkFunc(fn)
@@ -241,12 +262,36 @@ func Batch(fns []*ir.Func, recursive bool) {
 
 	for _, loc := range b.allLocs {
 		if why := HeapAllocReason(loc.n); why != "" {
+			// 因为对象太大导致必须分配的堆上，所有loc = &src中的src
+			// 也必须分配到堆上
 			b.flow(b.heapHole().addr(loc.n, why), loc)
 		}
 	}
-
 	b.walkAll()
 	b.finish(fns)
+}
+
+func (b *batch) dumpGraph() {
+	fmt.Printf("------------graph dump-----------------\n")
+	for _, loc := range b.allLocs {
+		fmt.Printf(" loc: %v\n", loc)
+		for _, edge := range loc.edges {
+			fmt.Printf("   %v -> this (defers=%d)\n", edge.src.n, edge.derefs)
+		}
+	}
+	fmt.Printf("------------graph dump end--------------\n")
+}
+
+func (loc *location) String() string {
+	s := fmt.Sprintf("%v", loc.n)
+	if loc.escapes {
+		s += " escapes"
+	}
+
+	if loc.transient {
+		s += " transient"
+	}
+	return s
 }
 
 func (b *batch) with(fn *ir.Func) *escape {
@@ -257,6 +302,7 @@ func (b *batch) with(fn *ir.Func) *escape {
 	}
 }
 
+// 为fn中的所有变量分配一个*location，此时都是默认值后面会修改
 func (b *batch) initFunc(fn *ir.Func) {
 	e := b.with(fn)
 	if fn.Esc() != escFuncUnknown {
@@ -268,7 +314,7 @@ func (b *batch) initFunc(fn *ir.Func) {
 	}
 
 	// Allocate locations for local variables.
-	for _, n := range fn.Dcl {
+	for _, n := range fn.Dcl { // 此时Dcl不包括captured var
 		if n.Op() == ir.ONAME {
 			e.newLoc(n, false)
 		}
@@ -313,13 +359,16 @@ func (b *batch) walkFunc(fn *ir.Func) {
 
 func (b *batch) flowClosure(k hole, clo *ir.ClosureExpr) {
 	for _, cv := range clo.Func.ClosureVars {
-		n := cv.Canonical()
-		loc := b.oldLoc(cv)
+		n := cv.Canonical() // n为被捕获变量的原始定义语句
+		loc := b.oldLoc(cv) // 应该就是n.Opt, loc==n.Opt
 		if !loc.captured {
 			base.FatalfAt(cv.Pos(), "closure variable never captured: %v", cv)
 		}
 
 		// Capture by value for variables <= 128 bytes that are never reassigned.
+		//
+		// 注意这个!reassigned条件，只要在原函数或者closure中有赋值修改x的语句，则必须
+		// capture by reference!!
 		n.SetByval(!loc.addrtaken && !loc.reassigned && n.Type().Size() <= 128)
 		if !n.Byval() {
 			n.SetAddrtaken(true)
@@ -566,6 +615,7 @@ func (e *escape) expr(k hole, n ir.Node) {
 	e.exprSkipInit(k, n)
 }
 
+// 创建边 n.location -> k.dst
 func (e *escape) exprSkipInit(k hole, n ir.Node) {
 	if n == nil {
 		return
@@ -582,6 +632,8 @@ func (e *escape) exprSkipInit(k hole, n ir.Node) {
 	if uintptrEscapesHack && n.Op() == ir.OCONVNOP && n.(*ir.ConvExpr).X.Type().IsUnsafePtr() {
 		// nop
 	} else if k.derefs >= 0 && !n.Type().HasPointers() {
+		// n的计算结果本身不包含指针，可以丢弃n的结果
+		// k.derefs >= 0是什么？
 		k.dst = &e.blankLoc
 	}
 
@@ -912,6 +964,9 @@ func (e *escape) addr(n ir.Node) hole {
 	return k
 }
 
+// var x int
+// x = 100
+// addrs([x]) -> oldLoc(x).asHole()
 func (e *escape) addrs(l ir.Nodes) []hole {
 	var ks []hole
 	for _, n := range l {
@@ -975,6 +1030,7 @@ func (e *escape) assignList(dsts, srcs []ir.Node, why string, where ir.Node) {
 	e.reassigned(ks, where)
 }
 
+// src -> heapHole()，因此src必须分配在堆上??
 func (e *escape) assignHeap(src ir.Node, why string, where ir.Node) {
 	e.expr(e.heapHole().note(where, why), src)
 }
@@ -1168,8 +1224,8 @@ func (e *escape) inMutualBatch(fn *ir.Name) bool {
 // expression. E.g., when evaluating p in "x = **p", we'd have a hole
 // with dst==x and derefs==2.
 type hole struct {
-	dst    *location
-	derefs int // >= -1
+	dst    *location // 指的是lhs
+	derefs int       // >= -1; 这个是针对rhs，不是lhs
 	notes  *note
 
 	// addrtaken indicates whether this context is taking the address of
@@ -1202,6 +1258,10 @@ func (k hole) note(where ir.Node, why string) hole {
 	return k
 }
 
+// deref +1   *x = 1; **x = 2
+// addr  -1   &x = -1; &&x: error
+//
+// 特别的slice[i]也是也是一个deref操作
 func (k hole) shift(delta int) hole {
 	k.derefs += delta
 	if k.derefs < -1 {
@@ -1214,6 +1274,11 @@ func (k hole) shift(delta int) hole {
 func (k hole) deref(where ir.Node, why string) hole { return k.shift(1).note(where, why) }
 func (k hole) addr(where ir.Node, why string) hole  { return k.shift(-1).note(where, why) }
 
+// x.(T): x本身一定是接口类型, iface{ itab *itab, data uintptr }
+//  - 如果T也是也是接口: 只是切换itab字段，没有deref/addr操作
+//  - 如果T是concrete type:
+//    - data就是T的值: 直接返回iface.data，也是没有deref/addr操作，最常见的就是x.(*T)
+//    - data是指向T值的指针，此时返回的是*iface.data, 也就是有一个deref操作
 func (k hole) dotType(t *types.Type, where ir.Node, why string) hole {
 	if !t.IsInterface() && !types.IsDirectIface(t) {
 		k = k.shift(1)
@@ -1223,9 +1288,11 @@ func (k hole) dotType(t *types.Type, where ir.Node, why string) hole {
 
 // teeHole returns a new hole that flows into each hole of ks,
 // similar to the Unix tee(1) command.
+//
+//
 func (e *escape) teeHole(ks ...hole) hole {
 	if len(ks) == 0 {
-		return e.discardHole()
+		return e.discardHole() // hole.dst=e.blankLoc
 	}
 	if len(ks) == 1 {
 		return ks[0]
@@ -1246,6 +1313,7 @@ func (e *escape) teeHole(ks ...hole) hole {
 			base.Fatalf("teeHole: negative derefs")
 		}
 
+		// loc -> k，注意第二个参数是src，第一个参数是dst
 		e.flow(k, loc)
 	}
 	return loc.asHole()
@@ -1316,13 +1384,16 @@ func (b *batch) oldLoc(n *ir.Name) *location {
 	if n.Canonical().Opt == nil {
 		base.Fatalf("%v has no location", n)
 	}
-	return n.Canonical().Opt.(*location)
+	loc := n.Canonical().Opt.(*location)
+
+	return loc
 }
 
 func (l *location) asHole() hole {
 	return hole{dst: l}
 }
 
+// src -> k
 func (b *batch) flow(k hole, src *location) {
 	if k.addrtaken {
 		src.addrtaken = true
@@ -1335,6 +1406,8 @@ func (b *batch) flow(k hole, src *location) {
 	if dst == src && k.derefs >= 0 { // dst = dst, dst = *dst, ...
 		return
 	}
+
+	// k.dst = &src，而且k.dst逃逸到堆上，那么src也需要在堆上
 	if dst.escapes && k.derefs < 0 { // dst = &src
 		if base.Flag.LowerM >= 2 || logopt.Enabled() {
 			pos := base.FmtPos(src.n.Pos())
@@ -1373,6 +1446,9 @@ func (b *batch) walkAll() {
 	// LIFO queue, has enough room for e.allLocs and e.heapLoc.
 	todo := make([]*location, 0, len(b.allLocs)+1)
 	enqueue := func(loc *location) {
+		// queued 是为了把loc多次加入到根节点列表中: 当node状态
+		// 改变时需要重新以node为根结点扫描全图。如果此时node已经
+		// 在root队列中没必要再次添加
 		if !loc.queued {
 			todo = append(todo, loc)
 			loc.queued = true
@@ -1388,6 +1464,8 @@ func (b *batch) walkAll() {
 	for len(todo) > 0 {
 		root := todo[len(todo)-1]
 		todo = todo[:len(todo)-1]
+
+		// 开始扫描所有节点到root的最短路径(loc.edges记录的是入边)
 		root.queued = false
 
 		walkgen++
@@ -1474,11 +1552,17 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 		}
 
 		for i, edge := range l.edges {
+			// src本身已经逃逸，没必要更新(一定会有一次以edge.src为根结点扫描, 且edge.src.escapes=true)
 			if edge.src.escapes {
 				continue
 			}
+
+			// 边的权重(derefs >= -1), 上面限制了derefs >= 0, 因此d >= -1
 			d := derefs + edge.derefs
 			if edge.src.walkgen != walkgen || edge.src.derefs > d {
+				// edge.src.walkgen != walkgen: 本次扫描还没有遇到过edge.src
+				// edge.src.derefs > d: 最短路径值更新了，根据 Bellman-Ford 算法
+				//                      需要重新扫描src的所有边，加入到todo
 				edge.src.walkgen = walkgen
 				edge.src.derefs = d
 				edge.src.dst = l
@@ -1658,7 +1742,7 @@ func (b *batch) finish(fns []*ir.Func) {
 		fn.SetEsc(escFuncTagged)
 
 		narg := 0
-		for _, fs := range &types.RecvsParams {
+		for _, fs := range &types.RecvsParams { // recv + in params
 			for _, f := range fs(fn.Type()).Fields().Slice() {
 				narg++
 				f.Note = b.paramTag(fn, narg, f)
@@ -1727,6 +1811,11 @@ const numEscResults = 7
 // An leaks represents a set of assignment flows from a parameter
 // to the heap or to any of its function's (first numEscResults)
 // result parameters.
+//
+// 用来记录一个入参是否泄露到heap和前7个出参
+// leaks[0]对应到heap derefs，leaks[1..7]对应到第0-6个出参的derefs
+//
+// 注意不必是指针泄露，可以是值本身泄露到出参
 type leaks [1 + numEscResults]uint8
 
 // Empty reports whether l is an empty set (i.e., no assignment flows).
@@ -1996,6 +2085,8 @@ func mayAffectMemory(n ir.Node) bool {
 
 // HeapAllocReason returns the reason the given Node must be heap
 // allocated, or the empty string if it doesn't.
+//
+// 这个和逃逸分析无关，只是对象太大等原因导致必须在堆上
 func HeapAllocReason(n ir.Node) string {
 	if n == nil || n.Type() == nil {
 		return ""

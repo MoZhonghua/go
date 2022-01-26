@@ -22,7 +22,6 @@ import (
 	"cmd/internal/objabi"
 	"cmd/internal/src"
 	"flag"
-	"fmt"
 	"internal/buildcfg"
 	"log"
 	"os"
@@ -235,10 +234,6 @@ func Main(archInit func(*ssagen.ArchInfo)) {
 		// otherwise lazily when used or re-exported.
 		typecheck.AllImportedBodies()
 	}
-
-	ir.VisitFuncsBottomUp(typecheck.Target.Decls, func(list []*ir.Func, recursive bool) {
-		fmt.Printf("VisitFuncsBottomUp: %v; recursive=%v\n", list, recursive)
-	})
 
 	// Inlining
 	base.Timer.Start("fe", "inlining")

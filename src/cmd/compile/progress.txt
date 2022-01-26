@@ -160,11 +160,17 @@ internal/inline/inl.go
 2022-01-25
 internal/deadcode/deadcode.go
 internal/devirtualize/devirtualize.go
-internal/escape/escape.go ?
+internal/dwarfgen/marker.go
+internal/dwarfgen/scope.go
 internal/dwarfgen/dwarf.go
-internal/liveness/plive.go
+internal/dwarfgen/dwinl.go
+internal/escape/escape.go
+
+2022-01-26
+internal/walk/walk.go *
 
 TODO
-internal/walk/walk.go *
 internal/amd64/ssa.go
 internal/gc/main.go
+
+internal/liveness/plive.go ???
