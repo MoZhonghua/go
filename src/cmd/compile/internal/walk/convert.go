@@ -24,22 +24,33 @@ func walkConv(n *ir.ConvExpr, init *ir.Nodes) ir.Node {
 		return n.X
 	}
 	if n.Op() == ir.OCONVNOP && ir.ShouldCheckPtr(ir.CurFunc, 1) {
+		// var x unsafe.Pointer; _ = (*T)(x)
 		if n.Type().IsPtr() && n.X.Type().IsUnsafePtr() { // unsafe.Pointer to *T
 			return walkCheckPtrAlignment(n, init, nil)
 		}
+		// var x *T; _ = (unsafe.Pointer)(uintptr(unsafe.Pointer(x)) + 100)
+		// 注意检查x, x+100必须指向同一个内存对象内部
 		if n.Type().IsUnsafePtr() && n.X.Type().IsUintptr() { // uintptr to unsafe.Pointer
 			return walkCheckPtrArithmetic(n, init)
 		}
 	}
+
 	param, result := rtconvfn(n.X.Type(), n.Type())
 	if param == types.Txxx {
 		return n
 	}
+
+	// 只有某些架构下float/int转换会走到这里
 	fn := types.BasicTypeNames[param] + "to" + types.BasicTypeNames[result]
 	return typecheck.Conv(mkcall(fn, types.Types[result], init, typecheck.Conv(n.X, types.Types[param])), n.Type())
 }
 
 // walkConvInterface walks an OCONVIFACE node.
+// type T struct {}
+// type I interface {}
+// type I2 interface {}
+// var x T; _ = I(x)
+// var i2 I2; _ = I(i2)
 func walkConvInterface(n *ir.ConvExpr, init *ir.Nodes) ir.Node {
 	n.X = walkExpr(n.X, init)
 
@@ -47,19 +58,24 @@ func walkConvInterface(n *ir.ConvExpr, init *ir.Nodes) ir.Node {
 	toType := n.Type()
 
 	if !fromType.IsInterface() && !ir.IsBlank(ir.CurFunc.Nname) { // skip unnamed functions (func _())
+		// 比较fromType在当前函数中被用来转换为接口，也就是说fromType的
+		// 所有方法必须保留，不能在link中因为没有被调用就删掉
 		reflectdata.MarkTypeUsedInInterface(fromType, ir.CurFunc.LSym)
 	}
 
 	// typeword generates the type word of the interface value.
 	typeword := func() ir.Node {
 		if toType.IsEmptyInterface() {
+			// &LSym("main.*T")
 			return reflectdata.TypePtr(fromType)
 		}
+		// &LSym("main.*T,main.I")
 		return reflectdata.ITabAddr(fromType, toType)
 	}
 
 	// Optimize convT2E or convT2I as a two-word copy when T is pointer-shaped.
 	if types.IsDirectIface(fromType) {
+		// eface(type, data): 比如fromType是指针，此时不需要分配内存，直接用data值
 		l := ir.NewBinaryExpr(base.Pos, ir.OEFACE, typeword(), n.X)
 		l.SetType(toType)
 		l.SetTypecheck(n.Typecheck())
@@ -78,6 +94,8 @@ func walkConvInterface(n *ir.ConvExpr, init *ir.Nodes) ir.Node {
 	case fromType.IsBoolean() || (fromType.Size() == 1 && fromType.IsInteger()):
 		// n.Left is a bool/byte. Use staticuint64s[n.Left * 8] on little-endian
 		// and staticuint64s[n.Left * 8 + 7] on big-endian.
+		//
+		// *8 是因为静态数据是 Staticuint64s [256]uint64, 此处是通过字节索引
 		n.X = cheapExpr(n.X, init)
 		// byteindex widens n.Left so that the multiplication doesn't overflow.
 		index := ir.NewBinaryExpr(base.Pos, ir.OLSH, byteindex(n.X), ir.NewInt(3))
@@ -87,6 +105,8 @@ func walkConvInterface(n *ir.ConvExpr, init *ir.Nodes) ir.Node {
 		// The actual type is [256]uint64, but we use [256*8]uint8 so we can address
 		// individual bytes.
 		staticuint64s := ir.NewLinksymExpr(base.Pos, ir.Syms.Staticuint64s, types.NewArray(types.Types[types.TUINT8], 256*8))
+
+		// (([256*8]byte)(Staticuint64s))[int(n.X) << 3]
 		xe := ir.NewIndexExpr(base.Pos, staticuint64s, index)
 		xe.SetBounded(true)
 		value = xe
@@ -206,7 +226,7 @@ func walkConvInterface(n *ir.ConvExpr, init *ir.Nodes) ir.Node {
 
 // walkBytesRunesToString walks an OBYTES2STR or ORUNES2STR node.
 func walkBytesRunesToString(n *ir.ConvExpr, init *ir.Nodes) ir.Node {
-	a := typecheck.NodNil()
+	a := typecheck.NodNil() // *runtime.tmpBuf，可以为nil
 	if n.Esc() == ir.EscNone {
 		// Create temporary buffer for string on stack.
 		a = stackBufAddr(tmpstringbufsize, types.Types[types.TUINT8])
@@ -222,6 +242,8 @@ func walkBytesRunesToString(n *ir.ConvExpr, init *ir.Nodes) ir.Node {
 }
 
 // walkBytesToStringTemp walks an OBYTES2STRTMP node.
+//
+// 仅用在临时值[]byte -> string，比如var b []byte; _ = m[string(b)]
 func walkBytesToStringTemp(n *ir.ConvExpr, init *ir.Nodes) ir.Node {
 	n.X = walkExpr(n.X, init)
 	if !base.Flag.Cfg.Instrumenting {
@@ -363,6 +385,8 @@ func convFuncName(from, to *types.Type) (fnname string, argType *types.Type, nee
 // name can be derived from the names of the returned types.
 //
 // If no such function is necessary, it returns (Txxx, Txxx).
+//
+// 简单来说有些架构下flaot/int互转需要调用runtime函数来实现
 func rtconvfn(src, dst *types.Type) (param, result types.Kind) {
 	if ssagen.Arch.SoftFloat {
 		return types.Txxx, types.Txxx
@@ -423,6 +447,10 @@ func byteindex(n ir.Node) ir.Node {
 	return n
 }
 
+// 插入一个函数调用checkptrAlignment(unsafe.Pointer(x), *_type)
+//
+// var x unsafe.Pointer; _ = (*T)(x)
+// 检查一下指针x指向的内存地址是否满足类型T的对齐要求，比如x=0x1，而T要求8字节对齐，显然有问题
 func walkCheckPtrAlignment(n *ir.ConvExpr, init *ir.Nodes, count ir.Node) ir.Node {
 	if !n.Type().IsPtr() {
 		base.Fatalf("expected pointer type: %v", n.Type())
@@ -502,6 +530,7 @@ func walkCheckPtrArithmetic(n *ir.ConvExpr, init *ir.Nodes) ir.Node {
 	slice := typecheck.MakeDotArgs(types.NewSlice(types.Types[types.TUNSAFEPTR]), originals)
 	slice.SetEsc(ir.EscNone)
 
+	// 要求 p 和 originals 指向同一个对象(以一次内存分配为单位)
 	init.Append(mkcall("checkptrArithmetic", nil, init, typecheck.ConvNop(cheap, types.Types[types.TUNSAFEPTR]), slice))
 	// TODO(khr): Mark backing store of slice as dead. This will allow us to reuse
 	// the backing store for multiple calls to checkptrArithmetic.

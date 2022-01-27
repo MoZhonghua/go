@@ -142,6 +142,7 @@ func WriteEmbed(v *ir.Name) {
 		}
 
 	case embedFiles:
+		// LSym.P = [.data, .len, .cap, file0, file1, ....]
 		slicedata := base.Ctxt.Lookup(`"".` + v.Sym().Name + `.files`)
 		off := 0
 		// []files pointed at by Files

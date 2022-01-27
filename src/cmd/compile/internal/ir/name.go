@@ -237,6 +237,7 @@ func (n *Name) SetWalkdef(x uint8) {
 	n.bits.set2(miniWalkdefShift, x)
 }
 
+// 只有最终出现在obj中才会有LSym(比如全局变量，字符串常量)，运行时的没有（比如局部变量）
 func (n *Name) Linksym() *obj.LSym               { return n.sym.Linksym() }
 func (n *Name) LinksymABI(abi obj.ABI) *obj.LSym { return n.sym.LinksymABI(abi) }
 

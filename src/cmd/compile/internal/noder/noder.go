@@ -632,6 +632,14 @@ func (p *noder) funcDecl(fun *syntax.FuncDecl) ir.Node {
 	f := ir.NewFunc(p.pos(fun))          // *ir.Func(op=ODCLFUNC)
 
 	if fun.Recv == nil {
+		/*
+			func init(){} // rename to init.0
+			func init(){} // rename to init.1
+
+			var x = 1000
+			var y = 1000
+			所有变量初始化会放到一个自动生成的init函数中 typecheck.InitTodoFunc
+		*/
 		if name.Name == "init" {
 			name = renameinit() // init.NNN
 			if len(t.Params) > 0 || len(t.Results) > 0 {

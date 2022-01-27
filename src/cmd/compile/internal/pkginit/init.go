@@ -14,6 +14,8 @@ import (
 	"cmd/internal/obj"
 )
 
+// 在 ../types2/initorder.go 也有循环依赖检查
+
 // Task makes and returns an initialization record for the package.
 // See runtime/proc.go:initTask for its layout.
 // The 3 tasks for initialization are:

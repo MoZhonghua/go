@@ -29,6 +29,8 @@ func walkSelect(sel *ir.SelectStmt) {
 	base.Pos = lno
 }
 
+// 需要把所有的case中channel对象取出形成一个casorder数组，然后做为参数调用runtime.selectgo
+// 会对一些简单情况做优化
 func walkSelectCases(cases []*ir.CommClause) []ir.Node {
 	ncas := len(cases)
 	sellineno := base.Pos
@@ -39,6 +41,18 @@ func walkSelectCases(cases []*ir.CommClause) []ir.Node {
 	}
 
 	// optimization: one-case select: single op.
+	//
+	// 只有一个case，直接去掉select语句
+	/*
+		select {
+		case c <- elem:
+			body...
+		}
+		=>
+		c<-elem // 只会再会重写为调用runtime.chansend1()
+		body...
+		break
+	*/
 	if ncas == 1 {
 		cas := cases[0]
 		ir.SetPos(cas)
@@ -66,7 +80,7 @@ func walkSelectCases(cases []*ir.CommClause) []ir.Node {
 		}
 
 		l = append(l, cas.Body...)
-		l = append(l, ir.NewBranchStmt(base.Pos, ir.OBREAK, nil))
+		l = append(l, ir.NewBranchStmt(base.Pos, ir.OBREAK, nil)) // 加一条break是为什么
 		return l
 	}
 

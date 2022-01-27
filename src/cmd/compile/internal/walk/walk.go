@@ -357,6 +357,8 @@ func mayCall(n ir.Node) bool {
 }
 
 // itabType loads the _type field from a runtime.itab struct.
+//
+// 关键在于field本身类型和偏移量；不需要关心field所属的struct类型
 func itabType(itab ir.Node) ir.Node {
 	if itabTypeField == nil {
 		// runtime.itab's _type field

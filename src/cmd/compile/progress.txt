@@ -177,15 +177,26 @@ internal/walk/temp.go
 internal/walk/race.go
 internal/walk/closure.go
 
-internal/walk/compare.go *
+2022-01-27
+internal/walk/compare.go
 internal/walk/convert.go
 internal/walk/range.go
 internal/walk/select.go
 internal/walk/switch.go
 internal/walk/walk.go
+internal/staticdata/data.go
+internal/staticdata/embed.go
+internal/staticinit/sched.go
+internal/logopt/log_opts.go
+internal/logopt/escape.go
+internal/logopt/escape_bootstrap.go
+internal/pkginit/initorder.go
+internal/pkginit/init.go
+
 
 TODO
+
+
 internal/amd64/ssa.go
 internal/gc/main.go
-
 internal/liveness/plive.go ???

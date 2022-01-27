@@ -73,6 +73,8 @@ func walkCompare(n *ir.BinaryExpr, init *ir.Nodes) ir.Node {
 		return finishCompare(n, expr, init)
 	}
 
+	// concrete type op concrete type
+
 	// Must be comparison of array or struct.
 	// Otherwise back end handles it.
 	// While we're here, decide whether to
@@ -268,7 +270,15 @@ func walkCompare(n *ir.BinaryExpr, init *ir.Nodes) ir.Node {
 	return finishCompare(n, expr, init)
 }
 
+// 两个接口类型数据比较要求x，y必须是同一个接口；比较特别的是两个interface{}类型
+// 比较。注意空接口和非空接口的底层表示不同:
+//  - empty interface{}:     runtime.eface { *concrete_type, data uintptr }
+//  - nonempty interface{}:  runtime.iface { *itab, data uintptr }
+//
+// 注意两者都是2的word （16字节）
 func walkCompareInterface(n *ir.BinaryExpr, init *ir.Nodes) ir.Node {
+	// 注意比较data字段的时候需要根据concrete_type来比较，比如*T直接比较data字段
+	// 而如果是T，需要比较*data
 	n.Y = cheapExpr(n.Y, init)
 	n.X = cheapExpr(n.X, init)
 	eqtab, eqdata := reflectdata.EqInterface(n.X, n.Y)

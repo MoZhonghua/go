@@ -47,6 +47,7 @@ func checkptrStraddles(ptr unsafe.Pointer, size uintptr) bool {
 	return checkptrBase(ptr) != checkptrBase(end)
 }
 
+// 要求p 和 originals 指向同一个对象(以一次内存分配为单位)
 func checkptrArithmetic(p unsafe.Pointer, originals []unsafe.Pointer) {
 	if 0 < uintptr(p) && uintptr(p) < minLegalPointer {
 		throw("checkptr: pointer arithmetic computed bad pointer value")

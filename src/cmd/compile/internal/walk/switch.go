@@ -60,6 +60,7 @@ func walkSwitchExpr(sw *ir.SwitchStmt) {
 
 	cond = walkExpr(cond, sw.PtrInit())
 	if cond.Op() != ir.OLITERAL && cond.Op() != ir.ONIL {
+		// switch f() { } => temp0 := f(); switch temp0 { }
 		cond = copyExpr(cond, cond.Type(), &sw.Compiled)
 	}
 
@@ -124,6 +125,7 @@ type exprClause struct {
 	jmp    ir.Node
 }
 
+// case a, b, c: 会调用三次Add
 func (s *exprSwitch) Add(pos src.XPos, expr, jmp ir.Node) {
 	c := exprClause{pos: pos, lo: expr, hi: expr, jmp: jmp}
 	if types.IsOrdered[s.exprname.Type().Kind()] && expr.Op() == ir.OLITERAL {
@@ -153,6 +155,15 @@ func (s *exprSwitch) flush() {
 	// (e.g., sort.Slice doesn't need to invoke the less function
 	// when there's only a single slice element).
 
+	/*
+		var s string
+		switch s {
+			case "1", "10":
+			case "2", "3":
+		}
+		把case中的字符串排序，然后把匹配转换为一个binary search，而不是
+		多个if s = "1"语句
+	*/
 	if s.exprname.Type().IsString() && len(cc) >= 2 {
 		// Sort strings by length and then by value. It is
 		// much cheaper to compare lengths than values, and
@@ -295,7 +306,7 @@ func endsInFallthrough(stmts []ir.Node) (bool, src.XPos) {
 // type switch.
 func walkSwitchType(sw *ir.SwitchStmt) {
 	var s typeSwitch
-	s.facename = sw.Tag.(*ir.TypeSwitchGuard).X
+	s.facename = sw.Tag.(*ir.TypeSwitchGuard).X // switch X.(type)
 	sw.Tag = nil
 
 	s.facename = walkExpr(s.facename, sw.PtrInit())
@@ -534,6 +545,8 @@ func (s *typeSwitch) flush() {
 //
 // leaf(i, nif) should setup nif (an OIF node) to test case i. In
 // particular, it should set nif.Left and nif.Nbody.
+//
+// 注意最终形成的代码不是递归形式，而是全部展开后的形式 if else tree!
 func binarySearch(n int, out *ir.Nodes, less func(i int) ir.Node, leaf func(i int, nif *ir.IfStmt)) {
 	const binarySearchMin = 4 // minimum number of cases for binary search
 

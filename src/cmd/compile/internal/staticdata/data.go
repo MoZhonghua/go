@@ -26,6 +26,8 @@ import (
 	"cmd/internal/src"
 )
 
+// 这里的初始化是通过link阶段重定向来完成，不是通过生成代码在运行时完成！
+
 // InitAddrOffset writes the static name symbol lsym to n, it does not modify n.
 // It's the caller responsibility to make sure lsym is from ONAME/PEXTERN node.
 func InitAddrOffset(n *ir.Name, noff int64, lsym *obj.LSym, off int64) {
@@ -65,6 +67,9 @@ const (
 	stringSymPattern = ".gostring.%d.%x"
 )
 
+// slice 和 string 的区别在于后者是 readonly 的, 因此相同内容string可以共享LSym
+// 而每个slice必须对应不同的LSym
+
 // StringSym returns a symbol containing the string s.
 // The symbol contains the string data, not a string header.
 func StringSym(pos src.XPos, s string) (data *obj.LSym) {
@@ -82,10 +87,12 @@ func StringSym(pos src.XPos, s string) (data *obj.LSym) {
 		symname = strconv.Quote(s)
 	}
 
+	// 比如go.string."abc"
 	symdata := base.Ctxt.Lookup(stringSymPrefix + symname)
 	if !symdata.OnList() {
+		// 比如s内容写入到LSym.P
 		off := dstringdata(symdata, 0, s, pos, "string")
-		objw.Global(symdata, int32(off), obj.DUPOK|obj.RODATA|obj.LOCAL)
+		objw.Global(symdata, int32(off), obj.DUPOK|obj.RODATA|obj.LOCAL) // symdata.Set(AttrOnList, true)
 		symdata.Set(obj.AttrContentAddressable, true)
 	}
 
@@ -157,6 +164,7 @@ func fileStringSym(pos src.XPos, file string, readonly bool, hash []byte) (*obj.
 		copy(hash, sum)
 	}
 
+	// 不把文件内容放到内存中，仅记录文件信息，输出obj时再读取并校验hash
 	var symdata *obj.LSym
 	if readonly {
 		symname := fmt.Sprintf(stringSymPattern, size, sum)
@@ -219,6 +227,9 @@ var (
 )
 
 // FuncLinksym returns n·f, the function value symbol for n.
+//
+// 不是指函数代码，而是指函数对应的struct funcval对象，比如func f() {}; var x = f
+// 需要生成一个funcval对象，然后x = &funcval
 func FuncLinksym(n *ir.Name) *obj.LSym {
 	if n.Op() != ir.ONAME || n.Class != ir.PFUNC {
 		base.Fatalf("expected func name: %v", n)
@@ -235,7 +246,7 @@ func FuncLinksym(n *ir.Name) *obj.LSym {
 	// Note NeedFuncSym also does package look-up of func sym names,
 	// but that it is only called serially, from the front end.
 	funcsymsmu.Lock()
-	sf, existed := s.Pkg.LookupOK(ir.FuncSymName(s))
+	sf, existed := s.Pkg.LookupOK(ir.FuncSymName(s)) // 加个.f后缀
 	// Don't export s·f when compiling for dynamic linking.
 	// When dynamically linking, the necessary function
 	// symbols will be created explicitly with NeedFuncSym.
@@ -361,6 +372,7 @@ func InitConst(n *ir.Name, noff int64, c ir.Node, wid int) {
 		}
 
 	case constant.String:
+		// 注意实际生成了两个LSym，一个用来存储string数据，一个是StringHeader
 		i := constant.StringVal(u)
 		symdata := StringSym(n.Pos(), i)
 		s.WriteAddr(base.Ctxt, noff, types.PtrSize, symdata, 0)

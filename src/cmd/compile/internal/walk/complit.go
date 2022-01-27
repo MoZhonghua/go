@@ -18,15 +18,32 @@ import (
 // walkCompLit walks a composite literal node:
 // OARRAYLIT, OSLICELIT, OMAPLIT, OSTRUCTLIT (all CompLitExpr), or OPTRLIT (AddrExpr).
 func walkCompLit(n ir.Node, init *ir.Nodes) ir.Node {
+	// 这里只处理函数中的常量，全局变量中的常量在 ../pkginit/init.go 中处理
 	if isStaticCompositeLiteral(n) && !ssagen.TypeOK(n.Type()) {
 		n := n.(*ir.CompLitExpr) // not OPTRLIT
 		// n can be directly represented in the read-only data section.
 		// Make direct reference to the static data. See issue 12841.
 		vstat := readonlystaticname(n.Type())
 		fixedlit(inInitFunction, initKindStatic, n, vstat, init)
+		/*
+			var x = [100]int{1,2}
+			转换为:
+			LSym("stmp_0").P = [1,2,...] // 静态部分
+			var x = stmp_0
+		*/
 		return typecheck.Expr(vstat)
 	}
 	var_ := typecheck.Temp(n.Type())
+	/*
+		var x = [100]int{1, 2, f()}
+		转换为:
+		LSym("stmp_0").P = [1,2,] //静态部分
+
+		// 动态部分
+		var autotmp_0 = stmp_0
+		autotmp_0[2] = f()
+		var x = stmp_0
+	*/
 	anylit(n, var_, init)
 	return var_
 }
@@ -59,7 +76,7 @@ func (c initContext) String() string {
 
 // readonlystaticname returns a name backed by a read-only static data symbol.
 func readonlystaticname(t *types.Type) *ir.Name {
-	n := staticinit.StaticName(t)
+	n := staticinit.StaticName(t) // ".stmp_0"
 	n.MarkReadonly()
 	n.Linksym().Set(obj.AttrContentAddressable, true)
 	n.Linksym().Set(obj.AttrLocal, true)
@@ -132,6 +149,9 @@ func getdyn(n ir.Node, top bool) initGenType {
 }
 
 // isStaticCompositeLiteral reports whether n is a compile-time constant.
+//
+// 可以理解为n的内容是const: 指针不是，虽然可以通过reloc静态生成，但是和指向的LSym的
+// 位置相关，不是固定值; 改成 isConstCompositeLiteral 更好
 func isStaticCompositeLiteral(n ir.Node) bool {
 	switch n.Op() {
 	case ir.OSLICELIT:
@@ -195,7 +215,10 @@ const (
 
 // fixedlit handles struct, array, and slice literals.
 // TODO: expand documentation.
+//
+// ctxt + kind 不同组合代表什么意思??
 func fixedlit(ctxt initContext, kind initKind, n *ir.CompLitExpr, var_ ir.Node, init *ir.Nodes) {
+	// var_ = n
 	isBlank := var_ == ir.BlankNode
 	var splitnode func(ir.Node) (a ir.Node, value ir.Node)
 	switch n.Op() {
@@ -215,6 +238,7 @@ func fixedlit(ctxt initContext, kind initKind, n *ir.CompLitExpr, var_ ir.Node, 
 			if isBlank {
 				return ir.BlankNode, r
 			}
+			// [3]int{1: 100} ==> a=var_[1], r=100
 			return a, r
 		}
 	case ir.OSTRUCTLIT:
@@ -224,12 +248,14 @@ func fixedlit(ctxt initContext, kind initKind, n *ir.CompLitExpr, var_ ir.Node, 
 				return ir.BlankNode, r.Value
 			}
 			ir.SetPos(r)
+			// var_.field = val
 			return ir.NewSelectorExpr(base.Pos, ir.ODOT, var_, r.Field), r.Value
 		}
 	default:
 		base.Fatalf("fixedlit bad op: %v", n.Op())
 	}
 
+	// 处理每个字段，根据value本身和ctxt+kind会选择不同的处理方式
 	for _, r := range n.List {
 		a, value := splitnode(r)
 		if a == ir.BlankNode && !staticinit.AnySideEffects(value) {
@@ -253,6 +279,7 @@ func fixedlit(ctxt initContext, kind initKind, n *ir.CompLitExpr, var_ ir.Node, 
 
 		islit := ir.IsConstNode(value)
 		if (kind == initKindStatic && !islit) || (kind == initKindDynamic && islit) {
+			// 静态部分不能出来非常量，反之动态部分不能处理常量
 			continue
 		}
 
@@ -262,6 +289,7 @@ func fixedlit(ctxt initContext, kind initKind, n *ir.CompLitExpr, var_ ir.Node, 
 		as = typecheck.Stmt(as).(*ir.AssignStmt)
 		switch kind {
 		case initKindStatic:
+			// 到这里说明value一定是常量，因此可以直接写入LSym("a").P
 			genAsStatic(as)
 		case initKindDynamic, initKindLocalCode:
 			a = orderStmtInPlace(as, map[string][]*ir.Name{})
@@ -518,7 +546,7 @@ func maplit(n *ir.CompLitExpr, m ir.Node, init *ir.Nodes) {
 	appendWalkStmt(init, ir.NewUnaryExpr(base.Pos, ir.OVARKILL, tmpelem))
 }
 
-// var_ = n, n is complit
+// var_ = n
 func anylit(n ir.Node, var_ ir.Node, init *ir.Nodes) {
 	t := n.Type()
 	switch n.Op() {
@@ -534,6 +562,13 @@ func anylit(n ir.Node, var_ ir.Node, init *ir.Nodes) {
 		anylit(n.FuncName(), var_, init)
 
 	case ir.OPTRLIT:
+		/*
+			var var_ = &Lit{...}
+
+			var r = new(Lit)
+			var_ = r
+			*var_ = Lit{...}
+		*/
 		n := n.(*ir.AddrExpr)
 		if !t.IsPtr() {
 			base.Fatalf("anylit: not ptr")
@@ -554,6 +589,15 @@ func anylit(n ir.Node, var_ ir.Node, init *ir.Nodes) {
 		anylit(n.X, var_, init)
 
 	case ir.OSTRUCTLIT, ir.OARRAYLIT:
+		/*
+			var x = [100]int{1, 2, f()}
+
+			LSym("stmp_0").P = [1,2,] //静态部分
+
+			var autotmp_0 = stmp_0    // 动态部分
+			autotmp_0[2] = f()
+			var x = stmp_0
+		*/
 		n := n.(*ir.CompLitExpr)
 		if !t.IsStruct() && !t.IsArray() {
 			base.Fatalf("anylit: not struct/array")
@@ -567,13 +611,15 @@ func anylit(n ir.Node, var_ ir.Node, init *ir.Nodes) {
 			if n.Op() == ir.OARRAYLIT {
 				ctxt = inNonInitFunction
 			}
-			fixedlit(ctxt, initKindStatic, n, vstat, init)
+
+			// LSym("vstat")中包含了CompLit中所有静态部分
+			fixedlit(ctxt, initKindStatic, n, vstat, init) // stmp_0 = { lit, _, lit }
 
 			// copy static to var
-			appendWalkStmt(init, ir.NewAssignStmt(base.Pos, var_, vstat))
+			appendWalkStmt(init, ir.NewAssignStmt(base.Pos, var_, vstat)) // var_ = stmp_0
 
 			// add expressions to automatic
-			fixedlit(inInitFunction, initKindDynamic, n, var_, init)
+			fixedlit(inInitFunction, initKindDynamic, n, var_, init) // var_[1] = ...
 			break
 		}
 
@@ -585,9 +631,11 @@ func anylit(n ir.Node, var_ ir.Node, init *ir.Nodes) {
 		}
 		// initialization of an array or struct with unspecified components (missing fields or arrays)
 		if isSimpleName(var_) || int64(len(n.List)) < components {
+			// 不是所有字段都有初始化，添加 var var_ T ，进行全0初始化
 			appendWalkStmt(init, ir.NewAssignStmt(base.Pos, var_, nil))
 		}
 
+		// 动态初始化var_的各个字段
 		fixedlit(inInitFunction, initKindLocalCode, n, var_, init)
 
 	case ir.OSLICELIT:

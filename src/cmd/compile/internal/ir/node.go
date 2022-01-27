@@ -666,4 +666,16 @@ func DumpIRNode(prefix string, n Node) {
 			DumpIRNode(oldPrefix + "    init", x)
 		}
 	}
+
+	if s, ok := n.(*SelectStmt); ok {
+		for _, x := range s.Compiled {
+			DumpIRNode(oldPrefix + "    compiled", x)
+		}
+	}
+
+	if s, ok := n.(*SwitchStmt); ok {
+		for _, x := range s.Compiled {
+			DumpIRNode(oldPrefix + "    compiled", x)
+		}
+	}
 }

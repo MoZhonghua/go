@@ -340,6 +340,9 @@ func (d *initDeps) foundDep(n *ir.Name) {
 // an OAS node's Pos may not be unique. For example, given the
 // declaration "var a, b = f(), g()", "a" must be ordered before "b",
 // but both OAS nodes use the "=" token's position as their Pos.
+//
+// var a, b = f(), g() 拆分为 var a = f(); var b = g()
+// 都没有依赖，如果随机选择一个先执行可能会会先调用g()，而原始的形式不符合
 type declOrder []ir.Node
 
 func (s declOrder) Len() int { return len(s) }

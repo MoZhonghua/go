@@ -1336,6 +1336,8 @@ func (e *escape) dcl(n *ir.Name) hole {
 // spill allocates a new location associated with expression n, flows
 // its address to k, and returns a hole that flows values to it. It's
 // intended for use with most expressions that allocate storage.
+//
+// 也就是说expr返回的是指针!
 func (e *escape) spill(k hole, n ir.Node) hole {
 	loc := e.newLoc(n, true)
 	e.flow(k.addr(n, "spill"), loc)

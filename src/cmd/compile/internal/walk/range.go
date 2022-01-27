@@ -16,6 +16,9 @@ import (
 	"cmd/internal/sys"
 )
 
+// var x []T; _ = x[index]
+// width: sizeof(T)
+// 是否可以快速计算x[index]的地址，AMD64可以通过lea来实现
 func cheapComputableIndex(width int64) bool {
 	switch ssagen.Arch.LinkArch.Family {
 	// MIPS does not have R+R addressing
@@ -38,6 +41,10 @@ func cheapComputableIndex(width int64) bool {
 // the returned node.
 func walkRange(nrange *ir.RangeStmt) ir.Node {
 	if isMapClear(nrange) {
+		// for k := range m {
+		//   delete(m, k)
+		// }
+		// 转换为 runtime.mapclear(m)
 		m := nrange.X
 		lno := ir.SetPos(m)
 		n := mapClear(m)
@@ -333,6 +340,8 @@ func isMapClear(n *ir.RangeStmt) bool {
 
 	k := n.Key
 	// Require k to be a new variable name.
+	//
+	// 否则结束后k应该是最后一个看到的key，不是无副作用的
 	if !ir.DeclaredBy(k, n) {
 		return false
 	}

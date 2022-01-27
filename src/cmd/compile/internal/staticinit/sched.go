@@ -18,6 +18,25 @@ import (
 	"cmd/internal/src"
 )
 
+// static init: 指的是值可以在编译或者链接（通过重定向）确定
+//
+/*
+var x = T{v1: 100, v2: z(), v3: []int{1, 2, f()}}
+
+// 静态部分, 通过写入LSym.P完成，可能有重定向(reloc)
+var stmp_1 = [3]int{1, 2, _}
+var stmp_0 = sliceheader{&stmp1, 3, 3}
+var x = T{100, _, stmp0}
+
+// 动态部分
+func init() {
+	x.v2 = z()
+	stmp_1[2] = f()
+}
+*/
+
+// 把Expr值写入到被初始化对象Xoffset处(按照Expr类型)
+// 对应CompLit中的每个Field
 type Entry struct {
 	Xoffset int64   // struct, array only
 	Expr    ir.Node // bytes of run-time computed expressions
@@ -47,7 +66,7 @@ func (s *Schedule) append(n ir.Node) {
 // StaticInit adds an initialization statement n to the schedule.
 func (s *Schedule) StaticInit(n ir.Node) {
 	if !s.tryStaticInit(n) {
-		if base.Flag.Percent != 0 {
+		if base.Flag.Percent != 0 { // -ldflags="-%=1"
 			ir.Dump("nonstatic", n)
 		}
 		s.append(n)
@@ -62,25 +81,40 @@ func (s *Schedule) tryStaticInit(nn ir.Node) bool {
 	// replaced by multiple simple OAS assignments, and the other
 	// OAS2* assignments mostly necessitate dynamic execution
 	// anyway.
+	//
+	// noder.go 中会把多个全局变量变成单个
+	/*
+		var x, y = 1, 2 => var x =1; var y =2;
+		var x, y = f(); // 不能展开，必须动态初始化
+	*/
 	if nn.Op() != ir.OAS {
 		return false
 	}
 	n := nn.(*ir.AssignStmt)
 	if ir.IsBlank(n.X) && !AnySideEffects(n.Y) {
+		// _ = 1000; 注意要求rhs没有副作用
+		// _ = sendmail(); 这种必须执行，不能丢弃
 		// Discard.
 		return true
 	}
 	lno := ir.SetPos(n)
 	defer func() { base.Pos = lno }()
 	nam := n.X.(*ir.Name)
+
+	// var x = 1000; // 注意此时已经设置Type(x) = int, 即1000这个常量的默认类型
 	return s.StaticAssign(nam, 0, n.Y, nam.Type())
 }
 
 // like staticassign but we are copying an already
 // initialized value r.
+//
+// 返回true: 表示已经生成了初始化l的代码，不需要生成赋值语句对应的代码并在init中执行
 func (s *Schedule) staticcopy(l *ir.Name, loff int64, rn *ir.Name, typ *types.Type) bool {
+	// var rn = r; var l = rn ===> var rn = r; var l = r
 	if rn.Class == ir.PFUNC {
 		// TODO if roff != 0 { panic }
+		//
+		// 注意这里必须是函数指针(f，(*T).f)，不能是closure (t.f)
 		staticdata.InitAddr(l, loff, staticdata.FuncLinksym(rn))
 		return true
 	}
@@ -97,7 +131,7 @@ func (s *Schedule) staticcopy(l *ir.Name, loff int64, rn *ir.Name, typ *types.Ty
 		return false
 	}
 	orig := rn
-	r := rn.Defn.(*ir.AssignStmt).Y
+	r := rn.Defn.(*ir.AssignStmt).Y // var rn = r
 	if r == nil {
 		// No explicit initialization value. Probably zeroed but perhaps
 		// supplied externally and of unknown value.
@@ -123,6 +157,7 @@ func (s *Schedule) staticcopy(l *ir.Name, loff int64, rn *ir.Name, typ *types.Ty
 		if loff != 0 || !types.Identical(typ, l.Type()) {
 			dst = ir.NewNameOffsetExpr(base.Pos, l, loff, typ)
 		}
+
 		s.append(ir.NewAssignStmt(base.Pos, dst, typecheck.Conv(r, typ)))
 		return true
 
@@ -133,10 +168,18 @@ func (s *Schedule) staticcopy(l *ir.Name, loff int64, rn *ir.Name, typ *types.Ty
 		if ir.IsZero(r) {
 			return true
 		}
+		/*
+			var x = 100
+			var x1 = x
+			var x2 = x1
+			l=x2，经过多次递归到r=100，此时直接赋值用Lit值初始化
+		*/
 		staticdata.InitConst(l, loff, r, int(typ.Width))
 		return true
 
 	case ir.OADDR:
+		/* var x int; var y = &x; */
+		// 直接通过reloc取符号x的地址即可，不用运行时计算
 		r := r.(*ir.AddrExpr)
 		if a, ok := r.X.(*ir.Name); ok && a.Op() == ir.ONAME {
 			staticdata.InitAddr(l, loff, staticdata.GlobalLinksym(a))
@@ -147,6 +190,12 @@ func (s *Schedule) staticcopy(l *ir.Name, loff int64, rn *ir.Name, typ *types.Ty
 		r := r.(*ir.AddrExpr)
 		switch r.X.Op() {
 		case ir.OARRAYLIT, ir.OSLICELIT, ir.OSTRUCTLIT, ir.OMAPLIT:
+			/*
+				var x = &[3]int{1,2,3}
+				stmp_0 = [3]int{1, 2, 3} // raw bytes
+				x = &stmp_0
+			*/
+
 			// copy pointer
 			staticdata.InitAddr(l, loff, staticdata.GlobalLinksym(s.Temps[r]))
 			return true
@@ -177,6 +226,7 @@ func (s *Schedule) staticcopy(l *ir.Name, loff int64, rn *ir.Name, typ *types.Ty
 			}
 			// Requires computation, but we're
 			// copying someone else's computation.
+			// *l[off] = *orig[off]
 			ll := ir.NewNameOffsetExpr(base.Pos, l, loff+e.Xoffset, typ)
 			rr := ir.NewNameOffsetExpr(base.Pos, orig, e.Xoffset, typ)
 			ir.SetPos(rr)
@@ -200,6 +250,7 @@ func (s *Schedule) StaticAssign(l *ir.Name, loff int64, r ir.Node, typ *types.Ty
 	}
 
 	assign := func(pos src.XPos, a *ir.Name, aoff int64, v ir.Node) {
+		// *(&a[aoff]) = v
 		if s.StaticAssign(a, aoff, v, v.Type()) {
 			return
 		}
@@ -241,16 +292,24 @@ func (s *Schedule) StaticAssign(l *ir.Name, loff int64, r ir.Node, typ *types.Ty
 		fallthrough
 
 	case ir.OPTRLIT:
+		/*
+			var x = &[]int{1, 2, 3}
+			转换为
+			var stmp_1 = [3]int{1, 2, 3} // LSym("stmp_1").P=[1,2,3]; 静态初始化,注意类型是array, [3]int
+			var stmp_0 = sliceheader{&stmp_1, 3, 3}
+			var x = &stmp_0
+		*/
 		r := r.(*ir.AddrExpr)
 		switch r.X.Op() {
 		case ir.OARRAYLIT, ir.OSLICELIT, ir.OMAPLIT, ir.OSTRUCTLIT:
 			// Init pointer.
-			a := StaticName(r.X.Type())
+			a := StaticName(r.X.Type()) // ".stmp_0"
 
 			s.Temps[r] = a
 			staticdata.InitAddr(l, loff, a.Linksym())
 
 			// Init underlying literal.
+			// 处理 var stmp_0 = []int{1, 2, 3} -> OSLICELIT 分支
 			assign(base.Pos, a, 0, r.X)
 			return true
 		}
@@ -296,6 +355,7 @@ func (s *Schedule) StaticAssign(l *ir.Name, loff int64, r ir.Node, typ *types.Ty
 		return true
 
 	case ir.OMAPLIT:
+		// 处理不了，不是简单的写入LSym.P，而是复杂的hashtable
 		break
 
 	case ir.OCLOSURE:
@@ -399,6 +459,8 @@ func (s *Schedule) initplan(n ir.Node) {
 	case ir.OSTRUCTLIT:
 		n := n.(*ir.CompLitExpr)
 		for _, a := range n.List {
+			// var t = T{1, 2} => var t = T{f1: 1, f2: 2}
+			// 在之前的阶段已经把这种匿名的字段赋值转换为显示的字段赋值
 			if a.Op() != ir.OSTRUCTKEY {
 				base.Fatalf("initplan structlit")
 			}
@@ -429,6 +491,12 @@ func (s *Schedule) addvalue(p *Plan, xoffset int64, n ir.Node) {
 
 	// special case: inline struct and array (not slice) literals
 	if isvaluelit(n) {
+		/*
+			type T1 struct { v int, v2 int }
+			type T2 struct { t1 T1 }
+			var c = T2 { t1: T1{v: 100, v2 int }}
+			// 变成直接写入T2.t1.v和T2.t1.v2字段，而不是先构造T1再赋值到T2.t1
+		*/
 		s.initplan(n)
 		q := s.Plans[n]
 		for _, qe := range q.E {
@@ -455,6 +523,7 @@ var statuniqgen int // name generator for static temps
 // Use readonlystaticname for read-only node.
 func StaticName(t *types.Type) *ir.Name {
 	// Don't use LookupNum; it interns the resulting string, but these are all unique.
+	// ".stmp_NNN"
 	n := typecheck.NewName(typecheck.Lookup(fmt.Sprintf("%s%d", obj.StaticNamePref, statuniqgen)))
 	statuniqgen++
 	typecheck.Declare(n, ir.PEXTERN)
@@ -463,6 +532,8 @@ func StaticName(t *types.Type) *ir.Name {
 }
 
 // StaticLoc returns the static address of n, if n has one, or else nil.
+//
+// n是否有静态地址，比如n是一个全局变量，函数名
 func StaticLoc(n ir.Node) (name *ir.Name, offset int64, ok bool) {
 	if n == nil {
 		return nil, 0, false
@@ -486,6 +557,9 @@ func StaticLoc(n ir.Node) (name *ir.Name, offset int64, ok bool) {
 		return name, offset, true
 
 	case ir.OINDEX:
+		// var x = [3]int{}
+		// var y = &x[1]          // x[1]也有静态地址
+		// var y = &x[getindex()] // 没有静态地址
 		n := n.(*ir.IndexExpr)
 		if n.X.Type().IsSlice() {
 			break
