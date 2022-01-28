@@ -72,12 +72,12 @@ type Node interface {
 
 	// Abstract graph structure, for generic traversals.
 	Op() Op
-	Init() Nodes  // 指的是for/switch/if语句中的init clause?
+	Init() Nodes // 指的是for/switch/if语句中的init clause?
 
 	// Fields specific to certain Ops only.
 	Type() *types.Type
 	SetType(t *types.Type)
-	Name() *Name  // 只有*Name(op=ONAME, OLITERAL, ...)返回自己，其他类型返回nil
+	Name() *Name // 只有*Name(op=ONAME, OLITERAL, ...)返回自己，其他类型返回nil
 	Sym() *types.Sym
 	Val() constant.Value
 	SetVal(v constant.Value)
@@ -211,9 +211,9 @@ const (
 	OCONV      // Type(X) (type conversion)
 	OCONVIFACE // Type(X) (type conversion, to interface)
 	//  用在修改MayBeShared node, 在原来node基础上创建一个nop node, 修改这个nop node
-	OCONVNOP   // Type(X) (type conversion, no effect)
-	OCOPY      // copy(X, Y)
-	ODCL       // var X (declares X of type X.Type)
+	OCONVNOP // Type(X) (type conversion, no effect)
+	OCOPY    // copy(X, Y)
+	ODCL     // var X (declares X of type X.Type)
 
 	// Used during parsing but don't last.
 	ODCLFUNC  // func f() or func (r) f()
@@ -252,29 +252,29 @@ const (
 	//
 	// This node is created so the walk pass can optimize this pattern which would
 	// otherwise be hard to detect after the order pass.
-	OMUL         // X * Y
-	ODIV         // X / Y
-	OMOD         // X % Y
-	OLSH         // X << Y
-	ORSH         // X >> Y
-	OAND         // X & Y
-	OANDNOT      // X &^ Y
-	ONEW         // new(X); corresponds to calls to new in source code
-	ONOT         // !X
-	OBITNOT      // ^X
-	OPLUS        // +X
-	ONEG         // -X
-	OOROR        // X || Y
-	OPANIC       // panic(X)
-	OPRINT       // print(List)
-	OPRINTN      // println(List)
-	OPAREN       // (X)
-	OSEND        // Chan <- Value
-	OSLICE       // X[Low : High] (X is untypechecked or slice)
-	OSLICEARR    // X[Low : High] (X is pointer to array)
-	OSLICESTR    // X[Low : High] (X is string)
-	OSLICE3      // X[Low : High : Max] (X is untypedchecked or slice)
-	OSLICE3ARR   // X[Low : High : Max] (X is pointer to array)
+	OMUL       // X * Y
+	ODIV       // X / Y
+	OMOD       // X % Y
+	OLSH       // X << Y
+	ORSH       // X >> Y
+	OAND       // X & Y
+	OANDNOT    // X &^ Y
+	ONEW       // new(X); corresponds to calls to new in source code
+	ONOT       // !X
+	OBITNOT    // ^X
+	OPLUS      // +X
+	ONEG       // -X
+	OOROR      // X || Y
+	OPANIC     // panic(X)
+	OPRINT     // print(List)
+	OPRINTN    // println(List)
+	OPAREN     // (X)
+	OSEND      // Chan <- Value
+	OSLICE     // X[Low : High] (X is untypechecked or slice)
+	OSLICEARR  // X[Low : High] (X is pointer to array)
+	OSLICESTR  // X[Low : High] (X is string)
+	OSLICE3    // X[Low : High : Max] (X is untypedchecked or slice)
+	OSLICE3ARR // X[Low : High : Max] (X is pointer to array)
 	// var x []int;  x = sliceheader(ptr, len, cap)
 	OSLICEHEADER // sliceheader{Ptr, Len, Cap} (Ptr is unsafe.Pointer, Len is length, Cap is capacity)
 	ORECOVER     // recover()
@@ -646,36 +646,36 @@ func DumpIRNode(prefix string, n Node) {
 	if n := len(prefix); n > 0 && prefix[n-1] != ':' {
 		prefix += ": "
 	}
-	fmt.Printf("%s%v // type=%T, op=%v(%d)", prefix, n, n, n.Op().String(), int(n.Op()))
+	fmt.Printf("%s%v // type=%T, op=O%v", prefix, n, n, n.Op().String())
 
 	if sym := n.Sym(); sym != nil {
-		fmt.Printf("; sym=%v(pkg=%v)", sym.Name, sym.Pkg.Name)
+		fmt.Printf("; sym=%v.%v", sym.Pkg.Name, sym.Name)
 	}
 	if typ := n.Type(); typ != nil {
 		fmt.Printf("; type=%v; kind=%v", typ, typ.Kind())
 	}
 
-	if name := n.Name(); name != nil && name.Ntype != nil{
-		fmt.Printf("; Ntype=%v", name.Ntype)
+	if name := n.Name(); name != nil && name.Ntype != nil {
+		fmt.Printf("; Ntype=%v, class=%v", name.Ntype, name.Class)
 	}
 
 	fmt.Printf("\n")
 
 	if init, ok := n.(InitNode); ok && len(init.Init()) > 0 {
 		for _, x := range init.Init() {
-			DumpIRNode(oldPrefix + "    init", x)
+			DumpIRNode(oldPrefix+"    init", x)
 		}
 	}
 
 	if s, ok := n.(*SelectStmt); ok {
 		for _, x := range s.Compiled {
-			DumpIRNode(oldPrefix + "    compiled", x)
+			DumpIRNode(oldPrefix+"    compiled", x)
 		}
 	}
 
 	if s, ok := n.(*SwitchStmt); ok {
 		for _, x := range s.Compiled {
-			DumpIRNode(oldPrefix + "    compiled", x)
+			DumpIRNode(oldPrefix+"    compiled", x)
 		}
 	}
 }

@@ -244,6 +244,11 @@ func appendParamOffsets(offsets []int64, at int64, t *types.Type) ([]int64, int6
 	return offsets, at
 }
 
+// call指令前后两部分:
+//  - call之前需要: push入参，push lr??; 后者对应的就是LocalsOffset()
+//  - call指令之后: push ret(call自动处理), push bp, 然后才是局部变量
+//       - 这是 ssagen.StackOffset() 在 ir.Name.FrameOffset() 减去的偏移量值
+
 // Thus 0(FP) is the first argument to the function, 和frame pointer是一个吗
 // 也就是可以认为frame pointer永远指向第一个参数的起始位置。
 //

@@ -5,6 +5,7 @@
 package ssagen
 
 import (
+	"fmt"
 	"internal/buildcfg"
 	"internal/race"
 	"math/rand"
@@ -37,6 +38,7 @@ func cmpstackvarlt(a, b *ir.Name) bool {
 		return needAlloc(b)
 	}
 
+	// 到这里needAlloc(a) == needAlloc(b)
 	if !needAlloc(a) {
 		return a.FrameOffset() < b.FrameOffset()
 	}
@@ -75,13 +77,45 @@ func (s byStackVar) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
 // allocate space. In particular, it excludes arguments and results, which are in
 // the callers frame.
 func needAlloc(n *ir.Name) bool {
+	// 注意这里是在寄存器中出参才需要在本函数的栈上分配空间:
+	//  - 出参在栈上，那么是在调用方的栈上，直接写入即可
+	//  - 出参在寄存器上，那么需要记录在本函数栈上，返回时再写入寄存器，此时反而需要分配栈空间
 	return n.Class == ir.PAUTO || n.Class == ir.PPARAMOUT && n.IsOutputParamInRegisters()
 }
+
+/*
+// -gcflags="-N -l"
+func f(x1, x2 int32) (x3, x4 int32) {
+	var x5, x6 = 1, 100
+	return x5, x6
+}
+
+ir.Name.FrameOffset():
+	x2: 4
+	x1: 0
+	-------------frame base
+	x3: -4
+	x4: -8
+	x5: -12
+	x6: -16
+
+	stksize=16
+
+如果x1和x3之间需要存储其他数据，比如ret address, bp, lr等等，则x3-x6需要向下推，
+即实际offset值变小，在 StackOffset 中计算
+
+AMD64中，需要记录ret，bp, 所以x3-x6的StackOffset(n)返回值减去16, 而x1,x2返回值不变
+*/
 
 func (s *ssafn) AllocFrame(f *ssa.Func) {
 	s.stksize = 0
 	s.stkptrsize = 0
 	fn := s.curfn
+
+	xlog("==========AllocFrame: %v\n", fn)
+	xlog("  len(Dcl): %v\n", len(fn.Dcl))
+	xlog("  len(RegAlloc): %v\n", len(f.RegAlloc))
+	xlog("  len(Blocks): %v\n", len(f.Blocks))
 
 	// Mark the PAUTO's unused.
 	for _, ln := range fn.Dcl {
@@ -98,6 +132,7 @@ func (s *ssafn) AllocFrame(f *ssa.Func) {
 
 	for _, b := range f.Blocks {
 		for _, v := range b.Values {
+			xlog("    block %v value %v; aux: %T, %v\n", b, v, v.Aux, v.Aux)
 			if n, ok := v.Aux.(*ir.Name); ok {
 				switch n.Class {
 				case ir.PPARAMOUT:
@@ -123,7 +158,7 @@ func (s *ssafn) AllocFrame(f *ssa.Func) {
 			// i.e., stack assign if AUTO, or if PARAMOUT in registers (which has no predefined spill locations)
 			continue
 		}
-		if !n.Used() {
+		if !n.Used() { // unused 一定会排在 used 后面，因此之后全部都是unused
 			fn.Dcl = fn.Dcl[:i]
 			break
 		}
@@ -148,11 +183,17 @@ func (s *ssafn) AllocFrame(f *ssa.Func) {
 		} else {
 			lastHasPtr = false
 		}
+		xlog("  SetFrameOffset: %v; %v\n", n, -s.stksize)
 		n.SetFrameOffset(-s.stksize)
 	}
 
 	s.stksize = types.Rnd(s.stksize, int64(types.RegSize))
 	s.stkptrsize = types.Rnd(s.stkptrsize, int64(types.RegSize))
+
+	for _, ln := range fn.Dcl {
+		xlog("  %v: offset: %v; width=%v; used=%v; stackoffset=%v\n",
+			ln, ln.FrameOffset(), ln.Type().Width, ln.Used(), StackOffsetDebug(ln))
+	}
 }
 
 const maxStackSize = 1 << 30
@@ -198,10 +239,18 @@ func init() {
 	}
 }
 
+func StackOffsetDebug(n *ir.Name) (v int32) {
+	slot := ssa.LocalSlot{N: n}
+	return StackOffset(slot)
+}
+
 // StackOffset returns the stack location of a LocalSlot relative to the
 // stack pointer, suitable for use in a DWARF location entry. This has nothing
 // to do with its offset in the user variable.
-func StackOffset(slot ssa.LocalSlot) int32 {
+func StackOffset(slot ssa.LocalSlot) (v int32) {
+	defer func() {
+		xlog("StackOffset: %v -> %v\n", slot.N, v)
+	}()
 	n := slot.N
 	var off int64
 	switch n.Class {
@@ -214,10 +263,10 @@ func StackOffset(slot ssa.LocalSlot) int32 {
 	case ir.PAUTO:
 		off = n.FrameOffset()
 		if base.Ctxt.FixedFrameSize() == 0 {
-			off -= int64(types.PtrSize)
+			off -= int64(types.PtrSize) // ret
 		}
 		if buildcfg.FramePointerEnabled {
-			off -= int64(types.PtrSize)
+			off -= int64(types.PtrSize) // save bp
 		}
 	}
 	return int32(off + slot.Off)
@@ -269,5 +318,13 @@ func CheckLargeStacks() {
 		} else {
 			base.ErrorfAt(large.pos, "stack frame too large (>1GB): %d MB locals + %d MB args", large.locals>>20, large.args>>20)
 		}
+	}
+}
+
+const debuglog = false
+
+func xlog(format string, args ...interface{}) {
+	if debuglog {
+		fmt.Printf(format, args...)
 	}
 }

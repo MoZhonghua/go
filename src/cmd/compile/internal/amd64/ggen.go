@@ -17,22 +17,36 @@ import (
 // no floating point in note handlers on Plan 9
 var isPlan9 = buildcfg.GOOS == "plan9"
 
+/*
+TEXT runtime.duffzero(SB) /data/go/src/runtime/duff_amd64.s
+  duff_amd64.s:8	0x470da0		440f113f		MOVUPS X15, 0(DI)    // 没有offset，只占用4字节
+  duff_amd64.s:9	0x470da4		440f117f10		MOVUPS X15, 0x10(DI) // 有offset，5字节
+  duff_amd64.s:10	0x470da9		440f117f20		MOVUPS X15, 0x20(DI) // 有offset，5字节
+  duff_amd64.s:11	0x470dae		440f117f30		MOVUPS X15, 0x30(DI) // 有offset，5字节
+  duff_amd64.s:12	0x470db3		488d7f40		LEAQ 0x40(DI), DI    // 4字节
+  
+  ... 共16个block
+*/
+
 // DUFFZERO consists of repeated blocks of 4 MOVUPSs + LEAQ,
 // See runtime/mkduff.go.
 const (
-	dzBlocks    = 16 // number of MOV/ADD blocks
-	dzBlockLen  = 4  // number of clears per block
-	dzBlockSize = 23 // size of instructions in a single block
+	dzBlocks    = 16 // number of MOV/ADD blocks;
+	dzBlockLen  = 4  // number of clears per block;
+	dzBlockSize = 23 // size of instructions in a single block;
 	dzMovSize   = 5  // size of single MOV instruction w/ offset
 	dzLeaqSize  = 4  // size of single LEAQ instruction
 	dzClearStep = 16 // number of bytes cleared by each MOV instruction
 
-	dzClearLen = dzClearStep * dzBlockLen // bytes cleared by one block
-	dzSize     = dzBlocks * dzBlockSize
+	dzClearLen = dzClearStep * dzBlockLen // bytes cleared by one block; 16*4=64
+	dzSize     = dzBlocks * dzBlockSize   // 16*23=368
 )
 
 // dzOff returns the offset for a jump into DUFFZERO.
 // b is the number of bytes to zero.
+//
+// 指要清零 b 个字节，需要直接跳转到 duffzero 函数的哪一行，然后执行
+// 完 duffzero 时正好把这 b 个字节全部清零
 func dzOff(b int64) int64 {
 	off := int64(dzSize)
 	off -= b / dzClearLen * dzBlockSize

@@ -29,6 +29,10 @@ func NoWriteBarrierRecCheck() {
 
 var nowritebarrierrecCheck *nowritebarrierrecChecker
 
+// 这里fn调用的函数列表有两个列表:
+//  - extraCalls[fn]
+//  - fn.NWBRCalls
+// BFS时会同时检查这两个列表
 type nowritebarrierrecChecker struct {
 	// extraCalls contains extra function calls that may not be
 	// visible during later analysis. It maps from the ODCLFUNC of

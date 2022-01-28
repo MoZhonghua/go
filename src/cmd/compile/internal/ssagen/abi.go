@@ -23,11 +23,19 @@ import (
 
 // SymABIs records information provided by the assembler about symbol
 // definition ABIs and reference ABIs.
+//
+// cd $GOROOT/src/runtime/
+// go tool asm -gensymabis -compiling-runtime -o /tmp/1.txt ./asm.s
+/*
+ref runtime.no_pointers_stackmap ABI0
+def "".sigpanic0 ABIInternal
+ref "".sigpanic ABIInternal
+*/
 type SymABIs struct {
 	defs map[string]obj.ABI
 	refs map[string]obj.ABISet
 
-	localPrefix string
+	localPrefix string // "".name 和 pkgpath.name 替换
 }
 
 func NewSymABIs(myimportpath string) *SymABIs {
@@ -81,6 +89,10 @@ func (s *SymABIs) ReadSymABIs(file string) {
 
 		parts := strings.Fields(line)
 		switch parts[0] {
+		/*
+		   def "".sigpanic0 ABIInternal
+		   ref "".sigpanic ABIInternal
+		*/
 		case "def", "ref":
 			// Parse line.
 			if len(parts) != 3 {
@@ -108,6 +120,12 @@ func (s *SymABIs) ReadSymABIs(file string) {
 
 // GenABIWrappers applies ABI information to Funcs and generates ABI
 // wrapper functions where necessary.
+//
+// ref: .s引用.go/其他.s中对象（通常是函数）
+//     - asm 调用 go 函数，ABIInternal -> ABI0
+//
+// def: .s定义了函数体+ABI，而.go中只有函数签名
+//     - go 调用 asm 函数，ABI0 -> ABIInternal
 func (s *SymABIs) GenABIWrappers() {
 	// For cgo exported symbols, we tell the linker to export the
 	// definition ABI to C. That also means that we don't want to
@@ -280,6 +298,8 @@ func forEachWrapperABI(fn *ir.Func, cb func(fn *ir.Func, wrapperABI obj.ABI)) {
 
 // makeABIAlias creates a new ABI alias so calls to f via wrapperABI
 // will be resolved directly to f's ABI by the linker.
+//
+// 注意这里没有真正生成代码, 仅仅生成一个size=0的特殊LSym
 func makeABIAlias(f *ir.Func, wrapperABI obj.ABI) {
 	// These LSyms have the same name as the native function, so
 	// we create them directly rather than looking them up.
@@ -296,6 +316,9 @@ func makeABIAlias(f *ir.Func, wrapperABI obj.ABI) {
 
 // makeABIWrapper creates a new function that will be called with
 // wrapperABI and calls "f" using f.ABI.
+//
+// 这里生成了函数体（[]ir.Node), 注意实际仅仅是一条ir.CallExpr，只是Wrapper.ABI
+// 会设置为合适值，汇编生成阶段再处理参数的转换
 func makeABIWrapper(f *ir.Func, wrapperABI obj.ABI) {
 	if base.Debug.ABIWrap != 0 {
 		fmt.Fprintf(os.Stderr, "=-= %v to %v wrapper for %v\n", wrapperABI, f.ABI, f)

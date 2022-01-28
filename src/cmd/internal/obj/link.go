@@ -989,6 +989,12 @@ func (fi *FuncInfo) UnspillRegisterArgs(last *Prog, pa ProgAlloc) *Prog {
 // variable on the stack. Architectures that use a link register save its value
 // on the stack in the function prologue and so always have a pointer between
 // the hardware stack pointer and the local variable area.
+//
+// call指令之后物理寄存器SP和局部变量之间的最小间隔，在AMD64中，call之后SP指向
+// ret address，下面的都可以放局部变量，因此为0
+//
+// ssgen.StackOffset() 检查 FixedFrameSize()=0 时会在局部变量的 FrameOffset() - PtrSize
+// 也就是说0实际隐含了call指令会push reg address ??
 func (ctxt *Link) FixedFrameSize() int64 {
 	switch ctxt.Arch.Family {
 	case sys.AMD64, sys.I386, sys.Wasm: // what's abort bp register?
@@ -998,6 +1004,7 @@ func (ctxt *Link) FixedFrameSize() int64 {
 		// just use that much stack always on ppc64x.
 		return int64(4 * ctxt.Arch.PtrSize)
 	default:
+		// ARM 中函数调用是 bl what; 返回地址不是压入栈，而是写入到r14，需要callee自己保存r14
 		return int64(ctxt.Arch.PtrSize)
 	}
 }

@@ -22,7 +22,7 @@ import (
 
 // markMoves marks any MOVXconst ops that need to avoid clobbering flags.
 func ssaMarkMoves(s *ssagen.State, b *ssa.Block) {
-	flive := b.FlagsLiveAtEnd
+	flive := b.FlagsLiveAtEnd // flags 指的是 x86 flags 寄存器
 	for _, c := range b.ControlValues() {
 		flive = c.Type.IsFlags() || flive
 	}
@@ -51,7 +51,7 @@ func loadByType(t *types.Type) obj.As {
 		case 1:
 			return x86.AMOVBLZX
 		case 2:
-			return x86.AMOVWLZX
+			return x86.AMOVWLZX // ZX: zero-extended. to avoid partial regiser write??
 		}
 	}
 	// Otherwise, there's no difference between load and store opcodes.
@@ -199,6 +199,12 @@ func getgFromTLS(s *ssagen.State, r int16) {
 func ssaGenValue(s *ssagen.State, v *ssa.Value) {
 	switch v.Op {
 	case ssa.OpAMD64VFMADD231SD:
+		// VFMADD231SD
+		// Performs a SIMD multiply-add computation on the low double-precision floating-point
+		// values using three source operands and writes the multiply-add result in the destination
+		// operand. The destination operand is also the first source operand. The first and second
+		// operand are XMM registers. The third source operand can be an XMM register or a 64-bit
+		// memory location.
 		p := s.Prog(v.Op.Asm())
 		p.From = obj.Addr{Type: obj.TYPE_REG, Reg: v.Args[2].Reg()}
 		p.To = obj.Addr{Type: obj.TYPE_REG, Reg: v.Reg()}
