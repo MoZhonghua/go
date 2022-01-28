@@ -45,6 +45,7 @@ func dumpexport(bout *bio.Writer) {
 	}
 }
 
+// 把.go 中的常量和结构体字段偏移量输出到 .h 文件中
 func dumpasmhdr() {
 	b, err := bio.Create(base.Flag.AsmHdr)
 	if err != nil {
@@ -89,6 +90,8 @@ func (p *exporter) markObject(n ir.Node) {
 	if n.Op() == ir.ONAME {
 		n := n.(*ir.Name)
 		if n.Class == ir.PFUNC {
+			// 如果 n 可以被内联，则把 n 和 n 调用的可以内联的函数
+			// 加入到 typecheck.Target.Export 列表
 			inline.Inline_Flood(n, typecheck.Export)
 		}
 	}

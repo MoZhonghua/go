@@ -127,8 +127,6 @@ func LoadPackage(filenames []string) {
 		p.processPragmas()
 	}
 
-	fmt.Printf("===========typecheck==================\n")
-
 	// Typecheck.
 	types.LocalPkg.Height = myheight
 	// typecheck.InitUniverse()在gc/main.go中已经调用

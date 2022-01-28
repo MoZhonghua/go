@@ -194,6 +194,16 @@ internal/pkginit/initorder.go
 internal/pkginit/init.go
 
 
+2022-01-28
+internal/gc/main.go
+internal/gc/bootstrap.go
+internal/gc/util.go
+internal/gc/trace.go
+internal/gc/pprof.go
+internal/gc/compile.go
+internal/gc/export.go
+internal/gc/obj.go
+
 TODO
 
 

@@ -204,6 +204,7 @@ func Inline_Flood(n *ir.Name, exportsym func(*ir.Name)) {
 	if fn == nil {
 		base.Fatalf("Inline_Flood: missing Func on %v", n)
 	}
+	// 如果 fn 可以被内联，这个字段不为nil
 	if fn.Inl == nil {
 		return
 	}
@@ -220,6 +221,7 @@ func Inline_Flood(n *ir.Name, exportsym func(*ir.Name)) {
 	doFlood = func(n ir.Node) {
 		switch n.Op() {
 		case ir.OMETHEXPR, ir.ODOTMETH:
+			// 这个会递归到 case ir.ONAME
 			Inline_Flood(ir.MethodExprName(n), exportsym)
 
 		case ir.ONAME:

@@ -147,6 +147,9 @@ func compileFunctions() {
 	var compile func([]*ir.Func)
 	compile = func(fns []*ir.Func) {
 		wg.Add(len(fns))
+		// 创建了len(fns)个goroutine，但是每个goroutine执行
+		// 编译前要获取一个workerid，只有 -c 个workerid，因此
+		// 限制了并行度为 -c
 		for _, fn := range fns {
 			fn := fn
 			queue(func(worker int) {

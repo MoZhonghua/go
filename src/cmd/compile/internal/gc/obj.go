@@ -20,6 +20,12 @@ import (
 	"fmt"
 )
 
+// 输出的 .a 文件中一般是两项:
+//  - __PKGDEF: 记录 exported 信息，compiler只需要读取这个信息来处理 imported package
+//  - _go_.o: 输出的obj文件，link 在链接时只需要这个文件
+//
+// 可以选择两个分开输出到不同的.a文件，也可以打包在一个.a文件
+
 // These modes say which kind of object file to generate.
 // The default use of the toolchain is to set both bits,
 // generating a combined compiler+linker object, one that
@@ -106,6 +112,8 @@ func dumpCompilerObj(bout *bio.Writer) {
 	dumpexport(bout)
 }
 
+// 为所有对象创建LSym并写入数据到LSym.P，此时还没有写入到obj文件
+// 而是都记录到base.Ctxt中， 在dumpobj()中写入到文件
 func dumpdata() {
 	numExterns := len(typecheck.Target.Externs)
 	numDecls := len(typecheck.Target.Decls)
@@ -151,7 +159,7 @@ func dumpdata() {
 		zero.Set(obj.AttrStatic, true)
 	}
 
-	staticdata.WriteFuncSyms()
+	staticdata.WriteFuncSyms() // nop.f LSym
 	addGCLocals()
 
 	if numExports != len(typecheck.Target.Exports) {
@@ -181,6 +189,7 @@ func dumpLinkerObj(bout *bio.Writer) {
 
 	fmt.Fprintf(bout, "\n!\n")
 
+	// base.Ctxt 中记录了所有的LSym数据
 	obj.WriteObjFile(base.Ctxt, bout)
 }
 

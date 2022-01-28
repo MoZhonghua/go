@@ -296,7 +296,7 @@ func Main(archInit func(*ssagen.ArchInfo)) {
 	fcount := int64(0)
 	for i := 0; i < len(typecheck.Target.Decls); i++ {
 		if fn, ok := typecheck.Target.Decls[i].(*ir.Func); ok {
-			enqueueFunc(fn)
+			enqueueFunc(fn) // 会调用walk.Walk(fn)
 			fcount++
 		}
 	}
@@ -320,10 +320,11 @@ func Main(archInit func(*ssagen.ArchInfo)) {
 
 	// Write object data to disk.
 	base.Timer.Start("be", "dumpobj")
-	dumpdata()
+	dumpdata() // 创建所有LSym和写入内容到LSym.P
 	base.Ctxt.NumberSyms()
-	dumpobj()
+	dumpobj()  // 将所有LSym写入到obj文件
 	if base.Flag.AsmHdr != "" {
+		// 生成 go_asm.h, 包含 .go 中声明的常量值和struct各个字段偏移量
 		dumpasmhdr()
 	}
 
