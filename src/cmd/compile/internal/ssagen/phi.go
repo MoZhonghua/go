@@ -44,6 +44,7 @@ func (s *state) insertPhis() {
 		fmt.Printf("%s\n", s.f.String())
 		sps := simplePhiState{s: s, f: s.f, defvars: s.defvars}
 		sps.insertPhis()
+		fmt.Printf("=================================\n%s\n", s.f.String())
 		return
 	}
 	ps := phiState{s: s, f: s.f, defvars: s.defvars}
