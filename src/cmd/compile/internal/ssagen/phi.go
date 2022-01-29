@@ -41,6 +41,7 @@ func (fwdRefAux) CanBeAnSSAAux() {}
 // TODO: make this part of cmd/compile/internal/ssa somehow?
 func (s *state) insertPhis() {
 	if len(s.f.Blocks) <= smallBlocks {
+		fmt.Printf("%s\n", s.f.String())
 		sps := simplePhiState{s: s, f: s.f, defvars: s.defvars}
 		sps.insertPhis()
 		return
@@ -465,11 +466,23 @@ func (s *simplePhiState) insertPhis() {
 			if v.Op != ssa.OpFwdRef {
 				continue
 			}
+			// 这里找出所有block中对变量的前向引用: 等价于刚进入block时引用变量，此时还没有
+			// 为任何变量定义Value，需要查找predecessor中的定义，可能需要插入Phi函数
 			s.fwdrefs = append(s.fwdrefs, v)
 			var_ := v.Aux.(fwdRefAux).N
+
 			if _, ok := s.defvars[b.ID][var_]; !ok {
+				// 注意在初始化是已经把所有的def设置好了，这里是额外把
+				// OpFwdRef也加入到def中，之后可以可以通过OpCopy来传递
 				s.defvars[b.ID][var_] = v // treat FwdDefs as definitions.
 			}
+			/*
+				x = z + 100
+				y = x + 1
+
+				fwdrefs = [z];  注意x不是
+				defvars = [x, y]
+			*/
 		}
 	}
 
@@ -492,6 +505,7 @@ loop:
 			v.Aux = nil
 			continue
 		}
+
 		// Find variable value on each predecessor.
 		args = args[:0]
 		for _, e := range b.Preds {

@@ -151,7 +151,7 @@ func pkgqual(pkg *Pkg, verb rune, mode fmtMode) string {
 	if verb != 'S' { // =='S'永远输出sym.Name，也就是这里总是返回""
 		switch mode {
 		case fmtGo: // This is for the user
-			if pkg == BuiltinPkg || pkg == LocalPkg {
+			if pkg == nil || pkg == BuiltinPkg || pkg == LocalPkg {
 				return ""
 			}
 
