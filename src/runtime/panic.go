@@ -205,6 +205,9 @@ func goPanicSliceConvert(x int, y int) {
 
 // Implemented in assembly, as they take arguments in registers.
 // Declared here to mark them as ABIInternal.
+//
+// 被检查的x，y是在CX, DX寄存中，然后汇编会把CX, DX值按照ABI设置写入到
+// 入参（寄存器或者栈），然后直接jump到对应goPanicXxxx
 func panicIndex(x int, y int)
 func panicIndexU(x uint, y int)
 func panicSliceAlen(x int, y int)

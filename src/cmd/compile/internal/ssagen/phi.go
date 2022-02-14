@@ -41,10 +41,8 @@ func (fwdRefAux) CanBeAnSSAAux() {}
 // TODO: make this part of cmd/compile/internal/ssa somehow?
 func (s *state) insertPhis() {
 	if len(s.f.Blocks) <= smallBlocks {
-		fmt.Printf("%s\n", s.f.String())
 		sps := simplePhiState{s: s, f: s.f, defvars: s.defvars}
 		sps.insertPhis()
-		fmt.Printf("=================================\n%s\n", s.f.String())
 		return
 	}
 	ps := phiState{s: s, f: s.f, defvars: s.defvars}
@@ -170,6 +168,7 @@ levels:
 	}
 
 	// Allocate scratch locations.
+	// 需要为每个变量执行一次，复用这些存储空间
 	s.priq.level = s.level
 	s.q = make([]*ssa.Block, 0, s.f.NumBlocks())
 	s.queued = newSparseSet(s.f.NumBlocks())
@@ -545,6 +544,7 @@ loop:
 // lookupVarOutgoing finds the variable's value at the end of block b.
 func (s *simplePhiState) lookupVarOutgoing(b *ssa.Block, t *types.Type, var_ ir.Node, line src.XPos) *ssa.Value {
 	for {
+		// 注意如果block有FwdRef，defvars就已经有_var的定义，直接返回
 		if v := s.defvars[b.ID][var_]; v != nil {
 			return v
 		}

@@ -51,6 +51,14 @@ func DumpInline(fn *ir.Func) {
 	}
 }
 
+/*
+../gc/main.go:194
+	ir.IsIntrinsicCall = ssagen.IsIntrinsicCall
+	inline.SSADumpInline = ssagen.DumpInline
+	ssagen.InitEnv()
+	ssagen.InitTables()
+*/
+
 func InitEnv() {
 	ssaDump = os.Getenv("GOSSAFUNC")
 	ssaDir = os.Getenv("GOSSADIR")
@@ -3659,7 +3667,7 @@ const (
 
 type sfRtCallDef struct {
 	rtfn  *obj.LSym
-	rtype types.Kind
+	rtype types.Kind // return value type
 }
 
 var softFloatOps map[ssa.Op]sfRtCallDef
