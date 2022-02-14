@@ -293,6 +293,10 @@ func regAbiForFuncType(ft *types.Func) bool {
 // interface call.
 func getParam(n *ir.CallExpr, i int) *types.Field {
 	t := n.X.Type()
+
+	// ../walk/expr.go:580
+	// If this is a method call t.M(...),
+	// rewrite into a function call T.M(t, ...).
 	if n.Op() == ir.OCALLMETH {
 		base.Fatalf("OCALLMETH missed by walkCall")
 	}
@@ -479,7 +483,7 @@ func buildssa(fn *ir.Func, worker int) *ssa.Func {
 	// Allocate starting values
 	s.labels = map[string]*ssaLabel{}
 	s.fwdVars = map[ir.Node]*ssa.Value{}
-	s.startmem = s.entryNewValue0(ssa.OpInitMem, types.TypeMem)
+	s.startmem = s.entryNewValue0(ssa.OpInitMem, types.TypeMem) // 生成的Value记录在f.Entry.Values
 
 	s.hasOpenDefers = base.Flag.N == 0 && s.hasdefer && !s.curfn.OpenCodedDeferDisallowed()
 	switch {
@@ -500,6 +504,10 @@ func buildssa(fn *ir.Func, worker int) *ssa.Func {
 	if s.hasOpenDefers {
 		// Similarly, skip if there are any heap-allocated result
 		// parameters that need to be copied back to their stack slots.
+		//
+		// func x() (z int) {  use(&z); return }
+		// 返回z本身是在栈上的，但是use(&z)要求z在堆上，结果就是把z分配在堆上
+		// 并在返回时自动生成代码把z的值复制到对应的栈地址上
 		for _, f := range s.curfn.Type().Results().FieldSlice() {
 			if !f.Nname.(*ir.Name).OnStack() {
 				s.hasOpenDefers = false
@@ -507,6 +515,7 @@ func buildssa(fn *ir.Func, worker int) *ssa.Func {
 			}
 		}
 	}
+
 	if s.hasOpenDefers &&
 		s.curfn.NumReturns*s.curfn.NumDefers > 15 {
 		// Since we are generating defer calls at every exit for
@@ -529,11 +538,23 @@ func buildssa(fn *ir.Func, worker int) *ssa.Func {
 		deferBitsTemp := typecheck.TempAt(src.NoXPos, s.curfn, types.Types[types.TUINT8])
 		deferBitsTemp.SetAddrtaken(true)
 		s.deferBitsTemp = deferBitsTemp
+
+		// v4 = Const8 <uint8> [0]
 		// For this value, AuxInt is initialized to zero by default
 		startDeferBits := s.entryNewValue0(ssa.OpConst8, types.Types[types.TUINT8])
 		s.vars[deferBitsVar] = startDeferBits
+
+		// v5 = LocalAddr <*uint8> {.autotmp_4} v2 v1
 		s.deferBitsAddr = s.addr(deferBitsTemp)
+
+		// v1 = InitMem <mem>
+		// v6 = Store <mem> {uint8} v5 v4 v1
+		//
+		// Store指令理解为对把值v4写入到mem v1的v5地址处，然后返回更新后的mem
+		// <mem> 为返回值类型，或者说v6的类型
+		// {uint8} 是Aux，这里就是types.Types[types.TUINT8]; types.Type实现了CanBeAnSSAAux()方法
 		s.store(types.Types[types.TUINT8], s.deferBitsAddr, startDeferBits)
+
 		// Make sure that the deferBits stack slot is kept alive (for use
 		// by panics) and stores to deferBits are not eliminated, even if
 		// all checking code on deferBits in the function exit can be
@@ -1398,7 +1419,25 @@ func (s *state) rawLoad(t *types.Type, src *ssa.Value) *ssa.Value {
 	return s.newValue2(ssa.OpLoad, t, src, s.mem())
 }
 
+/*
+v1 = InitMem <mem>
+v2 = SP <uintptr>
+v3 = SB <uintptr>
+v5 = Const64 <int> [4369]
+v6 = VarDef <mem> {.autotmp_0} v1
+v7 = LocalAddr <*int> {.autotmp_0} v2 v6
+v8 = Store <mem> {int} v7 v5 v6
+
+Store 三个Operand含义:
+ - 内存地址
+ - 要写入的值
+ - 对应的变量
+*/
 func (s *state) store(t *types.Type, dst, val *ssa.Value) {
+	// v8 = Store <mem> {int} v7 v5 v6
+	// Type: types.TypeMem => <mem>
+	// Aux = t => {int}
+	// Arg0, Arg1, Arg2 = dst, val, s.mem()
 	s.vars[memVar] = s.newValue3A(ssa.OpStore, types.TypeMem, t, dst, val, s.mem())
 }
 

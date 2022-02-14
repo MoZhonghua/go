@@ -319,6 +319,21 @@ func deferproc(siz int32, fn *funcval) { // arguments of fn follow fn
 	// been set and must not be clobbered.
 }
 
+/*
+func x() {
+	defer y(0x1111, 0x2222)
+}
+
+等价于:
+var _defer { siz:0, fn: &funcval }
+var funcval { fn: x.dwrap.1, arg0: 0x1111, arg2: 0x2222 }
+deferprocStack(&_defer)
+
+func x.dwrap.1() {
+	y(DX[8], DX[10])
+}
+*/
+
 // deferprocStack queues a new deferred function with a defer record on the stack.
 // The defer record must have its siz and fn fields initialized.
 // All other fields can contain junk.
