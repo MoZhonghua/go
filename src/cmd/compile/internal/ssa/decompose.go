@@ -6,6 +6,7 @@ package ssa
 
 import (
 	"cmd/compile/internal/types"
+	"fmt"
 	"sort"
 )
 
@@ -37,6 +38,7 @@ func decomposeBuiltIn(f *Func) {
 	// builtin types with leaf components, and thus there is no need to reprocess the newly create LocalSlots.
 	var toDelete []namedVal
 	var newNames []*LocalSlot
+	fmt.Printf("===before: %v\n", f)
 	for i, name := range f.Names {
 		t := name.Type
 		switch {
@@ -106,6 +108,8 @@ func decomposeBuiltIn(f *Func) {
 
 	deleteNamedVals(f, toDelete)
 	f.Names = append(f.Names, newNames...)
+
+	fmt.Printf("===after: %v\n", f)
 }
 
 func maybeAppend(f *Func, ss []*LocalSlot, s *LocalSlot) []*LocalSlot {
