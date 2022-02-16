@@ -646,8 +646,8 @@ func newResults(types []*Type) *Type {
 	return t
 }
 
+// NewResults: 在SSA中使用
 func NewResults(types []*Type) *Type {
-	// 经常用到?
 	if len(types) == 1 && types[0] == TypeMem {
 		return TypeResultMem
 	}

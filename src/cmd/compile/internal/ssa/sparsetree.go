@@ -74,6 +74,8 @@ func newSparseTree(f *Func, parentOf []*Block) SparseTree {
 // children will appear in the reverse of their order in reverseOrder
 // in particular, if reverseOrder is a dfs-reversePostOrder, then the root-to-children
 // walk of the tree will yield a pre-order.
+//
+// parent - child 结构是固定的，可变的是同一个parent下所有children出现的先后顺序
 func newSparseOrderedTree(f *Func, parentOf, reverseOrder []*Block) SparseTree {
 	t := make(SparseTree, f.NumBlocks())
 	for _, b := range reverseOrder {
@@ -143,7 +145,9 @@ func (t SparseTree) treestructure1(b *Block, i int) string {
 // for the last example:
 //   root     left     left      right       right       root
 //  1 2e 3 | 4 5e 6 | 7 8x 9 | 10 11e 12 | 13 14x 15 | 16 17x 18
-
+//
+// 每个节点占用6个值, entry-1, entry, entry+1, exit-1, exit, exit+1
+// 返回的是下一个可用的n，因为需要占用entry-1，所以下一个节点的entry为n+1
 func (t SparseTree) numberBlock(b *Block, n int32) int32 {
 	// reserve n for entry-1, assign n+1 to entry
 	n++

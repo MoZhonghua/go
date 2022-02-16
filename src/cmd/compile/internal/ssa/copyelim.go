@@ -9,6 +9,10 @@ package ssa
 func copyelim(f *Func) {
 	// Modify all values so no arg (including args
 	// of OpCopy) is a copy.
+	//
+	// v2 = OpCopy v1
+	// 如果v1也是OpCopy需要不断迭代直到找到不是OpCopy的Value，然后把所有
+	// OpCopy的第一个参数替换为实际值
 	for _, b := range f.Blocks {
 		for _, v := range b.Values {
 			copyelimValue(v)

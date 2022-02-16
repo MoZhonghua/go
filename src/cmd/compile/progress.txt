@@ -214,13 +214,16 @@ internal/ssagen/phi.go
 
 2022-02-14
 internal/ssagen/ssa.go
-
-
-
-TODO
 internal/ssa/addressingmodes.go
+internal/ssa/id.go
 internal/ssa/biasedsparsemap.go
+internal/ssa/sparsemap.go
+internal/ssa/sparseset.go
+internal/ssa/sparsetree.go
 internal/ssa/block.go
+
+
+2022-02-16
 internal/ssa/branchelim.go
 internal/ssa/cache.go
 internal/ssa/check.go
@@ -230,15 +233,22 @@ internal/ssa/config.go
 internal/ssa/copyelim.go
 internal/ssa/critical.go
 internal/ssa/cse.go
-internal/ssa/deadcode.go
 internal/ssa/deadstore.go
+internal/ssa/deadcode.go
+internal/ssa/location.go
+internal/ssa/rewrite.go
+
+internal/ssa/decompose.go ?
+internal/ssa/rewritedec.go
+internal/ssa/rewritedec64.go
 internal/ssa/debug.go
-internal/ssa/decompose.go
 internal/ssa/dom.go
 internal/ssa/expand_calls.go
 internal/ssa/flagalloc.go
 internal/ssa/func.go
 internal/ssa/fuse.go
+
+TODO
 internal/ssa/fuse_branchredirect.go
 internal/ssa/fuse_comparisons.go
 internal/ssa/gen
@@ -249,11 +259,9 @@ internal/ssa/gen/genericOps.go
 internal/ssa/gen/main.go
 internal/ssa/gen/rulegen.go
 internal/ssa/html.go
-internal/ssa/id.go
 internal/ssa/layout.go
 internal/ssa/lca.go
 internal/ssa/likelyadjust.go
-internal/ssa/location.go
 internal/ssa/loopbce.go
 internal/ssa/loopreschedchecks.go
 internal/ssa/looprotate.go
@@ -272,9 +280,6 @@ internal/ssa/regalloc.go
 internal/ssa/schedule.go
 internal/ssa/shortcircuit.go
 internal/ssa/softfloat.go
-internal/ssa/sparsemap.go
-internal/ssa/sparseset.go
-internal/ssa/sparsetree.go
 internal/ssa/stackalloc.go
 internal/ssa/stackframe.go
 internal/ssa/tighten.go

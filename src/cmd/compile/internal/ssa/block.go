@@ -19,6 +19,8 @@ type Block struct {
 	Pos src.XPos
 
 	// The kind of block this is.
+	//
+	// 可以理解为block块最后一条语句的跳转类型
 	Kind BlockKind
 
 	// Likely direction for branches.

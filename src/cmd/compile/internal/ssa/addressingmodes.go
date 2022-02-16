@@ -6,6 +6,8 @@ package ssa
 
 // addressingModes combines address calculations into memory operations
 // that can perform complicated addressing modes.
+//
+// 比如AMD64指令中的偏移量最多只有32bit
 func addressingModes(f *Func) {
 	isInImmediateRange := is32Bit
 	switch f.Config.arch {

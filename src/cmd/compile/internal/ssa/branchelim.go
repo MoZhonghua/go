@@ -4,7 +4,9 @@
 
 package ssa
 
-import "cmd/internal/src"
+import (
+	"cmd/internal/src"
+)
 
 // branchelim tries to eliminate branches by
 // generating CondSelect instructions.
@@ -19,6 +21,8 @@ import "cmd/internal/src"
 //
 // where the intermediate blocks are mostly empty (with no side-effects);
 // rewrite Phis in the postdominator as CondSelects.
+//
+// 改成总是执行bb1，然后bb2中的phi函数通过conditional mov指令来实现
 func branchelim(f *Func) {
 	// FIXME: add support for lowering CondSelects on more architectures
 	switch f.Config.arch {
@@ -58,6 +62,7 @@ func branchelim(f *Func) {
 				}
 			}
 		}
+		// 不断迭代直到不再新加入Value
 		if loadAddr.size() == n {
 			break
 		}
@@ -112,6 +117,7 @@ func elimIf(f *Func, loadAddr *sparseSet, dom *Block) bool {
 	}
 	var simple, post *Block
 	for i := range dom.Succs {
+		// 处理左右两种情况
 		bb, other := dom.Succs[i].Block(), dom.Succs[i^1].Block()
 		if isLeafPlain(bb) && bb.Succs[0].Block() == other {
 			simple = bb

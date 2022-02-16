@@ -585,16 +585,23 @@ func buildssa(fn *ir.Func, worker int) *ssa.Func {
 
 	s.f.OwnAux = ssa.OwnAuxCall(fn.LSym, params)
 
+	// SSAable: 指的是可以直接通过ssa.Value操作，而其他的变量只能通过Store/Load指令
+	// 来完成读写操作，此时对应的ssa.Value是整个内存，而不是单独变量值(虽然实际操作
+	// 的还是变量对应的内存部分)
+	//
 	// Populate SSAable arguments.
 	for _, n := range fn.Dcl {
 		if n.Class == ir.PPARAM {
 			if s.canSSA(n) {
+				// ssa.Value.Aux = ir.Node
 				v := s.newValue0A(ssa.OpArg, n.Type(), n)
 				s.vars[n] = v
 				s.addNamedValue(n, v) // This helps with debugging information, not needed for compilation itself.
 			} else { // address was taken AND/OR too large for SSA
 				paramAssignment := ssa.ParamAssignmentForArgName(s.f, n)
 				if len(paramAssignment.Registers) > 0 {
+					// canSSA() 返回false对应两种情况: 参数类型太大，参数本身!OnStack()或者addressTaken()
+					//
 					if TypeOK(n.Type()) { // SSA-able type, so address was taken -- receive value in OpArg, DO NOT bind to var, store immediately to memory.
 						v := s.newValue0A(ssa.OpArg, n.Type(), n)
 						s.store(n.Type(), s.decladdrs[n], v)
@@ -609,7 +616,7 @@ func buildssa(fn *ir.Func, worker int) *ssa.Func {
 	}
 
 	// Populate closure variables.
-	if !fn.ClosureCalled() {
+	if !fn.ClosureCalled() { // 指的是func() {}() 这种生成closure之后马上调用的情况
 		clo := s.entryNewValue0(ssa.OpGetClosurePtr, s.f.Config.Types.BytePtr)
 		offset := int64(types.PtrSize) // PtrSize to skip past function entry PC field
 		for _, n := range fn.ClosureVars {
@@ -696,6 +703,8 @@ func buildssa(fn *ir.Func, worker int) *ssa.Func {
 func (s *state) storeParameterRegsToStack(abi *abi.ABIConfig, paramAssignment *abi.ABIParamAssignment, n *ir.Name, addr *ssa.Value, pointersOnly bool) {
 	typs, offs := paramAssignment.RegisterTypesAndOffsets()
 	for i, t := range typs {
+		// i: 寄存器编号
+		// t: 这个寄存器中存放的数据类型
 		if pointersOnly && !t.IsPtrShaped() {
 			continue
 		}
@@ -706,6 +715,10 @@ func (s *state) storeParameterRegsToStack(abi *abi.ABIConfig, paramAssignment *a
 		v := s.newValue0I(op, t, reg)
 		v.Aux = aux
 		p := s.newValue1I(ssa.OpOffPtr, types.NewPtr(t), o, addr)
+
+		// Vv    = OpIntReg <t> {int:regIdx, aux:AuxNameOffset}
+		// Vp    = OpOffPtr <*t> {offset} Vaddr
+		// Vmem' = Store <mem> {t} Vp Vv Vmem
 		s.store(t, p, v)
 	}
 }
@@ -727,8 +740,16 @@ func (s *state) zeroResults() {
 		}
 		// Zero the stack location containing f.
 		if typ := n.Type(); TypeOK(typ) {
+			// 比如是对struct字段赋值
+			//
+			// Vzero = s.zeroVal(typ)
+			// Vfx   = OpStructSelect <field_type> {field_idx} Vold_struct
+			// Vnew  = StructMakeOpNN <struct_type> Vfa Vzero Vfc
 			s.assign(n, s.zeroVal(typ), false, 0)
 		} else {
+			// Vaddr  = s.decladdrs[n] = OpLocalAddr <*type> {node n} Vsp Vmem0
+			// Vmem1  = OpVarDef <mem> {node n} Vmem
+			// Vmem2  = OpZero <mem> {size, type} Vaddr Vmem1
 			s.vars[memVar] = s.newValue1A(ssa.OpVarDef, types.TypeMem, n, s.mem())
 			s.zero(n.Type(), s.decladdrs[n])
 		}
@@ -794,7 +815,12 @@ func (s *state) newObject(typ *types.Type) *ssa.Value {
 	if typ.Size() == 0 {
 		return s.newValue1A(ssa.OpAddr, types.NewPtr(typ), ir.Syms.Zerobase, s.sb)
 	}
-	return s.rtcall(ir.Syms.Newobject, true, []*types.Type{types.NewPtr(typ)}, s.reflectType(typ))[0]
+
+	// 注意rtcall会返回多个ssa.Value，对应函数的N个返回值，这里只需要第一个返回值
+	//
+	// func runtime.newobject(typ *_type) unsafe.Pointer
+	v := s.rtcall(ir.Syms.Newobject, true, []*types.Type{types.NewPtr(typ)}, s.reflectType(typ))[0]
+	return v
 }
 
 // reflectType returns an SSA value representing a pointer to typ's
@@ -929,6 +955,8 @@ type state struct {
 	// variable assignments in the current block (map from variable symbol to ssa value)
 	// *Node is the unique identifier (an ONAME Node) for the variable.
 	// TODO: keep a single varnum map, then make all of these maps slices instead?
+	//
+	// 每次s.startBlock()会清空这个map
 	vars map[ir.Node]*ssa.Value
 
 	// fwdVars are variables that are used before they are defined in the current block.
@@ -1089,6 +1117,12 @@ func (s *state) popLine() {
 func (s *state) peekPos() src.XPos {
 	return s.line[len(s.line)-1]
 }
+
+// 命名规则: newValueNNN[A/I]
+//  NNN: 表示参数个数
+//  A: Aux
+//  I: IntAux
+// 参数列表是: Op, *types.Type, Aux/IntAux, arg0, arg1, ...
 
 // newValue0 adds a new value with no arguments to the current block.
 func (s *state) newValue0(op ssa.Op, t *types.Type) *ssa.Value {
@@ -1434,7 +1468,7 @@ Store 三个Operand含义:
  - 对应的变量
 */
 func (s *state) store(t *types.Type, dst, val *ssa.Value) {
-	// v8 = Store <mem> {int} v7 v5 v6
+	// Vmem' = Store <mem> {int} Vdst_addr Vval Vmem
 	// Type: types.TypeMem => <mem>
 	// Aux = t => {int}
 	// Arg0, Arg1, Arg2 = dst, val, s.mem()
@@ -1537,6 +1571,14 @@ func (s *state) stmt(n ir.Node) {
 		s.callResult(n.Call.(*ir.CallExpr), callGo)
 
 	case ir.OAS2DOTTYPE:
+		// v, ok = x.(int)
+		// v = x.(int)
+		//
+		// 后者需要额外生成条件语句，如果转换失败则panic
+		// x需要从ir.Node => ssa.Value，通过查找vars来实现：
+		//   - 如果有定义则用当前block中的定义
+		//   - 否则生成一个OpFwdRef的ssa.Value
+		// 之后通过insertPhis()来解析到具体是对哪个Value的引用
 		n := n.(*ir.AssignListStmt)
 		res, resok := s.dottype(n.Rhs[0].(*ir.TypeAssertExpr), true)
 		deref := false
@@ -3553,10 +3595,13 @@ func (s *state) assign(left ir.Node, right *ssa.Value, deref bool, skip skipMask
 			new := s.newValue0(ssa.StructMakeOp(t.NumFields()), t)
 
 			// Add fields as args.
+			//
+			// Vnew = StructMakeOpNN <struct_type> Vfa Vright Vfc
 			for i := 0; i < nf; i++ {
 				if i == idx {
 					new.AddArg(right)
 				} else {
+					// Vfx = OpStructSelect <field_type> {field_idx} Vold_struct
 					new.AddArg(s.newValue1I(ssa.OpStructSelect, t.FieldType(i), int64(i), old))
 				}
 			}
@@ -5655,6 +5700,8 @@ func (s *state) rtcall(fn *obj.LSym, returns bool, results []*types.Type, args .
 	}
 
 	// Issue call
+	// SSA中的Arg必须是ssa.Value，而函数本身不是ssa.Value，因此需要放到Aux中
+	// v9 = StaticLECall <results_type(比如*int,mem)> {AuxCall} arg0 arg1 ...
 	var call *ssa.Value
 	aux := ssa.StaticAuxCall(fn, s.f.ABIDefault.ABIAnalyzeTypes(nil, callArgTypes, results))
 	callArgs = append(callArgs, s.mem())
@@ -6628,6 +6675,10 @@ func (s *State) DebugFriendlySetPosFrom(v *ssa.Value) {
 }
 
 // emit argument info (locations on stack) for traceback.
+//
+// FUNCDATA_ArgInfo 仅仅是用来在runtime.traceback中打印参数信息
+// FUNCDATA_ArgsPointerMaps 才是用来进行GC扫描的数据, 这个在liveness
+// 分析中生成 (../liveness/plive.go: 1347)
 func emitArgInfo(e *ssafn, f *ssa.Func, pp *objw.Progs) {
 	ft := e.curfn.Type()
 	if ft.NumRecvs() == 0 && ft.NumParams() == 0 {
@@ -6803,6 +6854,7 @@ func genssa(f *ssa.Func, pp *objw.Progs) {
 	var progToBlock map[*obj.Prog]*ssa.Block
 	var valueToProgAfter []*obj.Prog // The first Prog following computation of a value v; v is visible at this point.
 	if f.PrintOrHtmlSSA {
+		// 每个 Block 和 Value 对应不定个数的 *obj.Prog, 这里只是指向第一个 *obj.Prog
 		progToValue = make(map[*obj.Prog]*ssa.Value, f.NumValues())
 		progToBlock = make(map[*obj.Prog]*ssa.Block, f.NumBlocks())
 		f.Logf("genssa %s\n", f.Name)
@@ -7128,6 +7180,12 @@ func genssa(f *ssa.Func, pp *objw.Progs) {
 func defframe(s *State, e *ssafn, f *ssa.Func) {
 	pp := s.pp
 
+	// frame指的是函数自己的局部变量和用来调用其他函数的参数栈空间之和
+	// 调用其他函数的参数一定是放在栈底，而且和自己的局部变量总是独立的
+	//
+	// func() { var x int; what(x) }
+	// 注意代码里是用局部变量x调用what()，最终生成的代码是将x复制到栈底
+	// 然后用这个参数来调用what()
 	frame := types.Rnd(s.maxarg+e.stksize, int64(types.RegSize))
 	if Arch.PadFrame != nil {
 		frame = Arch.PadFrame(frame)

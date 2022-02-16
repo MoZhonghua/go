@@ -59,6 +59,8 @@ type Func struct {
 	RegAlloc []Location
 
 	// map from LocalSlot to set of Values that we want to store in that slot.
+	//
+	// 对变量赋值本身不需要生成新的ssa.Value, 只需要记录关联关系，多次赋值会关联多个ssa.Value
 	NamedValues map[LocalSlot][]*Value
 	// Names is a copy of NamedValues.Keys. We keep a separate list
 	// of keys to make iteration order deterministic.

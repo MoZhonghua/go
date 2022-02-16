@@ -202,6 +202,9 @@ const maxStackSize = 1 << 30
 // uses it to generate a plist,
 // and flushes that plist to machine code.
 // worker indicates which of the backend workers is doing the processing.
+//
+// 两个关键步骤: buildssa: ir.Node => []*ssa.Value
+//               genssa: []*ssa.Value => []*prog.Prog
 func Compile(fn *ir.Func, worker int) {
 	f := buildssa(fn, worker)
 	// Note: check arg size to fix issue 25507.
