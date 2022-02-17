@@ -21,6 +21,8 @@ package ssa
 //  entry:
 //    CMPQ ...
 //    JLT loop
+//
+// 注意前者在loop的循环体里有两个JUMP，而后者只有一个JUMP
 func loopRotate(f *Func) {
 	loopnest := f.loopnest()
 	if loopnest.hasIrreducible {

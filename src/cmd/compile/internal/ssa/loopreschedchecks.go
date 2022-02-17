@@ -9,6 +9,8 @@ import (
 	"fmt"
 )
 
+// 在循环中插入 runtime.GoSched() 调用，避免长时间循环导致不能STW
+
 // an edgeMem records a backedge, together with the memory
 // phi functions at the target of the backedge that must
 // be updated when a rescheduling check replaces the backedge.

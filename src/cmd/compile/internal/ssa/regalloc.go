@@ -615,6 +615,9 @@ func (s *regAllocState) init(f *Func) {
 	if s.f.Config.LinkReg != -1 {
 		if isLeaf(f) {
 			// Leaf functions don't save/restore the link register.
+			//
+			// 没有save/restore，因此不能使用这个寄存器，否则函数返回时不能
+			// 保证符合call convention (保证link寄存器不变）
 			s.allocatable &^= 1 << uint(s.f.Config.LinkReg)
 		}
 	}
@@ -644,10 +647,14 @@ func (s *regAllocState) init(f *Func) {
 	// Linear scan register allocation can be influenced by the order in which blocks appear.
 	// Decouple the register allocation order from the generated block order.
 	// This also creates an opportunity for experiments to find a better order.
+	//
+	// 算法要求所有指令有完全序，不能是图
 	s.visitOrder = layoutRegallocOrder(f)
 
 	// Compute block order. This array allows us to distinguish forward edges
 	// from backward edges and compute how far they go.
+	//
+	// 跳转指令中的距离
 	s.blockOrder = make([]int32, f.NumBlocks())
 	for i, b := range s.visitOrder {
 		s.blockOrder[b.ID] = int32(i)
@@ -674,6 +681,7 @@ func (s *regAllocState) init(f *Func) {
 			// Instead, we mark the corresponding Selects as needReg.
 		}
 	}
+	// 计算每个Value的live range
 	s.computeLive()
 
 	s.endRegs = make([][]endReg, f.NumBlocks())

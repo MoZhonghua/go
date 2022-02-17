@@ -7,6 +7,9 @@ package ssa
 // layout orders basic blocks in f with the goal of minimizing control flow instructions.
 // After this phase returns, the order of f.Blocks matters and is the order
 // in which those blocks will appear in the assembly output.
+//
+// 比如 A -> B, A -> C，如果把 A, B, C连续存放，则只需要A -> C一个跳转指令，而如果A, B, C都
+// 分开，那么需要两条指令来实现A跳转到B或者C
 func layout(f *Func) {
 	f.Blocks = layoutOrder(f)
 }
@@ -44,6 +47,8 @@ func layoutOrder(f *Func) []*Block {
 	}
 
 	// Expand exit to include blocks post-dominated by exit blocks.
+	//
+	// Succ(p)全部都是指向exit block
 	for {
 		changed := false
 		for _, id := range exit.contents() {

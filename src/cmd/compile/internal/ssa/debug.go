@@ -25,6 +25,8 @@ type VarID int32
 // A FuncDebug contains all the debug information for the variables in a
 // function. Variables are identified by their LocalSlot, which may be the
 // result of decomposing a larger variable.
+//
+// 两个问题: 运行到指定PC时哪些变量是活的，每个变量的数据在哪（内存/寄存器，可能被拆分）
 type FuncDebug struct {
 	// Slots is all the slots used in the debug info, indexed by their SlotID.
 	Slots []LocalSlot

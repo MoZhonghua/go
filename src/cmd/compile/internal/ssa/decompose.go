@@ -6,13 +6,16 @@ package ssa
 
 import (
 	"cmd/compile/internal/types"
-	"fmt"
 	"sort"
 )
 
 // decompose converts phi ops on compound builtin types into phi
 // ops on simple types, then invokes rewrite rules to decompose
 // other ops on those types.
+//
+// 注意修改仅仅是ssa.Value和LocalSlot的映射关系，没有修改ssa.Value本身
+// LocalSlot => []*ssa.Value, 指的是这些Value都是存放在LocalSlot指定的
+// 内存或者寄存器中。显然要求执行过程中任意时间不能有两个Value同时存活
 func decomposeBuiltIn(f *Func) {
 	// Decompose phis
 	for _, b := range f.Blocks {
@@ -38,7 +41,6 @@ func decomposeBuiltIn(f *Func) {
 	// builtin types with leaf components, and thus there is no need to reprocess the newly create LocalSlots.
 	var toDelete []namedVal
 	var newNames []*LocalSlot
-	fmt.Printf("===before: %v\n", f)
 	for i, name := range f.Names {
 		t := name.Type
 		switch {
@@ -108,8 +110,6 @@ func decomposeBuiltIn(f *Func) {
 
 	deleteNamedVals(f, toDelete)
 	f.Names = append(f.Names, newNames...)
-
-	fmt.Printf("===after: %v\n", f)
 }
 
 func maybeAppend(f *Func, ss []*LocalSlot, s *LocalSlot) []*LocalSlot {
@@ -387,6 +387,10 @@ func decomposeStructPhi(v *Value) {
 
 // decomposeArrayPhi replaces phi-of-array with arraymake(phi-of-array-element),
 // and then recursively decomposes the element phi.
+//
+// 注意这里直接消除了Phi函数，通过将Phi函数的所有参数指向同一个LocalSlot来实现，
+// 不管从哪个分支进来，pred写入值时就是写入到phi函数值的位置，执行到phi函数时，
+// 这个地址自然就是正确的值
 func decomposeArrayPhi(v *Value) {
 	t := v.Type
 	if t.NumElem() == 0 {

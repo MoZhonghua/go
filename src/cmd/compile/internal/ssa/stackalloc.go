@@ -317,6 +317,8 @@ func (s *stackAllocState) stackalloc() {
 // TODO: this could be quadratic if lots of variables are live across lots of
 // basic blocks. Figure out a way to make this function (or, more precisely, the user
 // of this function) require only linear size & time.
+//
+// 简单的迭代算法来计算在每个block结束时需要保持live的Value: 在B的后继中被引用的Value
 func (s *stackAllocState) computeLive(spillLive [][]ID) {
 	s.live = make([][]ID, s.f.NumBlocks())
 	var phis []*Value
@@ -328,6 +330,8 @@ func (s *stackAllocState) computeLive(spillLive [][]ID) {
 	// Instead of iterating over f.Blocks, iterate over their postordering.
 	// Liveness information flows backward, so starting at the end
 	// increases the probability that we will stabilize quickly.
+	//
+	// 计算每个block的live values at the end of block
 	po := s.f.postorder()
 	for {
 		changed := false
@@ -340,7 +344,7 @@ func (s *stackAllocState) computeLive(spillLive [][]ID) {
 			phis = phis[:0]
 			for i := len(b.Values) - 1; i >= 0; i-- {
 				v := b.Values[i]
-				live.remove(v.ID)
+				live.remove(v.ID) // livein减掉做为结果的，后面可能重新被加回来
 				if v.Op == OpPhi {
 					// Save phi for later.
 					// Note: its args might need a stack slot even though
@@ -409,6 +413,7 @@ func (f *Func) setHome(v *Value, loc Location) {
 	f.RegAlloc[v.ID] = loc
 }
 
+// interference: 两个变量的live range有重叠，因此不能分配相同的内存/寄存器
 func (s *stackAllocState) buildInterferenceGraph() {
 	f := s.f
 	if n := f.NumValues(); cap(s.interfere) >= n {

@@ -9,6 +9,8 @@ import (
 	"math"
 )
 
+// Bounds Check Elimination (BCE)
+
 type indVarFlags uint8
 
 const (
